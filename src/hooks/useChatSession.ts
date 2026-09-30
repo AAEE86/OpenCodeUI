@@ -683,7 +683,13 @@ export function useChatSession({
       try {
         if (!sessionId) {
           if (!input.allowCreateSession) return false
-          const newSession = await createSession()
+          // V2：模型是会话级的 —— 建会话时就带上本次要用的模型，
+          // sendMessageAsync 里的 switchModel 只作幂等兜底（模型没变则零开销）
+          const newSession = await createSession(undefined, {
+            providerID: input.model.providerID,
+            modelID: input.model.modelID,
+            variant: input.options?.variant,
+          })
           sessionId = newSession.id
           navigateToSession(sessionId, newSession.directory)
         }
@@ -1010,7 +1016,11 @@ export function useChatSession({
 
         // Create session if needed (like handleSend does)
         if (!sessionId) {
-          const newSession = await createSession()
+          // V2：模型是会话级的 —— 同 handleSend，建会话时带上当前所选模型
+          const newSession = await createSession(
+            undefined,
+            currentModel ? { providerID: currentModel.providerId, modelID: currentModel.id } : undefined,
+          )
           sessionId = newSession.id
           navigateToSession(sessionId, newSession.directory)
         }

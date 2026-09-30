@@ -30,6 +30,7 @@ import type { SendMessageParams } from './types'
 const listMock = vi.fn()
 const promptMock = vi.fn()
 const waitMock = vi.fn()
+const switchModelMock = vi.fn()
 
 vi.mock('./sdk', () => ({
   getSDKClient: () => ({
@@ -39,6 +40,7 @@ vi.mock('./sdk', () => ({
     session: {
       prompt: (...args: unknown[]) => promptMock(...args),
       wait: (...args: unknown[]) => waitMock(...args),
+      switchModel: (...args: unknown[]) => switchModelMock(...args),
     },
   }),
 }))
@@ -417,6 +419,7 @@ describe('sendMessage / sendMessageAsync（V2 prompt + wait）', () => {
   beforeEach(() => {
     promptMock.mockReset()
     waitMock.mockReset()
+    switchModelMock.mockReset()
   })
 
   it('sendMessageAsync 只投递一次 prompt，不等这轮跑完', async () => {
@@ -429,6 +432,39 @@ describe('sendMessage / sendMessageAsync（V2 prompt + wait）', () => {
     expect(promptMock).toHaveBeenCalledWith(buildPromptParams('ses_1', params))
     // V2 的 prompt 本身就是非阻塞的，没有 V1 的 prompt_async 变体 → 不需要 wait
     expect(waitMock).not.toHaveBeenCalled()
+  })
+
+  it('发送前先 switchModel 同步会话模型（幂等）—— 「切换模型生效」的关键', async () => {
+    promptMock.mockResolvedValue({ id: 'inbox_1' })
+
+    await sendMessageAsync(sendParams())
+
+    // UI 命名 modelID 必须映射成契约命名 id（V2 的 Model.Ref）
+    expect(switchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_1',
+      model: { id: 'm', providerID: 'p' },
+    })
+    // 顺序：先同步模型，再投递 —— 反了就会用旧模型跑
+    const switchOrder = switchModelMock.mock.invocationCallOrder[0]
+    const promptOrder = promptMock.mock.invocationCallOrder[0]
+    expect(switchOrder).toBeLessThan(promptOrder)
+  })
+
+  it('variant 只在有值时随 switchModel 下发', async () => {
+    promptMock.mockResolvedValue({ id: 'inbox_1' })
+
+    await sendMessageAsync(sendParams({ variant: 'max' }))
+    expect(switchModelMock).toHaveBeenLastCalledWith({
+      sessionID: 'ses_1',
+      model: { id: 'm', providerID: 'p', variant: 'max' },
+    })
+
+    switchModelMock.mockClear()
+    await sendMessageAsync(sendParams())
+    expect(switchModelMock).toHaveBeenLastCalledWith({
+      sessionID: 'ses_1',
+      model: { id: 'm', providerID: 'p' },
+    })
   })
 
   it('sendMessage 先 prompt 再 wait，返回的是入队记录而不是 AI 回复', async () => {
@@ -446,6 +482,11 @@ describe('sendMessage / sendMessageAsync（V2 prompt + wait）', () => {
     expect(callOrder).toEqual(['prompt', 'wait'])
     expect(promptMock).toHaveBeenCalledTimes(1)
     expect(waitMock).toHaveBeenCalledWith({ sessionID: 'ses_1' })
+    // 阻塞版同样先同步模型（与 sendMessageAsync 一致）
+    expect(switchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_1',
+      model: { id: 'm', providerID: 'p' },
+    })
     // ⚠️ V2 没有「一次请求拿回复」的接口 → info 是入队记录、parts 一定是空数组
     expect(response.info.id).toBe('inbox_1')
     expect(response.info.time.created).toBe(1234)

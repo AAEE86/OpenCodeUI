@@ -14,6 +14,7 @@ import { useDirectory } from './useDirectory'
 import { sessionErrorHandler, normalizeToForwardSlash, isSameDirectory, autoDetectPathStyle } from '../utils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { SessionContext, type SessionContextValue } from './SessionContext.shared'
+import type { ModelRef } from '../types/message'
 
 /**
  * 去掉补丁里的 `undefined` 字段
@@ -261,12 +262,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [hasMore, sessions, fetchSessions])
 
   const createSession = useCallback(
-    async (title?: string) => {
+    async (title?: string, model?: ModelRef) => {
       // 使用正斜杠格式传给后端
       const targetDir = normalizeToForwardSlash(currentDirectory) || undefined
 
       const newSession = await apiCreateSession({
         title,
+        // V2：模型是会话级的 —— 带上调用方指定的模型（通常是界面当前选择）。
+        // 否则新会话起在服务端默认模型上，发送前才被 switchModel 纠正，
+        // 会在转录顶部留下一条多余的「切换模型」标记。
+        model,
         directory: targetDir,
       })
       return newSession

@@ -327,15 +327,49 @@ export function buildPromptParams(
 }
 
 /**
+ * 把「本次发送要用的模型」同步到会话上（V2：模型是**会话级**的）
+ *
+ * 🔴 为什么必须同步：V2 的 `prompt` **不接受 model 参数**（见下方注释），
+ *    不同步的话「界面上切换模型」不会生效 —— 服务端永远使用会话当前模型
+ *    （新会话 = 服务端默认模型）。这正是「切换模型不起作用」的根因。
+ *
+ * ✅ 幂等：与会话当前模型一致时服务端**直接返回**（不插记录、不发事件），
+ *    所以每次发送前无脑调用是安全的；只有真正变化时才会在转录里留下一条
+ *    `model-switched` 记录（与官方 TUI 行为一致，UI 渲染为会话标记）。
+ */
+async function syncSessionModel(
+  sdk: ReturnType<typeof getSDKClient>,
+  sessionID: string,
+  model: { providerID: string; modelID: string },
+  variant: string | undefined,
+): Promise<void> {
+  await sdk.session.switchModel({
+    sessionID,
+    model: {
+      // UI 命名 modelID → 契约命名 id（V2 的 Model.Ref，见 types/api/message.ts）
+      id: model.modelID,
+      providerID: model.providerID,
+      // variant 只在有值时下发（缺省 = 模型默认 variant）
+      ...(variant ? { variant } : {}),
+    },
+  })
+}
+
+/**
  * 异步发送消息 —— **投递后立即返回**，AI 回复通过 SSE 推送
  *
  * V2: `POST /api/session/{sessionID}/prompt`（SDK：`session.prompt`）
  *     V2 的 prompt **本身就是非阻塞的**，返回 `Session.Inbox.User`（入队记录）。
  *     不再有 V1 的 `prompt_async` 变体。
+ *
+ * 🔴 模型不经过 prompt：V2 的模型是**会话级**的，prompt 的请求体里没有 model 字段
+ *    （实测核实，见 docs/opencode-v2-migration.md §10.4）→ 发送前先 `switchModel`。
  */
 export async function sendMessageAsync(params: import('./types').SendMessageParams, serverId?: string): Promise<void> {
   const target = resolveSessionTarget(params.sessionId, serverId)
   const sdk = getSDKClient(target.serverId)
+  // 🔴 先把本次要用的模型同步到会话（幂等）—— 否则 prompt 永远用会话当前模型
+  await syncSessionModel(sdk, target.sessionId, params.model, params.variant)
   await sdk.session.prompt(buildPromptParams(target.sessionId, params))
 }
 
@@ -357,6 +391,8 @@ export async function sendMessage(
   const target = resolveSessionTarget(params.sessionId, serverId)
   const sdk = getSDKClient(target.serverId)
 
+  // 🔴 同 sendMessageAsync：先同步模型再投递（幂等，见 syncSessionModel 注释）
+  await syncSessionModel(sdk, target.sessionId, params.model, params.variant)
   const inbox = await sdk.session.prompt(buildPromptParams(target.sessionId, params))
   // 等这轮 agent loop 变为空闲（等价于 V1 阻塞式 POST /session/{id}/message 的语义）
   await sdk.session.wait({ sessionID: target.sessionId })

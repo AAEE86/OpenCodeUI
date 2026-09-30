@@ -216,9 +216,17 @@ class ServerStore {
       // 遗留的 wsl: 条目，避免老用户下次启动先落在死地址上
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {
-        this.servers = (JSON.parse(stored) as ServerConfig[]).filter(
-          server => typeof server?.id === 'string' && !server.id.startsWith(WSL_SERVER_PREFIX),
-        )
+        this.servers = (JSON.parse(stored) as ServerConfig[])
+          .filter(server => typeof server?.id === 'string' && !server.id.startsWith(WSL_SERVER_PREFIX))
+          // 🔴 V2 修正（2026-09-30，真实部署发现）：历史版本持久化过「相对地址」
+          // （Docker 构建的 `/api`）。V2 下它无法工作——SDK 的 `new URL(baseUrl)` 需要绝对
+          // 地址，健康检查还会双重前缀成 `/api/api/info`（实测 401）→ 读取时就地升级为
+          // 当前页面 origin，老用户无需手动删除重加服务器。
+          .map(server =>
+            server.url?.startsWith('/') && typeof window !== 'undefined'
+              ? { ...server, url: window.location.origin }
+              : server,
+          )
       }
 
       // 如果没有服务器，添加默认的本地服务器

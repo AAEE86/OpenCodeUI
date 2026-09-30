@@ -1689,6 +1689,14 @@ LSP 状态 · 格式化器状态 · 符号搜索 · 会话分享 · 手动摘要
       （Caddy `handle_path` → `handle`；nginx `proxy_pass` 去尾斜杠，`/api/pty/` 同步修正），
       并给 gateway 补上 `Authorization` 透传（后端开 `OPENCODE_SERVER_PASSWORD` 时必需，
       否则所有 `/api/*` 请求 401）。**该问题单测/冒烟均无法发现**，由 NAS 真实部署暴露。
+- [x] ✅ **默认服务器 URL 修正（同一部署暴露，2026-09-30 追加）** —— Docker 构建注入的
+      `VITE_API_BASE_URL=/api` 是 **V1 语义**（相对 base + 反代削前缀）；V2 下：
+      ① 健康检查拼成 `/api/api/info`（实测 401，界面显示「401」）；
+      ② SDK `new URL(baseUrl)` 对相对地址直接抛 `Invalid URL`。
+      已修：`src/constants/api.ts` 把相对 base 解析为**页面 origin**；
+      `serverStore` 读取持久化数据时把历史遗留的相对地址**就地升级**（老用户无需手动重加服务器）。
+      另确认：内置 `Local` 服务器**故意不可编辑**（`isDefault` 隐藏编辑/删除按钮）——
+      带密码的后端请通过「**添加服务器**」+「添加认证」使用（用户名固定 `opencode`）。
 - [ ] ❗ **三形态真机回归：Tauri 本地 / WSL / Docker** —— **环境限制未实测**（容器内无 docker daemon、
       非 Windows、无 Tauri 运行时）；清单与「已知未验证项 9 条」见
       `docs/opencode-v2-migration-regression-checklist.md`

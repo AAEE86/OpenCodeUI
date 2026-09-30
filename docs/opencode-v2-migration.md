@@ -1681,6 +1681,14 @@ LSP 状态 · 格式化器状态 · 符号搜索 · 会话分享 · 手动摘要
       顺带**彻底摆脱 GitHub 限流**（新渠道不经过 GitHub）。详见阶段 4 报告 §1
 - [x] ✅ **Rust 编译验证**（3b 遗留）—— 装齐 Tauri Linux 依赖后 `cargo check` **0 报错**，
       含一次**从零完整编译**（692 crate）。**顺带修掉 WSL「安装 opencode」装成 V1 的 bug**（阶段 4 报告 §5）
+- [x] ✅ **反代配置修正（由真实部署发现，2026-09-30）** —— 🔴 迁移时修了 vite 开发代理，
+      但**生产反代配置漏改**：`docker/Caddyfile.standalone`、`docker/Caddyfile.gateway`、
+      `docker/nginx.host.conf.example` 仍在**削 `/api` 前缀**（V1 写法）。
+      V2 端点本身带 `/api` 前缀 → 削掉后请求命中 SPA 兜底 HTML（实测 `200 + text/html`），
+      前端拿 HTML 当 JSON 解析 → 整条链路坏。已全部改为**原样透传**
+      （Caddy `handle_path` → `handle`；nginx `proxy_pass` 去尾斜杠，`/api/pty/` 同步修正），
+      并给 gateway 补上 `Authorization` 透传（后端开 `OPENCODE_SERVER_PASSWORD` 时必需，
+      否则所有 `/api/*` 请求 401）。**该问题单测/冒烟均无法发现**，由 NAS 真实部署暴露。
 - [ ] ❗ **三形态真机回归：Tauri 本地 / WSL / Docker** —— **环境限制未实测**（容器内无 docker daemon、
       非 Windows、无 Tauri 运行时）；清单与「已知未验证项 9 条」见
       `docs/opencode-v2-migration-regression-checklist.md`

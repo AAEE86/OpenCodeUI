@@ -87,7 +87,10 @@ After you enter the username/password in the frontend's server connection dialog
 If you use a custom Caddyfile (or hit 401 auth failures), add this to the `reverse_proxy` block:
 
 ```caddyfile
-handle_path /api/* {
+# 🔴 OpenCode V2: use `handle` (NOT `handle_path`) — V2 endpoints already include
+#    the /api prefix; handle_path strips it and requests hit non-existent paths
+#    (the backend returns the SPA fallback HTML instead of JSON).
+handle /api/* {
 	reverse_proxy your-opencode-serve:4096 {
 		header_up Host {upstream_hostport}
 		header_up Authorization {http.request.header.Authorization}

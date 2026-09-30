@@ -43,6 +43,10 @@
 
 ## 快速体验
 
+> ⚠️ **需要 OpenCode v2**（如 `v2.0.19`）。**本 UI 只支持 V2，不支持 v1.x** ——
+> 如果后端还是 v1，界面能打开但一发消息就会失败。
+> 用 `opencode --version` 确认；输出的版本号应以 `v2.` 开头。
+
 无需部署，在本地启动 OpenCode 后端后直接访问托管版前端：
 
 ```bash
@@ -314,7 +318,8 @@ preview.example.com {
 
 ## 本地开发
 
-需要一个运行中的 [OpenCode](https://github.com/anomalyco/opencode) 后端。
+需要一个运行中的 [OpenCode](https://github.com/anomalyco/opencode) **v2** 后端
+（**本 UI 只支持 V2，不支持 v1.x**；用 `opencode --version` 确认版本号以 `v2.` 开头）。
 
 ```bash
 opencode serve

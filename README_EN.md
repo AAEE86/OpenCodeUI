@@ -43,6 +43,10 @@ A third-party Web frontend for [OpenCode](https://github.com/anomalyco/opencode)
 
 ## Quick Start
 
+> ⚠️ **OpenCode v2 required** (e.g. `v2.0.19`). **This UI only supports V2 and does not work with v1.x** —
+> if the backend is still v1, the UI will load but sending a message will fail.
+> Run `opencode --version` to check; the version number should start with `v2.`.
+
 No deployment needed — after starting the OpenCode backend locally, access the hosted frontend directly:
 
 ```bash
@@ -263,7 +267,8 @@ preview.example.com {
 
 ## Local Development
 
-Requires a running [OpenCode](https://github.com/anomalyco/opencode) backend.
+Requires a running [OpenCode](https://github.com/anomalyco/opencode) **v2** backend
+(**this UI only supports V2 and does not work with v1.x**; run `opencode --version` and make sure it starts with `v2.`).
 
 ```bash
 opencode serve

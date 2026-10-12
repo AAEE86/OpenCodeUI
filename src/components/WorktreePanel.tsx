@@ -22,7 +22,7 @@ import { listPtySessions, removePtySession } from '../api/pty'
 import { listWorktrees, createWorktree, removeWorktree, refreshWorktrees } from '../api/worktree'
 import { getBranchList } from '../api/vcs'
 import { subscribeToEvents } from '../api/events'
-import { useDirectory, useVcsInfo, requestGitWorkspaceCatalogRefresh } from '../hooks'
+import { useDirectory, useVcsInfo } from '../hooks'
 import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../utils'
 import type { ApiProject } from '../api'
 import { ConfirmDialog } from './ui/ConfirmDialog'
@@ -181,7 +181,6 @@ export const WorktreePanel = memo(function WorktreePanel({ isResizing: _isResizi
         })
         setShowCreateForm(false)
         await loadWorktrees()
-        requestGitWorkspaceCatalogRefresh()
         if (autoOpen && wt.directory) {
           handleOpenSession(wt.directory)
         }
@@ -211,7 +210,6 @@ export const WorktreePanel = memo(function WorktreePanel({ isResizing: _isResizi
         await releaseWorktreeResources(directory)
         await removeWorktree({ projectID: current.id, directory, force: true })
         await loadWorktrees()
-        requestGitWorkspaceCatalogRefresh()
       } catch (e) {
         setError(e instanceof Error ? e.message : t('worktreePanel.failedToRemove'))
       } finally {
@@ -242,7 +240,6 @@ export const WorktreePanel = memo(function WorktreePanel({ isResizing: _isResizi
         await releaseWorktreeResources(directory)
         await refreshWorktrees(current.id)
         await loadWorktrees()
-        requestGitWorkspaceCatalogRefresh()
       } catch (e) {
         setError(e instanceof Error ? e.message : t('worktreePanel.failedToReset'))
       } finally {

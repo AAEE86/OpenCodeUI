@@ -37,8 +37,6 @@ export type { SessionStats } from './useSessionStats'
 export type { FileTreeNode, UseFileExplorerOptions, UseFileExplorerResult } from './useFileExplorer'
 export { useVcsInfo } from './useVcsInfo'
 export type { UseVcsInfoResult } from './useVcsInfo'
-export { useGitWorkspaceCatalog, requestGitWorkspaceCatalogRefresh } from './useGitWorkspaceCatalog'
-export type { GitWorkspaceCatalog, GitWorkspaceMeta } from './useGitWorkspaceCatalog'
 
 // Re-export from contexts
 export {

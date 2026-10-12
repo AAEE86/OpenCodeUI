@@ -136,13 +136,9 @@ const ServerFolderGroup = memo(function ServerFolderGroup({
       id: 'global',
       worktree: '',
       name: t('sidebar.global'),
-      sectionKind: 'project',
       canReorder: true,
     }
-    return [
-      globalProject,
-      ...workspaces.map(dir => ({ ...createDirectoryProject(dir, 'project'), canReorder: true })),
-    ]
+    return [globalProject, ...workspaces.map(dir => ({ ...createDirectoryProject(dir), canReorder: true }))]
   }, [workspaces, t])
 
   // 仅当当前选中的 session 属于本服务器时才高亮（复合 key 前缀匹配），

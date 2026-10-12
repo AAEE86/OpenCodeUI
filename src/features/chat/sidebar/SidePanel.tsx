@@ -26,9 +26,8 @@ import {
   ListFilterIcon,
   FolderMinusIcon,
   CheckIcon,
-  SpinnerIcon,
 } from '../../../components/Icons'
-import { useDirectory, useKeybindingLabel, useGitWorkspaceCatalog, useVcsInfo } from '../../../hooks'
+import { useDirectory, useKeybindingLabel, useVcsInfo } from '../../../hooks'
 import { useSessionContext } from '../../../contexts/useSessionContext'
 import { useLayoutStore, childSessionStore } from '../../../store'
 import { useBusySessions, useBusyCount } from '../../../store/activeSessionStore'
@@ -75,10 +74,7 @@ interface ProjectItem {
   worktree: string
   name: string
   canReorder?: boolean
-  memberDirectories?: string[]
   reorderPath?: string
-  workspaceDirectories?: string[]
-  sectionKind?: 'project' | 'workspace'
 }
 
 function getSelectionRange(visibleIds: string[], anchorId: string, targetId: string) {
@@ -93,21 +89,9 @@ function getSelectionRange(visibleIds: string[], anchorId: string, targetId: str
 }
 
 function findProjectGroupForDirectory(projects: ProjectItem[], directory: string) {
-  return projects.find(project => {
-    if (isSameDirectory(project.id, directory) || isSameDirectory(project.worktree, directory)) {
-      return true
-    }
-
-    if (project.workspaceDirectories?.some(workspace => isSameDirectory(workspace, directory))) {
-      return true
-    }
-
-    if (project.memberDirectories?.some(memberDirectory => isSameDirectory(memberDirectory, directory))) {
-      return true
-    }
-
-    return false
-  })
+  return projects.find(
+    project => isSameDirectory(project.id, directory) || isSameDirectory(project.worktree, directory),
+  )
 }
 
 export function SidePanel({
@@ -132,17 +116,6 @@ export function SidePanel({
     reorderDirectories,
     recentProjects,
   } = useDirectory()
-  const catalogDirectories = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          savedDirectories
-            .map(directory => normalizeToForwardSlash(directory.path))
-            .concat(currentDirectory ? [normalizeToForwardSlash(currentDirectory)] : []),
-        ),
-      ),
-    [savedDirectories, currentDirectory],
-  )
   // 多服务器订阅模式配置
   const multiServerConfig = useMultiServerStore()
   // 多服务器模式：Git/路径信息跟随「焦点服务器」（焦点缺省 = 活动服务器）
@@ -153,10 +126,6 @@ export function SidePanel({
   const catalogServerId = multiServerConfig.enabled
     ? (multiServerConfig.focusedServerId ?? activeServer?.id)
     : undefined
-  const { catalog: gitWorkspaceCatalog, isLoading: isGitWorkspaceCatalogLoading } = useGitWorkspaceCatalog(
-    catalogDirectories,
-    catalogServerId,
-  )
   const { vcsInfo: currentDirectoryVcsInfo, isLoading: isCurrentDirectoryVcsLoading } = useVcsInfo(
     currentDirectory,
     catalogServerId,
@@ -584,58 +553,19 @@ export function SidePanel({
     [busySessions, findParentId],
   )
 
-  const buildProjectGroups = useCallback(
-    (directories: typeof savedDirectories): ProjectItem[] => {
-      const savedNameByPath = new Map(
-        directories.map(directory => [normalizeToForwardSlash(directory.path), directory.name]),
-      )
-      const groups = new Map<string, ProjectItem>()
-
-      for (const directory of directories) {
-        const normalizedDirectory = normalizeToForwardSlash(directory.path)
-        const meta = gitWorkspaceCatalog.get(normalizedDirectory)
-        const { projectId, workspaceDirectories } = getProjectGroupIdentity(normalizedDirectory, meta)
-        const existing = groups.get(projectId)
-
-        if (existing) {
-          groups.set(projectId, {
-            ...existing,
-            memberDirectories: [...(existing.memberDirectories ?? []), directory.path],
-            reorderPath: existing.reorderPath ?? directory.path,
-          })
-          continue
-        }
-
-        groups.set(projectId, {
-          id: projectId,
-          worktree: projectId,
-          name: savedNameByPath.get(projectId) ?? getDirectoryName(projectId),
-          canReorder: true,
-          memberDirectories: [directory.path],
-          reorderPath: directory.path,
-          workspaceDirectories,
-        })
+  // worktree 不合并进项目：每个已保存目录都是独立文件夹（见 projectGrouping.ts）
+  const buildProjectGroups = useCallback((directories: typeof savedDirectories): ProjectItem[] => {
+    return directories.map(directory => {
+      const { projectId } = getProjectGroupIdentity(directory.path)
+      return {
+        id: projectId,
+        worktree: projectId,
+        name: directory.name || getDirectoryName(projectId),
+        canReorder: true,
+        reorderPath: directory.path,
       }
-
-      return Array.from(groups.values()).map(project => {
-        if (!project.workspaceDirectories?.length) return project
-
-        const savedWorkspaceDirectories = (project.memberDirectories ?? [])
-          .map(directory => normalizeToForwardSlash(directory))
-          .filter(directory => project.workspaceDirectories?.some(workspace => isSameDirectory(workspace, directory)))
-
-        const remainingWorkspaceDirectories = project.workspaceDirectories.filter(
-          workspace => !savedWorkspaceDirectories.some(directory => isSameDirectory(directory, workspace)),
-        )
-
-        return {
-          ...project,
-          workspaceDirectories: [...savedWorkspaceDirectories, ...remainingWorkspaceDirectories],
-        }
-      })
-    },
-    [gitWorkspaceCatalog],
-  )
+    })
+  }, [])
 
   const folderProjectGroups = useMemo<ProjectItem[]>(() => {
     return buildProjectGroups(savedDirectories)
@@ -682,20 +612,15 @@ export function SidePanel({
     const groupedProject = findProjectGroupForDirectory(folderProjectGroups, normalizedCurrentDirectory!)
     if (groupedProject) return groupedProject
 
-    const meta = gitWorkspaceCatalog.get(normalizedCurrentDirectory!)
-    const { projectId, workspaceDirectories } = getProjectGroupIdentity(normalizedCurrentDirectory!, meta)
-    const found = findProjectGroupForDirectory(folderProjectGroups, projectId)
-    if (found) return found
+    const { projectId } = getProjectGroupIdentity(normalizedCurrentDirectory!)
 
     return {
       id: projectId,
       worktree: projectId,
       name: getDirectoryName(projectId),
       canReorder: false,
-      memberDirectories: [],
-      workspaceDirectories,
     }
-  }, [currentDirectory, folderProjectGroups, gitWorkspaceCatalog, globalProject, normalizedCurrentDirectory])
+  }, [currentDirectory, folderProjectGroups, globalProject, normalizedCurrentDirectory])
 
   const currentProjectLabel = useMemo(() => {
     const baseLabel = currentProject?.name || t('sidebar.global')
@@ -730,57 +655,6 @@ export function SidePanel({
   }, [folderProjectGroups, currentDirectory, currentProject, globalFolderProject, globalFolderIndex])
   // 文件夹模式开启（搜索时由 SearchResults 接管，文件夹与 session 一起搜）
 
-  const workspaceDirectoriesByProjectId = useMemo(() => {
-    const map = new Map<string, string[]>()
-    for (const project of folderProjects) {
-      if (project.workspaceDirectories && project.workspaceDirectories.length > 1) {
-        map.set(project.id, project.workspaceDirectories)
-      }
-    }
-    return map
-  }, [folderProjects])
-
-  const currentProjectWorkspaceDirectories = useMemo(
-    () => currentProject.workspaceDirectories ?? [],
-    [currentProject.workspaceDirectories],
-  )
-  const shouldRenderWorkspaceTreeOnly =
-    !search && currentProjectWorkspaceDirectories.length > 1 && currentProject.id !== 'global'
-  const shouldWaitForWorkspaceResolution =
-    !sidebarFolderRecents &&
-    !search &&
-    !!currentDirectory &&
-    isGitWorkspaceCatalogLoading &&
-    currentProjectWorkspaceDirectories.length <= 1 &&
-    !!normalizedCurrentDirectory &&
-    !gitWorkspaceCatalog.has(normalizedCurrentDirectory)
-
-  const currentProjectTreeProjects = useMemo<ProjectItem[]>(() => {
-    if (!shouldRenderWorkspaceTreeOnly || currentProject.id === 'global') return []
-
-    const draggableWorkspaceSet = new Set(
-      (currentProject.memberDirectories ?? []).map(directory => normalizeToForwardSlash(directory)),
-    )
-
-    return currentProjectWorkspaceDirectories.map(workspaceDirectory => {
-      const isSavedWorkspace = draggableWorkspaceSet.has(normalizeToForwardSlash(workspaceDirectory))
-
-      return {
-        id: workspaceDirectory,
-        worktree: workspaceDirectory,
-        name: getDirectoryName(workspaceDirectory),
-        canReorder: isSavedWorkspace,
-        memberDirectories: isSavedWorkspace ? [workspaceDirectory] : [],
-        reorderPath: isSavedWorkspace ? workspaceDirectory : undefined,
-        sectionKind: 'workspace' as const,
-      }
-    })
-  }, [currentProject, currentProjectWorkspaceDirectories, shouldRenderWorkspaceTreeOnly])
-
-  const allDisplayedProjects = useMemo(() => {
-    return [...folderProjects, ...currentProjectTreeProjects]
-  }, [folderProjects, currentProjectTreeProjects])
-
   const handleSelectFolderProject = useCallback(
     (project: ProjectItem) => {
       if (!project.worktree) {
@@ -794,13 +668,10 @@ export function SidePanel({
     [currentDirectory, setCurrentDirectory],
   )
 
-  const getProjectDirectoriesToRemove = useCallback(
-    (projectId: string) => {
-      const project = allDisplayedProjects.find(item => isSameDirectory(item.id, projectId))
-      return project?.memberDirectories?.length ? project.memberDirectories : [projectId]
-    },
-    [allDisplayedProjects],
-  )
+  const getProjectDirectoriesToRemove = useCallback((projectId: string) => {
+    // worktree 不合并后，一个项目条目就是一个目录
+    return [projectId]
+  }, [])
 
   const handleSelectProject = useCallback(
     (projectId: string) => {
@@ -1543,23 +1414,10 @@ export function SidePanel({
                     projects={folderProjects}
                     {...commonFolderRecentListProps}
                     onReorderProject={handleReorderProjectGroup}
-                    workspaceDirectoriesByProjectId={workspaceDirectoriesByProjectId}
                     pinnedSessions={resolvedPinnedSessions}
                     unavailablePinnedEntries={unavailablePinnedEntries}
                   />
                 )
-              ) : shouldRenderWorkspaceTreeOnly ? (
-                <FolderRecentList
-                  projects={currentProjectTreeProjects}
-                  {...commonFolderRecentListProps}
-                  onReorderProject={reorderDirectories}
-                  pinnedSessions={resolvedPinnedSessions}
-                  unavailablePinnedEntries={unavailablePinnedEntries}
-                />
-              ) : shouldWaitForWorkspaceResolution ? (
-                <div className="flex h-full items-center justify-center text-text-400/70">
-                  <SpinnerIcon size={14} className="animate-spin" />
-                </div>
               ) : (
                 <SessionList
                   sessions={orderedSessions}

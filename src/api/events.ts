@@ -165,7 +165,7 @@ function getReconnectDelay(attempt: number): number {
 // 这些回调会被调用、但没有任何消费方。逐个核对过，都不是"忘了接"：
 //
 //   worktree.updated / worktree.resolved / vcs.branch.updated
-//       → 由 WorktreePanel 与 useGitWorkspaceCatalog 通过 subscribeToEvents 直接消费
+//       → 由 WorktreePanel 通过 subscribeToEvents 直接消费
 //   pty.created / updated / exited / deleted
 //       → 终端自己用 WebSocket 桥（api/ptyBridge.ts）感知 connected/data/
 //         disconnected，PTY 结束时 socket 本身会断，无需再听这些事件

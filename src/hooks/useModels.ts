@@ -16,6 +16,8 @@ interface ModelsState {
   providers: Provider[]
   isLoading: boolean
   error: Error | null
+  /** 是否成功拉到过一次（区分「真为空」与「还没拉到」） */
+  fetchedOnce: boolean
 }
 
 type Listener = () => void
@@ -26,7 +28,7 @@ const _fetchGenerations = new Map<string, number>()
 const _listeners = new Set<Listener>()
 
 function _getState(serverId: string): ModelsState {
-  return _states.get(serverId) ?? { models: [], providers: [], isLoading: true, error: null }
+  return _states.get(serverId) ?? { models: [], providers: [], isLoading: true, error: null, fetchedOnce: false }
 }
 
 function _notify() {
@@ -56,7 +58,7 @@ async function _fetchModels(serverId: string, force = false) {
         getProviders(undefined, serverId).catch(() => [] as Provider[]),
       ])
       if (generation === _fetchGenerations.get(serverId)) {
-        _setState(serverId, { models, providers, isLoading: false })
+        _setState(serverId, { models, providers, isLoading: false, fetchedOnce: true })
       }
     } catch (e) {
       if (generation === _fetchGenerations.get(serverId)) {
@@ -77,6 +79,23 @@ async function _fetchModels(serverId: string, force = false) {
 export function refreshModels(serverId?: string) {
   const sid = serverId ?? serverStore.getActiveServerId()
   return _fetchModels(sid, true)
+}
+
+/**
+ * 仅在不健康时刷新（从未拉成功过 / 上次失败）。
+ *
+ * 用在 SSE `server.connected`（含首次连接）上：App 启动先于服务器就绪时
+ * 预取必然失败，没有这条补拉路径的话模型/agent/思考等级会**永远空着，
+ * 只能手动刷新**（官方做法：每次 server.connected 都 refetch bootstrap，
+ * 见 packages/app/src/runtime/server/server-sync/connection.ts）。
+ * 数据健康时什么都不做，避免每次重连都白白重拉。
+ */
+export function ensureModelsFresh(serverId?: string) {
+  const sid = serverId ?? serverStore.getActiveServerId()
+  const state = _getState(sid)
+  if (state.isLoading) return
+  if (state.fetchedOnce && !state.error) return
+  void _fetchModels(sid, true)
 }
 
 // 预取活动服务器的模型 — 组件挂载前模型就已就绪

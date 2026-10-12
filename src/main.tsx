@@ -96,7 +96,7 @@ interface StartOpencodeServiceResult {
   started: boolean
   startedByUs: boolean
   url?: string | null
-  /** v2 服务端自动生成的随机密码（未显式配置 OPENCODE_SERVER_PASSWORD 时强制生成） */
+  /** 连接用密码：服务端随机生成（未显式配置时）或来自 OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD 环境变量 */
   serverPassword?: string | null
 }
 

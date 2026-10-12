@@ -24,10 +24,14 @@ pub struct StartOpencodeServiceResult {
     started: bool,
     started_by_us: bool,
     url: Option<String>,
-    /// v2 服务端生成的随机密码（无 OPENCODE_SERVER_PASSWORD 时
-    /// serve 自动生成并打印 `server password <pwd>` 到 stdout——
-    /// 官方 cli/server-process.ts:160 同款契约）。用户显式配置密码时
-    /// 服务端不打印，这里为 None（前端继续用条目上已有的凭据）。
+    /// 连接用的服务密码。两个来源：
+    /// 1. v2 服务端生成的随机密码（无显式密码时 serve 自动生成并打印
+    ///    `server password <pwd>` 到 stdout——官方 cli/server-process.ts 契约）；
+    /// 2. 用户显式配置的 env 密码（OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD，
+    ///    此时服务端不打印随机密码，由我们把 env 值回传）。
+    /// 前端必须把它写回本机条目 auth，否则后续所有 API/SSE 请求 401。
+    /// 仅当密码来自「探测实际命中/服务端实际使用」的来源时才返回，
+    /// 不会用存疑的 env 值覆盖条目上已可用的凭据。
     server_password: Option<String>,
 }
 
@@ -81,15 +85,18 @@ pub async fn is_service_running_with_auth(url: &str, auth: Option<(&str, &str)>)
 fn spawn_opencode_serve(
     binary_path: &str,
     env_vars: &std::collections::HashMap<String, String>,
+    serve_args: &[String],
 ) -> Result<SpawnedOpencodeServe, String> {
-    log::info!("Starting opencode serve with binary: {}", binary_path);
+    log::info!(
+        "Starting opencode serve with binary: {} (args: {})",
+        binary_path,
+        serve_args.join(" ")
+    );
     if !env_vars.is_empty() {
         log::info!("Injecting {} environment variable(s)", env_vars.len());
     }
 
-    let serve_args = ["serve".to_string()];
-
-    let mut cmd = build_opencode_command(binary_path, &serve_args);
+    let mut cmd = build_opencode_command(binary_path, serve_args);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     // 注入用户配置的环境变量
@@ -162,6 +169,72 @@ fn parse_server_password(line: &str) -> Option<String> {
     Some(password.to_string())
 }
 
+/// 官方约定的服务密码环境变量（新名优先、旧名兜底，
+/// 对齐官方 cli/src/env.ts 的 `OPENCODE_PASSWORD orElse OPENCODE_SERVER_PASSWORD`）。
+const SERVER_PASSWORD_ENV_KEYS: [&str; 2] = ["OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD"];
+
+/// 在给定的 env 集合里按官方优先级找显式配置的密码。
+fn password_from_env_vars(env_vars: &std::collections::HashMap<String, String>) -> Option<String> {
+    for key in SERVER_PASSWORD_ENV_KEYS {
+        for (env_key, value) in env_vars {
+            if env_key.eq_ignore_ascii_case(key) && !value.is_empty() {
+                return Some(value.clone());
+            }
+        }
+    }
+    None
+}
+
+/// 解析「用户显式配置」的服务密码：先条目注入的 env_vars，再进程环境。
+///
+/// 为什么必须读进程环境：GUI 应用继承系统/用户环境变量，spawn 的子进程
+/// 默认也继承——用户在系统里设了 OPENCODE_SERVER_PASSWORD 时，serve 会用它
+/// 且**不再打印随机密码**；ocui 若不识别，就绪探测与后续所有 API/SSE 请求
+/// 全部 401，表现为「永远连不上、反复重启」。
+fn configured_server_password(env_vars: &std::collections::HashMap<String, String>) -> Option<String> {
+    if let Some(password) = password_from_env_vars(env_vars) {
+        return Some(password);
+    }
+    for key in SERVER_PASSWORD_ENV_KEYS {
+        if let Ok(value) = env::var(key) {
+            if !value.is_empty() {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+/// 从条目 URL 派生 serve 绑定参数：用户把本机条目改成自定义主机/端口时，
+/// 让 serve 实际绑到那里（v2 serve 支持 --hostname/--port/--cors；
+/// 默认 http://127.0.0.1:4096 与显式传参行为一致）。URL 无法解析时退回裸 serve。
+fn serve_args_from_url(url: &str) -> Vec<String> {
+    let mut args = vec!["serve".to_string()];
+    if let Ok(parsed) = reqwest::Url::parse(url) {
+        if let Some(host) = parsed.host_str() {
+            if !host.is_empty() {
+                args.push("--hostname".to_string());
+                args.push(host.to_string());
+            }
+        }
+        if let Some(port) = parsed.port() {
+            args.push("--port".to_string());
+            args.push(port.to_string());
+        }
+    }
+    args
+}
+
+/// 按优先级依次尝试多套凭据探测服务，返回命中的候选下标。
+async fn probe_service_with_auths(url: &str, auths: &[Option<(&str, &str)>]) -> Option<usize> {
+    for (index, auth) in auths.iter().enumerate() {
+        if is_service_running_with_auth(url, *auth).await {
+            return Some(index);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::{parse_listening_url, parse_server_password};
@@ -195,6 +268,56 @@ mod tests {
         assert_eq!(parse_server_password(url_line), None);
         assert!(parse_server_password(password_line).is_some());
         assert_eq!(parse_listening_url(password_line), None);
+    }
+
+    #[test]
+    fn configured_password_prefers_new_env_name() {
+        let mut env_vars = std::collections::HashMap::new();
+        env_vars.insert("OPENCODE_SERVER_PASSWORD".to_string(), "legacy".to_string());
+        env_vars.insert("OPENCODE_PASSWORD".to_string(), "new".to_string());
+        assert_eq!(
+            super::password_from_env_vars(&env_vars),
+            Some("new".to_string())
+        );
+    }
+
+    #[test]
+    fn configured_password_falls_back_to_legacy_and_ignores_empty() {
+        let mut env_vars = std::collections::HashMap::new();
+        env_vars.insert("OPENCODE_SERVER_PASSWORD".to_string(), "legacy".to_string());
+        assert_eq!(
+            super::password_from_env_vars(&env_vars),
+            Some("legacy".to_string())
+        );
+        // 大小写不敏感（Windows 环境变量）
+        let mut env_vars = std::collections::HashMap::new();
+        env_vars.insert("opencode_server_password".to_string(), "lower".to_string());
+        assert_eq!(
+            super::password_from_env_vars(&env_vars),
+            Some("lower".to_string())
+        );
+        // 空值视为未配置
+        let mut env_vars = std::collections::HashMap::new();
+        env_vars.insert("OPENCODE_SERVER_PASSWORD".to_string(), "".to_string());
+        assert_eq!(super::password_from_env_vars(&env_vars), None);
+    }
+
+    #[test]
+    fn serve_args_derive_hostname_and_port() {
+        assert_eq!(
+            super::serve_args_from_url("http://127.0.0.1:4096"),
+            vec!["serve", "--hostname", "127.0.0.1", "--port", "4096"]
+        );
+        assert_eq!(
+            super::serve_args_from_url("http://0.0.0.0:5050/"),
+            vec!["serve", "--hostname", "0.0.0.0", "--port", "5050"]
+        );
+        // 默认端口不重复传；无法解析时退回裸 serve
+        assert_eq!(
+            super::serve_args_from_url("http://localhost"),
+            vec!["serve", "--hostname", "localhost"]
+        );
+        assert_eq!(super::serve_args_from_url("not a url"), vec!["serve"]);
     }
 }
 
@@ -345,37 +468,61 @@ pub async fn start_opencode_service(
     env_vars: std::collections::HashMap<String, String>,
     auth: Option<(String, String)>,
 ) -> Result<StartOpencodeServiceResult, String> {
-    // 「已经在跑」的探测要带条目上已有的凭据——v2 服务端强制随机密码，
-    // 不带凭据的探测会 401 误判成没在跑，进而尝试重复 spawn 撞端口
-    let health_auth = auth
+    // 显式配置的密码（条目 env_vars → 进程环境，官方优先级）。
+    // 子进程默认继承进程环境，因此 serve 一定会用它——探测与回传都必须认它。
+    let configured_password = configured_server_password(&env_vars);
+    if configured_password.is_some() {
+        log::info!("Using explicitly configured server password (env)");
+    }
+
+    // 「已经在跑」的探测要按优先级尝试多套凭据——v2 服务端强制密码，
+    // 拿错凭据探测会 401 误判成没在跑，进而重复 spawn 撞端口、反复重启。
+    // 优先级：显式 env 密码 > 条目已存凭据 > 无凭据（v1/异常环境兜底）。
+    // probe_report 记录命中后需要回传前端写回条目的密码（条目已有凭据不回传，
+    // 避免用过期的 env 密码覆盖条目上实际可用的凭据）。
+    let entry_auth = auth
         .as_ref()
         .map(|(username, password)| (username.as_str(), password.as_str()));
+    let mut probe_auths: Vec<Option<(&str, &str)>> = Vec::new();
+    let mut probe_report: Vec<Option<String>> = Vec::new();
+    if let Some(password) = configured_password.as_deref() {
+        probe_auths.push(Some(("opencode", password)));
+        probe_report.push(Some(password.to_string()));
+    }
+    if entry_auth.is_some() {
+        probe_auths.push(entry_auth);
+        probe_report.push(None);
+    }
+    probe_auths.push(None);
+    probe_report.push(None);
+
     if state.we_started.load(Ordering::SeqCst) {
         let current_url = state.service_url.lock().map_err(|e| e.to_string())?.clone();
         if let Some(current_url) = current_url {
-            if is_service_running_with_auth(&current_url, health_auth).await {
+            if let Some(winner) = probe_service_with_auths(&current_url, &probe_auths).await {
                 log::info!("opencode service already running at {}", current_url);
                 return Ok(StartOpencodeServiceResult {
                     started: false,
                     started_by_us: true,
                     url: Some(current_url),
-                    server_password: None,
+                    server_password: probe_report[winner].clone(),
                 });
             }
         }
     }
 
-    if is_service_running_with_auth(&url, health_auth).await {
+    if let Some(winner) = probe_service_with_auths(&url, &probe_auths).await {
         log::info!("opencode service already running at {}", url);
         return Ok(StartOpencodeServiceResult {
             started: false,
             started_by_us: false,
             url: Some(url),
-            server_password: None,
+            server_password: probe_report[winner].clone(),
         });
     }
 
-    let mut spawned = spawn_opencode_serve(&binary_path, &env_vars)?;
+    let serve_args = serve_args_from_url(&url);
+    let mut spawned = spawn_opencode_serve(&binary_path, &env_vars, &serve_args)?;
     let pid = spawned.child.id();
     log::info!("Started opencode serve, PID: {}", pid);
 
@@ -417,13 +564,14 @@ pub async fn start_opencode_service(
         let health_url = detected_url.as_deref().unwrap_or(&url);
         // 就绪检查的凭据来源（按优先级）：
         // 1. 服务端刚打印的随机密码（未显式配置时强制生成）
-        // 2. 条目上已有的凭据（用户通过 env 配了 OPENCODE_SERVER_PASSWORD
-        //    时服务端不打印，但只要条目 auth 与之匹配就能秒级就绪，
-        //    否则 401 每次迭代全失败、白等 15 秒超时才返回）
+        // 2. 显式配置的 env 密码（OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD，
+        //    来自条目 env_vars 或进程环境；此时服务端不打印随机密码）
+        // 3. 条目上已有的凭据（碰巧与实际密码一致时也能秒级就绪）
         let ready_auth = detected_password
             .as_deref()
             .map(|password| ("opencode", password))
-            .or(health_auth);
+            .or(configured_password.as_deref().map(|password| ("opencode", password)))
+            .or(entry_auth);
         if is_service_running_with_auth(health_url, ready_auth).await {
             log::info!("opencode service is ready at {}", health_url);
             *state.service_url.lock().map_err(|e| e.to_string())? = Some(health_url.to_string());
@@ -431,7 +579,7 @@ pub async fn start_opencode_service(
                 started: true,
                 started_by_us: true,
                 url: Some(health_url.to_string()),
-                server_password: detected_password,
+                server_password: detected_password.or_else(|| configured_password.clone()),
             });
         }
 
@@ -443,7 +591,7 @@ pub async fn start_opencode_service(
         started: true,
         started_by_us: true,
         url: detected_url,
-        server_password: detected_password,
+        server_password: detected_password.or(configured_password),
     })
 }
 

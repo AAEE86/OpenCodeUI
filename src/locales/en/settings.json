@@ -471,7 +471,7 @@
     "runningExternal": "Running (external)",
     "notRunning": "Not running",
     "envVars": "Environment Variables",
-    "envVarsDesc": "Passed to the opencode serve process (e.g. HTTPS_PROXY, API keys)",
+    "envVarsDesc": "Passed to the opencode serve process (e.g. HTTPS_PROXY, API keys, OPENCODE_PASSWORD). OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD already set in the system environment are detected and used automatically",
     "keyPlaceholder": "KEY",
     "valuePlaceholder": "value"
   },

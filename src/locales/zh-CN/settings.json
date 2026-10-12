@@ -471,7 +471,7 @@
     "runningExternal": "运行中（外部）",
     "notRunning": "未运行",
     "envVars": "环境变量",
-    "envVarsDesc": "传递给 opencode serve 进程（如 HTTPS_PROXY、API 密钥）",
+    "envVarsDesc": "传递给 opencode serve 进程（如 HTTPS_PROXY、API 密钥、OPENCODE_PASSWORD 服务密码）。系统环境中已设置的 OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD 也会被自动识别并使用",
     "keyPlaceholder": "KEY",
     "valuePlaceholder": "值"
   },

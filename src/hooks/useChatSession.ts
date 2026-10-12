@@ -18,7 +18,7 @@ import {
   updateConsumerSessionId,
   hasOtherConsumerForSession,
 } from '../hooks'
-import { usePermissions, usePermissionHandler, useMessageAnimation, useDirectory, useSessionContext } from '../hooks'
+import { usePermissions, usePermissionHandler, useMessageAnimation, useDirectory, useSessionContext, useAgents } from '../hooks'
 import { useNotification } from './useNotification'
 import { notificationEventSettingsStore } from '../store/notificationEventSettingsStore'
 import { notificationStore } from '../store/notificationStore'
@@ -26,8 +26,6 @@ import {
   sendMessageAsync,
   getSessionMessages,
   abortSession,
-  getSelectableAgents,
-  subscribeToServerConnectionState,
   getPendingPermissions,
   getPendingForms,
   prefetchCommands,
@@ -44,7 +42,6 @@ import {
   type ApiFormInfo,
   type ApiPermissionRequest,
   type ApiSession,
-  type ApiAgent,
   type Attachment,
   type Model,
 } from '../api'
@@ -151,7 +148,6 @@ export function useChatSession({
   const [queueMutation, setQueueMutation] = useState<QueueMutation | null>(null)
 
   // Agents
-  const [agents, setAgents] = useState<ApiAgent[]>([])
   const [selectedAgent, setSelectedAgentRaw] = useState<string>(
     () => serverStorage.get(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`) || '',
   )
@@ -193,6 +189,10 @@ export function useChatSession({
     () => (routeSessionId ? sessionKeyToServerId(routeSessionId) : activeServerId),
     [routeSessionId, activeServerId],
   )
+
+  // agents 目录：共享 store（按 server+directory 缓存，多 pane 不重复拉取）；
+  // 健康度兜底与事件刷新由 useGlobalEvents 统一驱动（对齐官方 location store）
+  const { agents, refetch: refetchAgents } = useAgents(currentDirectory, paneServerId)
 
   const handleMissingRouteSession = useCallback(
     (missingSessionId: string) => {
@@ -482,18 +482,6 @@ export function useChatSession({
   // 每个 pane 都注册自己的 consumer，由 App 顶层统一建立 SSE 连接
   // ============================================
 
-  // silent=true 用于自动补拉（重连 / server.connected / agent.updated），
-  // 失败不打 toast——下一次连接事件还会再试
-  const reloadAgents = useCallback(
-    (silent = false) =>
-      getSelectableAgents(currentDirectory, paneServerId)
-        .then(setAgents)
-        .catch(err => {
-          if (!silent) handleError('fetch agents', err)
-        }),
-    [currentDirectory, paneServerId],
-  )
-
   const sseCallbacks = useMemo(
     () => ({
       onPermissionAsked: (request: import('../api').ApiPermissionRequest) => {
@@ -595,11 +583,7 @@ export function useChatSession({
         }
         refetchModels().catch(() => {})
         // 重新获取 agents 列表（切换后端时 currentDirectory 可能没变，useEffect 不会触发）
-        void reloadAgents(true)
-      },
-      // agent / config 目录变更 → 重拉 agents（官方收到后 refetch bootstrap）
-      onAgentsChanged: () => {
-        void reloadAgents(true)
+        refetchAgents().catch(() => {})
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs and stable functions
@@ -618,7 +602,7 @@ export function useChatSession({
       loadSession,
       refreshPendingRequests,
       refetchModels,
-      reloadAgents,
+      refetchAgents,
     ],
   )
 
@@ -640,7 +624,6 @@ export function useChatSession({
       onSessionIdle: sid => sseCallbacksRef.current.onSessionIdle(sid),
       onExecutionFailed: sid => sseCallbacksRef.current.onExecutionFailed(sid),
       onReconnected: reason => sseCallbacksRef.current.onReconnected(reason),
-      onAgentsChanged: () => sseCallbacksRef.current.onAgentsChanged?.(),
     })
 
     return unregister
@@ -654,23 +637,6 @@ export function useChatSession({
   const handleVisibleMessageIdsChange = useCallback((_ids: string[]) => {
     // No-op: parts are always in memory now
   }, [])
-
-  // Load agents
-  useEffect(() => {
-    void reloadAgents()
-  }, [reloadAgents])
-
-  // agents 在「App 启动先于服务器就绪」时必然拉空，此前没有任何重试路径，
-  // agent 选择器会一直空着只能手动刷新。连接成功后若列表仍为空则自动补拉
-  //（对齐官方：每次 server.connected 都 refetch bootstrap）。
-  useEffect(() => {
-    if (agents.length > 0) return
-    const targetServerId = paneServerId ?? serverStore.getActiveServerId()
-    return subscribeToServerConnectionState(targetServerId, info => {
-      if (info.state !== 'connected') return
-      void reloadAgents(true)
-    })
-  }, [agents.length, paneServerId, reloadAgents])
 
   // Preload @ root directory and / commands for current session directory
   useEffect(() => {

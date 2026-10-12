@@ -1,5 +1,24 @@
 # Changelog
 
+## [v0.7.5] - 2026-10-12
+
+- fix(file-explorer): strip trailing slashes from directory entries (24647965)
+- feat(chat): restore smooth streaming growth animation at stick-to-bottom (5db979eb)
+- fix(chat): heal stale virtual row measurements causing message overlap (dcfe27cf)
+- refactor(agents): agents 收敛为共享 store，对齐官方 location sync 设计 (126f1ab8)
+- fix(chat): server.connected 时补拉模型/agent 目录，根治选择器空载 (64abe223)
+- feat(models): 模型目录缓存增加 fetchedOnce 与按需自愈补拉 (9e0057e8)
+- fix(sdk): abortInFlightApiRequests 不再永久毒化客户端缓存 (05e757e2)
+- feat(chat): 发送失败自动幂等重试一次（对齐官方 composer） (495fb6a7)
+- refactor(sidebar): worktree 不再合并进项目，按独立文件夹展示 (e00529d9)
+- feat(chat): 发送失败时弹出错误通知，不再静默吞消息 (51651745)
+- fix(sdk): 给 REST 请求加响应头超时，根治发送链卡死 (5ad5c94c)
+- fix(events): 修复 SSE 永久断联与重连补偿漏洞 (f3707985)
+- fix(project-dialog): 浏览到 location 根之外时项目路径被拼上 ../../ (df5e05e2)
+- feat(v2): 输入框插队/排队 chip 显隐开关（agent 设置「后续消息排队」之后） (bacbd3ed)
+- fix(v2): warmup 移除 workerFiles——vite 8 类型不支持（客户端入口预热即达同样提速） (19f28e0e)
+- fix(v2): server.warmup 预热转译管线——首访白屏 7.4s → 1.2s (dd9b868d)
+
 ## [v0.7.4] - 2026-10-07
 
 - fix(v2): 内嵌服务就绪检查带条目凭据——用户自配 OPENCODE_SERVER_PASSWORD 时不再白等 15s (c59371b1)

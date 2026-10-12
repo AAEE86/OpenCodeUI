@@ -89,6 +89,26 @@ export async function prefetchRootDirectory(directory?: string, serverId?: strin
 }
 
 /**
+ * 列出目录内容，并返回服务器回显的 location 根目录。
+ *
+ * v2 的条目 path 是**相对 location 根**的（不是相对被列出的目录），
+ * 浏览到根之外时会带 `../`。需要拼绝对路径的调用方（如项目选择对话框）
+ * 必须用这个变体，把条目按 `resolveEntryPath(entry.path, locationRoot)` 解析。
+ */
+export async function listDirectoryWithRoot(
+  path: string,
+  directory?: string,
+  serverId?: string,
+): Promise<{ locationRoot: string; entries: FileNode[] }> {
+  const sdk = getSDKClient(serverId)
+  const result = await sdk.file.list({
+    location: locationParam(directory, serverId),
+    path,
+  })
+  return { locationRoot: result.location?.directory ?? '', entries: result.data }
+}
+
+/**
  * 搜索文件 / 目录。
  *
  * v1 的 `find.files` 返回 path 字符串数组；v2 的 `file.find` 返回条目数组，

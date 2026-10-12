@@ -30,3 +30,49 @@ export function normalizePathSeparators(path: string): string {
   if (result.startsWith('./')) result = result.slice(2)
   return result
 }
+
+/**
+ * 折叠路径中的 `.` / `..` 段并统一为正斜杠（浏览器端的 path.resolve 单参数版）。
+ * 保留盘符根（C:/）、UNC 前缀（//server/share）与 Unix 根（/）。
+ *
+ * @example
+ * canonicalizePath('D:/data/../../../../../data/backup/') // 'D:/data/backup'
+ * canonicalizePath('C:/a/./b/../c') // 'C:/a/c'
+ */
+export function canonicalizePath(path: string): string {
+  if (!path) return ''
+  const normalized = path.replace(/\\/g, '/')
+  // 识别根：'C:/' | '/' | '//'（UNC）
+  const driveMatch = normalized.match(/^([a-zA-Z]:)(\/+)?/)
+  const root = driveMatch ? `${driveMatch[1]}/` : normalized.startsWith('//') ? '//' : normalized.startsWith('/') ? '/' : ''
+  const body = normalized.slice(root.length)
+  const parts: string[] = []
+  for (const part of body.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      // 根之上不能再 ..，直接丢弃（与 Node path.resolve 行为一致）
+      if (parts.length > 0 && parts[parts.length - 1] !== '..') parts.pop()
+      else if (!root) parts.push('..')
+      continue
+    }
+    parts.push(part)
+  }
+  return root + parts.join('/')
+}
+
+/**
+ * 把 `file.list` / `file.find` 返回的条目路径解析为绝对路径。
+ *
+ * v2 的条目 path 是**相对 location 根目录**的（可能带 `../`，浏览到根之外时），
+ * 而不是相对被列出的目录。必须对 location 根做 resolve 并折叠 `..`，
+ * 否则会拼出 `D:/data/../../../../../data/backup` 这种假绝对路径。
+ *
+ * @example
+ * resolveEntryPath('../../data/backup/', 'C:/work/project') // 'C:/data/backup'
+ */
+export function resolveEntryPath(entryPath: string, locationRoot: string): string {
+  const normalized = entryPath.replace(/\\/g, '/').replace(/\/+$/, '')
+  if (!normalized || normalized === '.') return canonicalizePath(locationRoot)
+  if (/^[a-zA-Z]:\//.test(normalized) || normalized.startsWith('/')) return canonicalizePath(normalized)
+  return canonicalizePath(`${locationRoot.replace(/[\\/]+$/, '')}/${normalized}`)
+}

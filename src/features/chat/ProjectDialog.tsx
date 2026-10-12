@@ -1,8 +1,8 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FolderIcon, ArrowUpIcon, SpinnerIcon, PlusIcon } from '../../components/Icons'
-import { listDirectory, getPath } from '../../api'
-import { fileBaseName, toAbsoluteFilePath } from '../../utils/pathUtils'
+import { listDirectoryWithRoot, getPath } from '../../api'
+import { fileBaseName, resolveEntryPath } from '../../utils/pathUtils'
 import { fileErrorHandler } from '../../utils'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
 import { Dialog } from '../../components/ui/Dialog'
@@ -147,17 +147,17 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', ser
       setIsLoading(true)
       setError(null)
 
-      listDirectory(currentDir, undefined, serverId)
-        .then(nodes => {
+      listDirectoryWithRoot(currentDir, undefined, serverId)
+        .then(({ locationRoot, entries }) => {
           if (cancelled || requestId !== requestIdRef.current) return
 
-          const fileItems = nodes
+          const fileItems = entries
             .filter(n => n.type === 'directory')
-            // v2 条目只有 { path, type }：展示名与绝对路径由 path 派生
+            // v2 条目 path 相对 location 根（根之外带 ../），必须对根 resolve 并折叠 ..
             .sort((a, b) => fileBaseName(a.path).localeCompare(fileBaseName(b.path)))
             .map(n => ({
               name: fileBaseName(n.path),
-              path: normalizePath(toAbsoluteFilePath(n.path, currentDir)),
+              path: resolveEntryPath(n.path, locationRoot),
               type: n.type,
             }))
 

@@ -160,6 +160,8 @@
     "stopGeneration": "Stop generation",
     "sendingMessage": "Sending message",
     "sendMessage": "Send message",
+    "sendFailed": "Failed to send",
+    "sendFailedHint": "The message did not reach the server. Check the connection and try again. Your input was kept.",
     "steer": "Steer",
     "steerHint": "Inject into the current turn (click to queue instead)",
     "followUp": "Queue",

@@ -160,6 +160,8 @@
     "stopGeneration": "停止生成",
     "sendingMessage": "发送消息中",
     "sendMessage": "发送消息",
+    "sendFailed": "发送失败",
+    "sendFailedHint": "消息未送达服务器，请检查连接后重试。输入内容已保留。",
     "steer": "插队",
     "steerHint": "立即注入当前回合（点击切换为排队）",
     "followUp": "排队",

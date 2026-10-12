@@ -21,6 +21,7 @@ import {
 import { usePermissions, usePermissionHandler, useMessageAnimation, useDirectory, useSessionContext } from '../hooks'
 import { useNotification } from './useNotification'
 import { notificationEventSettingsStore } from '../store/notificationEventSettingsStore'
+import { notificationStore } from '../store/notificationStore'
 import {
   sendMessageAsync,
   getSessionMessages,
@@ -899,6 +900,16 @@ export function useChatSession({
         return true
       } catch (error) {
         handleError('send message', error)
+        // 用户可见反馈（修复「吞消息」无感知问题）：乐观气泡被回滚后
+        // 必须有明确提示，否则用户看到的就是"消息发了又消失"。
+        // 输入框草稿本就在失败时保留，用户可直接重发。
+        notificationStore.push(
+          'error',
+          i18n.t('chat:inputArea.sendFailed'),
+          error instanceof Error && error.message ? error.message : i18n.t('chat:inputArea.sendFailedHint'),
+          sessionId ?? '',
+          input.directory,
+        )
         if (sessionId) {
           if (rollbackSnapshot) {
             messageStore.restoreSendRollback(sessionId, rollbackSnapshot)

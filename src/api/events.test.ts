@@ -279,4 +279,77 @@ describe('v2 event dispatch', () => {
     unsubscribe()
     expect(getServerConnectionInfo('test-server').state).toBe('disconnected')
   })
+
+  /**
+   * 建连卡死自愈：SSE 建连 fetch 无超时，挂起时 isConnecting 会吞掉所有
+   * 重连入口（永久断联）。看门狗应在 CONNECT_STALL_TIMEOUT 后掐断，
+   * 并在底层 fetch 不认 abort 时于 5s 后强制复位重连。
+   */
+  it('recovers when the SSE connect hangs (stall watchdog + force reset)', async () => {
+    vi.useFakeTimers()
+    try {
+      // 永不产出事件、也不响应 abort 的僵尸流
+      subscribeMock.mockImplementation(() => ({
+        [Symbol.asyncIterator]() {
+          return {
+            next: () => new Promise<IteratorResult<unknown>>(() => {}),
+            return: () => Promise.resolve({ value: undefined, done: true } as IteratorResult<unknown>),
+          }
+        },
+      }))
+
+      const { subscribeToServerEvents, getServerConnectionInfo } = await import('./events')
+      const unsubscribe = subscribeToServerEvents('test-server', {})
+      await Promise.resolve()
+
+      expect(getServerConnectionInfo('test-server').state).toBe('connecting')
+      expect(subscribeMock).toHaveBeenCalledTimes(1)
+
+      // 看门狗 tick(15s) → 卡死阈值(>15s，第二个 tick 30s 触发) → 强制复位(5s)
+      await vi.advanceTimersByTimeAsync(35_000)
+      expect(getServerConnectionInfo('test-server').state).toBe('disconnected')
+
+      // 复位后按退避排了重连（首次 attempt 延迟 1s）
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(subscribeMock).toHaveBeenCalledTimes(2)
+
+      unsubscribe()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /**
+   * 端点变更重连必须广播 onReconnected：否则订阅者不做补偿拉取，
+   * WSL 端口变化等场景下状态/权限/消息全部陈旧。
+   */
+  it('broadcasts onReconnected after reconnectServerSSE so subscribers refetch', async () => {
+    const harnesses: Array<ReturnType<typeof createEventStream>> = []
+    subscribeMock.mockImplementation(() => {
+      const harness = createEventStream()
+      harnesses.push(harness)
+      return harness.stream
+    })
+
+    const { subscribeToServerEvents, reconnectServerSSE } = await import('./events')
+    const onReconnected = vi.fn()
+    const unsubscribe = subscribeToServerEvents('test-server', { onReconnected })
+    await Promise.resolve()
+
+    // 首次连接：不广播
+    harnesses[0].emit(v2Event('session.idle', { sessionID: 's1' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(onReconnected).not.toHaveBeenCalled()
+
+    // 端点变更强制重连 → 新流的首个事件应触发补偿广播
+    reconnectServerSSE('test-server')
+    await Promise.resolve()
+    expect(harnesses.length).toBe(2)
+
+    harnesses[1].emit(v2Event('session.idle', { sessionID: 's1' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(onReconnected).toHaveBeenCalledWith('server-switch')
+
+    unsubscribe()
+  })
 })

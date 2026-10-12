@@ -56,6 +56,8 @@ interface ServerConnection {
   watchdogTimer: ReturnType<typeof setInterval> | null
   /** 看门狗主动掐断标记（区分于取消订阅/切换服务器的主动 abort） */
   watchdogDrop: boolean
+  /** 本次建连开始时间（建连卡死检测用） */
+  connectStartedAt: number
 }
 
 const connections = new Map<string, ServerConnection>()
@@ -86,6 +88,13 @@ const RECONNECTED_COOLDOWN = 2000
  */
 const WATCHDOG_INTERVAL = 15_000
 const IDLE_TIMEOUT = 45_000
+/**
+ * 建连卡死超时：SSE 建连 fetch 自身没有超时，遇到 TCP 半开 / 代理黑洞 /
+ * 主机休眠时会永远挂起，isConnecting 卡 true 吞掉所有后续重连入口，
+ * 表现为永久断联只能刷新页面。超过该时长仍未进入 connected 就主动掐断
+ * 走重连循环（官方客户端 connectTimeout 2s，这里取更宽容的 15s）。
+ */
+const CONNECT_STALL_TIMEOUT = 15_000
 
 const DEFAULT_CONNECTION_INFO: ConnectionInfo = {
   state: 'disconnected',
@@ -112,6 +121,7 @@ function getOrCreateConnection(serverId: string): ServerConnection {
       hasConnectedBefore: false,
       watchdogTimer: null,
       watchdogDrop: false,
+      connectStartedAt: 0,
     }
     connections.set(serverId, conn)
   }
@@ -485,6 +495,7 @@ async function connectServer(serverId: string): Promise<void> {
 
   conn.controller = new AbortController()
   const signal = conn.controller.signal
+  conn.connectStartedAt = Date.now()
 
   updateConnectionState(serverId, { state: 'connecting', error: undefined })
 
@@ -494,18 +505,39 @@ async function connectServer(serverId: string): Promise<void> {
     const sdk = getSDKClient(serverId)
 
     // 空闲看门狗：心跳也会触发 onActivity 刷新 lastEventTime，
-    // 因此超过 IDLE_TIMEOUT 无字节就是半开连接（休眠/闪断）——
+    // 因此超过 IDLE_TIMEOUT 没有任何字节说明是半开连接（休眠/闪断）——
     // for-await 会永远挂起、状态永远停在 connected，必须主动掐断重连
     //（对齐官方客户端 45s 静默 abort）。
+    // 建连卡死同样由这里兜底：建连 fetch 无超时，挂起时 isConnecting 会
+    // 吞掉所有重连入口（永久断联），超过 CONNECT_STALL_TIMEOUT 未进入
+    // connected 就掐断走重连循环。
     conn.watchdogDrop = false
     conn.watchdogTimer = setInterval(() => {
       if (generation !== conn.generation) return
-      if (conn.info.state !== 'connected') return
-      const last = conn.info.lastEventTime
-      if (last <= 0) return
-      if (Date.now() - last <= IDLE_TIMEOUT) return
+
+      const stalledConnecting =
+        conn.info.state === 'connecting' && Date.now() - conn.connectStartedAt > CONNECT_STALL_TIMEOUT
+      const idleConnected =
+        conn.info.state === 'connected' &&
+        conn.info.lastEventTime > 0 &&
+        Date.now() - conn.info.lastEventTime > IDLE_TIMEOUT
+      if (!stalledConnecting && !idleConnected) return
+
       conn.watchdogDrop = true
       conn.controller?.abort()
+      // 兜底：若底层 fetch 不认 abort（挂起的 for-await 不退出），
+      // isConnecting 会再次卡死。5s 后仍卡在同代次就作废本代次强制复位，
+      // 让重连循环能继续下去（僵尸流的事件会因代次不符被丢弃）。
+      setTimeout(() => {
+        if (generation !== conn.generation) return
+        if (!conn.isConnecting) return
+        conn.generation += 1
+        conn.isConnecting = false
+        conn.watchdogDrop = false
+        conn.connectStartedAt = 0
+        updateConnectionState(serverId, { state: 'disconnected' })
+        scheduleReconnect(conn)
+      }, 5_000)
     }, WATCHDOG_INTERVAL)
 
     const stream = sdk.event.subscribe({
@@ -680,7 +712,17 @@ function stopBackgroundKeepalive(): void {
 export function reconnectServerSSE(serverId: string): void {
   const conn = getOrCreateConnection(serverId)
   conn.info = { ...conn.info, reconnectAttempt: 0 }
+  // disconnectServerConnection 会把 hasConnectedBefore 重置为 false，
+  // 导致端点变更（如 WSL 端口变化）后的重连被当成「首次连接」，
+  // 不广播 onReconnected → 订阅者不做补偿拉取，状态/权限/消息全部陈旧。
+  // 这里保住 hasConnectedBefore 并置 serverSwitchFlags，
+  // 让重连成功走「重连 → 补偿拉取」链路。
+  const hadConnected = conn.hasConnectedBefore
   disconnectServerConnection(conn)
+  if (hadConnected) {
+    conn.hasConnectedBefore = true
+    serverSwitchFlags.set(serverId, true)
+  }
   if (conn.subscribers.size > 0) {
     connectServer(serverId)
   }
@@ -744,9 +786,24 @@ export function subscribeToServerConnectionState(serverId: string, fn: (info: Co
 
 /**
  * 订阅活动服务器的连接状态变化（兼容旧 API）。
+ * 跟随 active server：切换服务器时自动迁移订阅，
+ * 否则状态栏会一直显示旧服务器的连接状态。
  */
 export function subscribeToConnectionState(fn: (info: ConnectionInfo) => void): () => void {
-  return subscribeToServerConnectionState(serverStore.getActiveServerId(), fn)
+  let currentServerId = serverStore.getActiveServerId()
+  let unsubscribe = subscribeToServerConnectionState(currentServerId, fn)
+
+  const offServerChange = serverStore.onServerChange(newServerId => {
+    if (newServerId === currentServerId) return
+    unsubscribe()
+    currentServerId = newServerId
+    unsubscribe = subscribeToServerConnectionState(currentServerId, fn)
+  })
+
+  return () => {
+    offServerChange()
+    unsubscribe()
+  }
 }
 
 /**

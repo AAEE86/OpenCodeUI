@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.7.6] - 2026-10-12
+
+- fix(service): honor explicitly configured server passwords and serve bind args (4908fa1a)
+
 ## [v0.7.5] - 2026-10-12
 
 - fix(file-explorer): strip trailing slashes from directory entries (24647965)

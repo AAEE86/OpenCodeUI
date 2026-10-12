@@ -837,8 +837,10 @@ const AssistantMessageView = memo(function AssistantMessageView({
 
   return (
     <div ref={wrapperRef} className={`flex flex-col ${MSG_SPACING.stack} w-full group`}>
-      {/* 流式增高走自然撑开 + 贴底 scroll，默认不做 height 补间，避免每帧 layout/remeasure */}
-      <SmoothHeight isActive={isStreaming && allowStreamingLayoutAnimation && processContentScope === 'all'}>
+      {/* 流式增高走 SmoothHeight 0.12s 补间：贴底跟随时内容丝滑生长。
+          不限 scope——过程壳内的流式消息（scope 'process'）同样需要，
+          否则壳内文本每 chunk 瞬时撑开，行高抖动且丢失生长动画 */}
+      <SmoothHeight isActive={isStreaming && allowStreamingLayoutAnimation}>
         <div className={`flex flex-col ${MSG_SPACING.stack}`}>
           {renderItems.map((item: RenderItem, idx: number) => {
             const isLastItem = idx === lastRenderIdx

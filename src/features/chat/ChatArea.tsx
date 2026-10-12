@@ -556,6 +556,17 @@ export const ChatArea = memo(
         initialMeasurementsCache: initialCacheRef.current,
         estimateSize: index => estimateTimelineItemSize(timeline[index]),
         getItemKey: i => timeline[i]?.key ?? `removed:${i}`,
+        // 关键修复：同步重测（ref / layoutEffect，无 RO entry）必须读真实 DOM 高度。
+        // 库默认实现在无 entry 时回退 itemSizeCache 旧值——陈旧缓存会自我续命：
+        // 行尺寸一旦被冻结（RO 错过一次变更或会话缓存恢复），后续所有同步重测
+        // 都返回同一个错值，相邻虚拟行永久错位叠印，只能刷新恢复。
+        measureElement: (el, entry, instance) => {
+          const box = entry?.borderBoxSize?.[0]
+          if (box) {
+            return Math.round(instance.options.horizontal ? box.inlineSize : box.blockSize)
+          }
+          return instance.options.horizontal ? el.offsetWidth : el.offsetHeight
+        },
         // 输入框占位放在消息区外（retry/error 之后），避免重试提示被压到输入框下面
         paddingEnd: 0,
         scrollEndThreshold: 80,

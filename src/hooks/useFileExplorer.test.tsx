@@ -192,4 +192,51 @@ describe('useFileExplorer change scope', () => {
     expect(result.current.tree[0]?.absolute).toBe('/repo-b/src')
     expect(result.current.tree[0]?.children?.map(child => child.path)).toEqual(['src/b.ts'])
   })
+
+  // issue #176：部分服务器（Windows v2）目录条目带尾斜杠（如 `castle-village-3d/`），
+  // 不剥掉会让子条目拼出 `castle-village-3d//castle-village-3d/index.html` 的重复路径
+  it('strips trailing slashes from directory entries so child paths are not duplicated', async () => {
+    listDirectory.mockImplementation(async (parentPath: string, directory: string) => {
+      if (parentPath === '') {
+        return [{ name: 'castle-village-3d', path: 'castle-village-3d/', absolute: `${directory}/castle-village-3d`, type: 'directory', ignored: false }]
+      }
+      if (parentPath === 'castle-village-3d') {
+        return [
+          {
+            name: 'index.html',
+            path: 'castle-village-3d/index.html',
+            absolute: `${directory}/castle-village-3d/index.html`,
+            type: 'file',
+            ignored: false,
+          },
+        ]
+      }
+      return []
+    })
+
+    const { result } = renderHook(() => useFileExplorer({ directory: '/repo', autoLoad: true }))
+
+    await waitFor(() => {
+      expect(result.current.tree).toHaveLength(1)
+    })
+
+    // 根节点 path 不带尾斜杠，展开列子目录传的也是干净路径
+    expect(result.current.tree[0]?.path).toBe('castle-village-3d')
+
+    act(() => {
+      result.current.toggleExpand('castle-village-3d')
+    })
+
+    await waitFor(() => {
+      expect(result.current.tree[0]?.children?.[0]?.path).toBe('castle-village-3d/index.html')
+    })
+
+    expect(listDirectory).toHaveBeenCalledWith('castle-village-3d', '/repo', undefined)
+
+    // 预览读取用拼接后的根相对路径，不能再出现 `//` 重复段
+    await act(async () => {
+      await result.current.loadPreview('castle-village-3d/index.html')
+    })
+    expect(getFileContent).toHaveBeenCalledWith('castle-village-3d/index.html', '/repo', undefined)
+  })
 })

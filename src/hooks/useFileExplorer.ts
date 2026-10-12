@@ -519,10 +519,14 @@ function collectPendingExpandedDirectoryPaths(tree: FileTreeNode[], expandedPath
   return pending
 }
 
-// Helper: 规范化路径 — 统一分隔符为 /，去掉前导 ./
+// Helper: 规范化路径 — 统一分隔符为 /，去掉前导 ./ 与尾斜杠。
+// 尾斜杠必须剥掉：部分服务器版本（Windows v2 见过）目录条目带 `/` 后缀，
+// 留着会让 toTreeNode 的父前缀判断失效，拼出 `parent//parent/file` 的重复路径，
+// 读取时服务端原样报 FileNotFound（issue #176）。
 function normalizePath(p: string): string {
   let result = p.replace(/\\/g, '/')
   if (result.startsWith('./')) result = result.slice(2)
+  if (result.length > 1) result = result.replace(/\/+$/, '')
   return result
 }
 

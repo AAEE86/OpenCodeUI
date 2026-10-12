@@ -177,6 +177,7 @@ vi.mock('../api', () => ({
   cancelInboxItem: vi.fn(() => Promise.resolve()),
   steerInboxItem: vi.fn(() => Promise.resolve()),
   extractUserMessageContent: vi.fn(),
+  subscribeToServerConnectionState: vi.fn(() => () => {}),
 }))
 
 vi.mock('../utils', () => ({

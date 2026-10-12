@@ -445,6 +445,14 @@ function dispatchEvent(callbacks: EventCallbacks, event: GlobalEvent): void {
     case 'model.updated':
       callbacks.onModelUpdated?.(event.data, facts)
       break
+    // agent / config 目录变更。官方收到后 refetch bootstrap
+    //（packages/app/src/runtime/server/sync.tsx:255）。
+    case 'agent.updated':
+      callbacks.onAgentUpdated?.(event.data, facts)
+      break
+    case 'config.updated':
+      callbacks.onConfigUpdated?.(event.data, facts)
+      break
     case 'filesystem.changed':
       callbacks.onFilesystemChanged?.(event.data, facts)
       break

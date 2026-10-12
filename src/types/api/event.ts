@@ -86,6 +86,8 @@ import type {
   SessionInstructionsUpdated,
   V2Event,
   V2EventServerConnected,
+  AgentUpdated,
+  ConfigUpdated,
   FilesystemChanged,
   FormCancelled,
   FormCreated,
@@ -161,6 +163,15 @@ export type McpStatusChangedPayload = McpStatusChanged['data']
 export type ProviderUpdatedPayload = ProviderUpdated['data']
 
 export type ModelUpdatedPayload = ModelUpdated['data']
+
+/**
+ * agent / config 变更（负载为空 `{}`）。
+ * 官方在收到这两个事件时 refetch bootstrap（含 providers/config/agents），
+ * 见 packages/app/src/runtime/server/sync.tsx。
+ */
+export type AgentUpdatedPayload = AgentUpdated['data']
+
+export type ConfigUpdatedPayload = ConfigUpdated['data']
 
 export type InboxEnqueuedPayload = SessionInboxEnqueued['data']
 
@@ -443,6 +454,10 @@ export interface EventCallbacks {
    */
   onProviderUpdated?: (data: ProviderUpdatedPayload, facts?: EventFacts) => void
   onModelUpdated?: (data: ModelUpdatedPayload, facts?: EventFacts) => void
+  /** agent 目录变更 → 各 pane 应重新拉取 agents 列表 */
+  onAgentUpdated?: (data: AgentUpdatedPayload, facts?: EventFacts) => void
+  /** config 变更 → 可能影响模型/agent 目录，应重新拉取 */
+  onConfigUpdated?: (data: ConfigUpdatedPayload, facts?: EventFacts) => void
   onFilesystemChanged?: (data: FilesystemChangedPayload, facts?: EventFacts) => void
   onPtyCreated?: (data: PtyCreatedPayload, facts?: EventFacts) => void
   onPtyUpdated?: (data: PtyUpdatedPayload, facts?: EventFacts) => void
@@ -538,6 +553,8 @@ export const EventTypes = {
   MCP_STATUS_CHANGED: 'mcp.status.changed',
   PROVIDER_UPDATED: 'provider.updated',
   MODEL_UPDATED: 'model.updated',
+  AGENT_UPDATED: 'agent.updated',
+  CONFIG_UPDATED: 'config.updated',
   FILESYSTEM_CHANGED: 'filesystem.changed',
 
   PTY_CREATED: 'pty.created',

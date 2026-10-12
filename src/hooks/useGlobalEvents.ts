@@ -29,7 +29,7 @@ import {
   getSessionMessage,
 } from '../api'
 import { createSessionPlaceholder } from '../utils/sessionPlaceholder'
-import { refreshModels } from './useModels'
+import { refreshModels, ensureModelsFresh } from './useModels'
 import type { EventCallbacks } from '../types/api/event'
 import { replyPermission } from '../api/permission'
 import { outboxConfirm } from '../api/sendAdmission'
@@ -59,6 +59,8 @@ export interface SessionEventCallbacks {
   /** v2：会话错误由 execution.failed 表达 */
   onExecutionFailed?: (sessionID: string) => void
   onReconnected?: (reason: 'network' | 'server-switch') => void
+  /** agent / config 目录变更（agent.updated / config.updated）→ 重拉 agents */
+  onAgentsChanged?: () => void
 }
 
 interface SessionConsumer {
@@ -104,6 +106,13 @@ function dispatchToConsumers(sessionId: string, invoke: (cb: SessionEventCallbac
     }
   }
   return dispatched
+}
+
+/** 广播给所有已注册消费者（不限 session，如 agent/config 目录变更） */
+function broadcastToConsumers(invoke: (cb: SessionEventCallbacks) => void): void {
+  for (const consumer of sessionConsumers.values()) {
+    invoke(consumer.callbacks)
+  }
 }
 
 /** 检查是否有任何消费者关心此 sessionId */
@@ -874,6 +883,15 @@ export function useGlobalEvents(directories?: string[]) {
         onModelUpdated: () => {
           void refreshModels(serverId)
         },
+        // agent / config 目录变更（官方：sync.tsx:255 收到后 refetch bootstrap）。
+        // config 可能改模型/agent 定义，两边都刷；agents 是 pane 级状态，广播重拉。
+        onAgentUpdated: () => {
+          broadcastToConsumers(cb => cb.onAgentsChanged?.())
+        },
+        onConfigUpdated: () => {
+          void refreshModels(serverId)
+          broadcastToConsumers(cb => cb.onAgentsChanged?.())
+        },
 
         // ---- 执行生命周期 ----
         //
@@ -991,6 +1009,12 @@ export function useGlobalEvents(directories?: string[]) {
           // 时钟校准不走这里：以前把本地时钟 Date.now() 当"服务器时间"校准，
           // 偏移恒为 0，是伪校准。真实校准在事件分发层用事件自带的 created
           // 完成（api/events.ts → serverStore.calibrateFromServerTimestamp）。
+          //
+          // 首次连接（App 启动先于服务器就绪时预取必失败）与重连都会到这里：
+          // 模型目录不健康就补拉，否则输入框的模型/思考等级会一直空着，
+          // 只能手动刷新。官方同款：每次 server.connected 都 refetch bootstrap
+          //（server-sync/connection.ts）。
+          ensureModelsFresh(serverId)
         },
 
         // ============================================

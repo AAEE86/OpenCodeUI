@@ -843,10 +843,9 @@ export function useChatSession({
         // 「上一轮已收工」误判成最新 Working 再展开，造成一闪。
         // streaming 在 send 成功后、或 SSE 推到 assistant 时再打开。
         const admittedSessionId = sessionId
-        try {
-          // 同会话发送串行化（官方 sendAdmission）：等待上一次 POST 落定，
-          // 避免 switchModel/switchAgent/prompt 与另一次发送交错
-          await sendAdmission(admittedSessionId, () =>
+        // 发送载荷提取成函数：失败后要按原样幂等重试一次
+        const postAdmission = () =>
+          sendAdmission(admittedSessionId, () =>
             sendMessageAsync(
               {
                 sessionId: admittedSessionId,
@@ -862,14 +861,26 @@ export function useChatSession({
               paneServerId,
             ),
           )
-        } catch (error) {
-          // 官方同款回滚守卫（data.ts:1578-1583）：只撤本次乐观插入、且
-          // 服务端尚未确认的行；回声已到达的行属于服务端状态，绝不能撤
-          if (fresh && outboxTryRollback(messageId)) {
-            messageStore.removeMessage(sessionId, messageId)
-            if (input.delivery) inboxStore.removeItem(sessionId, messageId)
+        try {
+          // 同会话发送串行化（官方 sendAdmission）：等待上一次 POST 落定，
+          // 避免 switchModel/switchAgent/prompt 与另一次发送交错
+          await postAdmission()
+        } catch {
+          // 幂等自动重试一次（官方 composer submit.ts 同款）：消息 ID 由
+          // 客户端铸造、服务端按 ID 幂等入场，同 payload 重试不会重复。
+          // 覆盖「请求已到服务端、响应在断网中丢失」的假象失败——不重试
+          // 直接回滚会把服务端已收到的消息撤掉，用户重发后变成重复消息。
+          try {
+            await postAdmission()
+          } catch (error) {
+            // 官方同款回滚守卫（data.ts:1578-1583）：只撤本次乐观插入、且
+            // 服务端尚未确认的行；回声已到达的行属于服务端状态，绝不能撤
+            if (fresh && outboxTryRollback(messageId)) {
+              messageStore.removeMessage(sessionId, messageId)
+              if (input.delivery) inboxStore.removeItem(sessionId, messageId)
+            }
+            throw error
           }
-          throw error
         }
 
         messageStore.setStreaming(sessionId, true)

@@ -472,6 +472,9 @@
     "notRunning": "Not running",
     "envVars": "Environment Variables",
     "envVarsDesc": "Passed to the opencode serve process (e.g. HTTPS_PROXY, API keys, OPENCODE_PASSWORD). OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD already set in the system environment are detected and used automatically",
+    "serveArgs": "Startup Arguments",
+    "serveArgsDesc": "Appended after the opencode serve command, one per line (e.g. --cors and https://example.com on separate lines). Hostname and port are derived from the local server entry URL automatically",
+    "serveArgPlaceholder": "--flag or value",
     "keyPlaceholder": "KEY",
     "valuePlaceholder": "value"
   },

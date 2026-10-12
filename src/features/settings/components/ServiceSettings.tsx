@@ -15,7 +15,7 @@ interface StartOpencodeServiceResult {
   started: boolean
   startedByUs: boolean
   url?: string | null
-  /** v2 服务端自动生成的随机密码（未显式配置 OPENCODE_SERVER_PASSWORD 时强制生成） */
+  /** 连接用密码：服务端随机生成（未显式配置时）或来自 OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD 环境变量 */
   serverPassword?: string | null
 }
 
@@ -27,6 +27,7 @@ export function ServiceSettings() {
     binaryPath,
     detectedBinaryPath,
     envVars,
+    serveArgs,
     running: serviceRunning,
     startedByUs,
     starting: serviceStarting,
@@ -127,6 +128,7 @@ export function ServiceSettings() {
         url: getServerUrl(),
         binaryPath: serviceStore.effectiveBinaryPath,
         envVars: serviceStore.envVarsRecord,
+        extraArgs: serviceStore.serveArgsList,
         // 条目上已有的凭据：让「已经在跑」的探测通过 v2 的强制密码门
         auth: localServer?.auth ? ([localServer.auth.username, localServer.auth.password] as [string, string]) : null,
       })
@@ -326,6 +328,52 @@ export function ServiceSettings() {
                   onClick={() => {
                     const updated = envVars.filter((_, i) => i !== idx)
                     serviceStore.setEnvVars(updated)
+                  }}
+                  title={t('common:remove')}
+                >
+                  <TrashIcon size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </SettingField>
+
+      <SettingField
+        label={t('service.serveArgs')}
+        description={t('service.serveArgsDesc')}
+        actions={
+          <button
+            type="button"
+            className="h-7 px-2 rounded-md text-[length:var(--fs-xs)] font-medium text-accent-main-100 hover:bg-accent-main-100/10 transition-colors"
+            onClick={() => serviceStore.setServeArgs([...serveArgs, ''])}
+          >
+            + {t('common:add')}
+          </button>
+        }
+      >
+        {serveArgs.length > 0 ? (
+          <div className="flex flex-col gap-1.5">
+            {serveArgs.map((arg, idx) => (
+              <div key={idx} className="flex min-w-0 items-center gap-1.5">
+                <input
+                  type="text"
+                  value={arg}
+                  onChange={e => {
+                    const updated = [...serveArgs]
+                    updated[idx] = e.target.value
+                    serviceStore.setServeArgs(updated)
+                  }}
+                  placeholder={t('service.serveArgPlaceholder')}
+                  className={`${settingsFieldClass} min-w-0 flex-1 font-mono text-[length:var(--fs-xs)]`}
+                />
+                <button
+                  type="button"
+                  className="shrink-0 w-8 h-8 flex items-center justify-center text-text-400 hover:text-danger-100
+                    hover:bg-danger-100/10 rounded-lg transition-colors"
+                  onClick={() => {
+                    const updated = serveArgs.filter((_, i) => i !== idx)
+                    serviceStore.setServeArgs(updated)
                   }}
                   title={t('common:remove')}
                 >

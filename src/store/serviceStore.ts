@@ -9,6 +9,7 @@ import { useSyncExternalStore } from 'react'
 const STORAGE_KEY_AUTO_START = 'opencode-auto-start-service'
 const STORAGE_KEY_BINARY_PATH = 'opencode-binary-path'
 const STORAGE_KEY_ENV_VARS = 'opencode-service-env-vars'
+const STORAGE_KEY_SERVE_ARGS = 'opencode-service-serve-args'
 
 /** 环境变量键值对 */
 export interface EnvVar {
@@ -20,6 +21,7 @@ export interface ServiceSettingsBackup {
   autoStart: boolean
   binaryPath: string
   envVars: EnvVar[]
+  serveArgs: string[]
 }
 
 interface ServiceStoreSnapshot {
@@ -28,6 +30,8 @@ interface ServiceStoreSnapshot {
   binaryPath: string
   /** 传给子进程的额外环境变量 */
   envVars: EnvVar[]
+  /** 追加到 `opencode serve` 之后的额外启动参数（每行一个，如 --cors） */
+  serveArgs: string[]
   /** 自动检测到的 opencode 可执行文件路径 */
   detectedBinaryPath: string | null
   /** 服务是否正在运行（最后一次检测结果） */
@@ -42,6 +46,7 @@ class ServiceStore {
   private _autoStart: boolean
   private _binaryPath: string
   private _envVars: EnvVar[]
+  private _serveArgs: string[]
   private _detectedBinaryPath: string | null = null
   private _running = false
   private _startedByUs = false
@@ -66,6 +71,13 @@ class ServiceStore {
     } catch {
       this._envVars = []
     }
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_SERVE_ARGS)
+      const parsed = raw ? JSON.parse(raw) : []
+      this._serveArgs = Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+    } catch {
+      this._serveArgs = []
+    }
     this._snapshot = this._buildSnapshot()
   }
 
@@ -79,6 +91,9 @@ class ServiceStore {
   }
   get envVars() {
     return this._envVars
+  }
+  get serveArgs() {
+    return this._serveArgs
   }
   get running() {
     return this._running
@@ -103,6 +118,11 @@ class ServiceStore {
       if (k) record[k] = value
     }
     return record
+  }
+
+  /** 过滤空白后的有效启动参数（每行一个，保持顺序） */
+  get serveArgsList(): string[] {
+    return this._serveArgs.map(arg => arg.trim()).filter(arg => arg.length > 0)
   }
 
   get detectedBinaryPath() {
@@ -135,6 +155,16 @@ class ServiceStore {
     this._envVars = vars
     try {
       localStorage.setItem(STORAGE_KEY_ENV_VARS, JSON.stringify(vars))
+    } catch {
+      /* */
+    }
+    this._notify()
+  }
+
+  setServeArgs(args: string[]) {
+    this._serveArgs = args
+    try {
+      localStorage.setItem(STORAGE_KEY_SERVE_ARGS, JSON.stringify(args))
     } catch {
       /* */
     }
@@ -179,6 +209,7 @@ class ServiceStore {
       autoStart: this._autoStart,
       binaryPath: this._binaryPath,
       envVars: this._envVars,
+      serveArgs: this._serveArgs,
       detectedBinaryPath: this._detectedBinaryPath,
       running: this._running,
       startedByUs: this._startedByUs,
@@ -199,6 +230,7 @@ export function exportServiceSettingsBackup(): ServiceSettingsBackup {
     autoStart: serviceStore.autoStart,
     binaryPath: serviceStore.binaryPath,
     envVars: serviceStore.envVars.map(item => ({ ...item })),
+    serveArgs: [...serviceStore.serveArgs],
   }
 }
 
@@ -215,10 +247,14 @@ export function importServiceSettingsBackup(raw: unknown): void {
         )
         .map(item => ({ key: item.key, value: item.value }))
     : []
+  const serveArgs = Array.isArray(parsed?.serveArgs)
+    ? parsed.serveArgs.filter((item): item is string => typeof item === 'string')
+    : []
 
   serviceStore.setAutoStart(parsed?.autoStart === true)
   serviceStore.setBinaryPath(typeof parsed?.binaryPath === 'string' ? parsed.binaryPath : '')
   serviceStore.setEnvVars(envVars)
+  serviceStore.setServeArgs(serveArgs)
 }
 
 /** React hook */

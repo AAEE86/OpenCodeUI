@@ -136,6 +136,7 @@ async function initializeNativeDesktopService() {
       url: serverUrl,
       binaryPath: serviceStore.effectiveBinaryPath,
       envVars: serviceStore.envVarsRecord,
+      extraArgs: serviceStore.serveArgsList,
       // 条目上已有的凭据：让「已经在跑」的探测通过 v2 的强制密码门
       auth: serverStore.getLocalServer()?.auth
         ? ([serverStore.getLocalServer()!.auth!.username, serverStore.getLocalServer()!.auth!.password] as [string, string])

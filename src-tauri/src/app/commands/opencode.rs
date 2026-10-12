@@ -208,7 +208,8 @@ fn configured_server_password(env_vars: &std::collections::HashMap<String, Strin
 /// 从条目 URL 派生 serve 绑定参数：用户把本机条目改成自定义主机/端口时，
 /// 让 serve 实际绑到那里（v2 serve 支持 --hostname/--port/--cors；
 /// 默认 http://127.0.0.1:4096 与显式传参行为一致）。URL 无法解析时退回裸 serve。
-fn serve_args_from_url(url: &str) -> Vec<String> {
+/// `extra_args`（设置页「启动参数」）追加在最后，用户可覆盖前面派生的值。
+fn serve_args_from_url(url: &str, extra_args: &[String]) -> Vec<String> {
     let mut args = vec!["serve".to_string()];
     if let Ok(parsed) = reqwest::Url::parse(url) {
         if let Some(host) = parsed.host_str() {
@@ -222,6 +223,7 @@ fn serve_args_from_url(url: &str) -> Vec<String> {
             args.push(port.to_string());
         }
     }
+    args.extend(extra_args.iter().cloned());
     args
 }
 
@@ -305,19 +307,29 @@ mod tests {
     #[test]
     fn serve_args_derive_hostname_and_port() {
         assert_eq!(
-            super::serve_args_from_url("http://127.0.0.1:4096"),
+            super::serve_args_from_url("http://127.0.0.1:4096", &[]),
             vec!["serve", "--hostname", "127.0.0.1", "--port", "4096"]
         );
         assert_eq!(
-            super::serve_args_from_url("http://0.0.0.0:5050/"),
+            super::serve_args_from_url("http://0.0.0.0:5050/", &[]),
             vec!["serve", "--hostname", "0.0.0.0", "--port", "5050"]
         );
         // 默认端口不重复传；无法解析时退回裸 serve
         assert_eq!(
-            super::serve_args_from_url("http://localhost"),
+            super::serve_args_from_url("http://localhost", &[]),
             vec!["serve", "--hostname", "localhost"]
         );
-        assert_eq!(super::serve_args_from_url("not a url"), vec!["serve"]);
+        assert_eq!(super::serve_args_from_url("not a url", &[]), vec!["serve"]);
+    }
+
+    #[test]
+    fn serve_args_append_extra_args_last() {
+        // 用户额外参数追加在派生值之后，重复 flag 时后到者生效（可覆盖 --port 等）
+        let extra = vec!["--cors".to_string(), "https://example.com".to_string()];
+        assert_eq!(
+            super::serve_args_from_url("http://127.0.0.1:4096", &extra),
+            vec!["serve", "--hostname", "127.0.0.1", "--port", "4096", "--cors", "https://example.com"]
+        );
     }
 }
 
@@ -467,6 +479,7 @@ pub async fn start_opencode_service(
     binary_path: String,
     env_vars: std::collections::HashMap<String, String>,
     auth: Option<(String, String)>,
+    extra_args: Option<Vec<String>>,
 ) -> Result<StartOpencodeServiceResult, String> {
     // 显式配置的密码（条目 env_vars → 进程环境，官方优先级）。
     // 子进程默认继承进程环境，因此 serve 一定会用它——探测与回传都必须认它。
@@ -521,7 +534,7 @@ pub async fn start_opencode_service(
         });
     }
 
-    let serve_args = serve_args_from_url(&url);
+    let serve_args = serve_args_from_url(&url, extra_args.as_deref().unwrap_or(&[]));
     let mut spawned = spawn_opencode_serve(&binary_path, &env_vars, &serve_args)?;
     let pid = spawned.child.id();
     log::info!("Started opencode serve, PID: {}", pid);

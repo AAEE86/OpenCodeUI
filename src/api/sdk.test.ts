@@ -113,4 +113,26 @@ describe('v2 client request lifecycle', () => {
     expect(second.__options.baseUrl).toBe('http://127.0.0.1:5000')
     expect(second).not.toBe(first)
   })
+
+  it('does not poison the client cache: getSDKClient after abort works again', async () => {
+    // 回归：abortInFlightApiRequests 递增代次后，缓存 client 的 generation
+    // 快照永久落后，之后每个请求都抛 'Stale API request'（永久毒化）。
+    // 修复后 abort 会清空缓存，新 getSDKClient() 拿到新代次实例。
+    const { abortInFlightApiRequests, getSDKClient } = await import('./sdk')
+    const stale = getSDKClient() as unknown as MockClient
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'))
+
+    abortInFlightApiRequests('Server endpoint changed')
+
+    const fresh = getSDKClient() as unknown as MockClient
+    expect(fresh).not.toBe(stale)
+
+    // 新实例正常发请求；旧引用仍然在起飞前失败（防乱序语义保留）
+    await expect(fresh.__fetch('http://127.0.0.1:4096/api/session')).resolves.toBeInstanceOf(Response)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    await expect(stale.__fetch('http://127.0.0.1:4096/api/session')).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
 })

@@ -126,6 +126,12 @@ async function trackedFetch(
 /**
  * 中断所有在途请求（服务器端点变化时调用）。
  * 通过递增代次让旧请求在起飞前就失败，避免响应乱序落库。
+ *
+ * 注意必须同时清空客户端缓存：缓存 client 的 generation 是建实例时的
+ * 快照，不清缓存的话它永远落后于新代次，之后每个请求都会抛
+ * 'Stale API request'——一次 abort 就把缓存 client 永久毒化。
+ * 清缓存后：旧引用仍然失效（代次检查保留，防乱序），
+ * 而新 getSDKClient() 会按新代次重建实例，正常工作。
  */
 export function abortInFlightApiRequests(reason = 'Server endpoint changed'): void {
   _apiRequestGeneration++
@@ -133,6 +139,7 @@ export function abortInFlightApiRequests(reason = 'Server endpoint changed'): vo
     controller.abort(createAbortError(reason))
   }
   _apiRequestControllers.clear()
+  _cachedClients.clear()
 }
 
 // Client 缓存：按 serverId → "baseUrl + authHash" 缓存实例，避免重复创建

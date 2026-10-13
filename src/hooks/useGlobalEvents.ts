@@ -458,6 +458,25 @@ export function useGlobalEvents(directories?: string[]) {
       void serverStore.checkHealth(serverId).catch(() => {})
     }
 
+    // 目录类事件（provider/model/agent/config.updated）会触发 models/agents 重拉。
+    // 服务端在连接建立与配置变更时常常连推一串（真机实测 provider+model+config
+    // 打包到达），逐事件强刷就是「接口在反复调用」体感的来源；trailing 防抖
+    // 合并成一次。数据本身有缓存，延迟 500ms 刷新无感知。
+    const catalogRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+    const scheduleCatalogRefresh = (serverId: string) => {
+      const existing = catalogRefreshTimers.get(serverId)
+      if (existing) clearTimeout(existing)
+      catalogRefreshTimers.set(
+        serverId,
+        setTimeout(() => {
+          catalogRefreshTimers.delete(serverId)
+          if (disposed) return
+          void refreshModels(serverId)
+          refreshServerAgents(serverId)
+        }, 500),
+      )
+    }
+
     const markPermissionReplied = (sessionID: string, requestID: string) => {
       removePendingByRequestId(pendingPermissions, sessionID, requestID)
       latePendingRequests.delete(requestID)
@@ -870,21 +889,20 @@ export function useGlobalEvents(directories?: string[]) {
         // 其余目录（agents / commands / skills / MCP 资源）都是打开时现拉，无陈旧问题。
         // 官方对应处理：invalidate + 重新 sync（client/solid/data.ts:1208-1215）。
         onProviderUpdated: () => {
-          void refreshModels(serverId)
+          scheduleCatalogRefresh(serverId)
         },
         onModelUpdated: () => {
-          void refreshModels(serverId)
+          scheduleCatalogRefresh(serverId)
         },
         // agent / config 目录变更（官方：sync.tsx:255 收到后 refetch bootstrap）。
         // config 可能改模型/agent 定义，两边都刷。agents 是共享 store
         // （useAgents，按 server+directory 缓存），整服务器刷新即可，
         // 所有 pane 通过 store 订阅自动更新。
         onAgentUpdated: () => {
-          refreshServerAgents(serverId)
+          scheduleCatalogRefresh(serverId)
         },
         onConfigUpdated: () => {
-          void refreshModels(serverId)
-          refreshServerAgents(serverId)
+          scheduleCatalogRefresh(serverId)
         },
 
         // ---- 执行生命周期 ----
@@ -1237,6 +1255,8 @@ export function useGlobalEvents(directories?: string[]) {
       serverSyncRef.current = null
       offRuntimeChange()
       clearInterval(healthPollTimer)
+      catalogRefreshTimers.forEach(timer => clearTimeout(timer))
+      catalogRefreshTimers.clear()
       subscriptions.forEach(unsubscribe => unsubscribe())
       unsubscribeAutoApprove()
       unsubscribeServerChange()

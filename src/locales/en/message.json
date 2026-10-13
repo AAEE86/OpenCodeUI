@@ -34,8 +34,7 @@
     "running": "Running",
     "failed": "Failed",
     "loadedSkill": "Loaded skill",
-    "skill": "Skill",
-    "execute": "Execute"
+    "skill": "Skill"
   },
   "toolSteps": {
     "separator": ", ",

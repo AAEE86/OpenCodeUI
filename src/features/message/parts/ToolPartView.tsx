@@ -63,9 +63,6 @@ export const ToolPartView = memo(function ToolPartView({
   const { state, name: toolName } = part
   const metadata = currentToolMetadata(part)
   const title = (metadata.title as string) || getInputDescription(part) || ''
-  // 官方对内置工具名做本地化（session-ui ui.tool.*）：execute → 执行/Execute，其余保持原名格式化
-  const toolDisplayName =
-    toolName.toLowerCase() === 'execute' ? t('toolPart.execute') : formatToolName(toolName)
 
   const isActive = state.status === 'running' || state.status === 'streaming'
   // 失败判定含「completed 但进程失败」（shell 非零退出 / 超时）
@@ -278,7 +275,7 @@ export const ToolPartView = memo(function ToolPartView({
                     : 'text-text-200 group-hover/header:text-text-100'
               }`}
             >
-              {toolDisplayName}
+              {formatToolName(toolName)}
             </span>
 
             {title && (
@@ -345,7 +342,7 @@ export const ToolPartView = memo(function ToolPartView({
                       : 'text-text-200 group-hover/header:text-text-100'
                 }`}
               >
-                {toolDisplayName}
+                {formatToolName(toolName)}
               </span>
               {title && (
                 <span
@@ -428,7 +425,7 @@ export const ToolPartView = memo(function ToolPartView({
                     : 'text-text-200 group-hover/header:text-text-100'
               }`}
             >
-              {toolDisplayName}
+              {formatToolName(toolName)}
             </span>
 
             {title && (

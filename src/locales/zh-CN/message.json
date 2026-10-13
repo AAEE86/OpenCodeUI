@@ -34,8 +34,7 @@
     "running": "运行中",
     "failed": "失败",
     "loadedSkill": "已加载技能",
-    "skill": "技能",
-    "execute": "执行"
+    "skill": "技能"
   },
   "toolSteps": {
     "separator": "，",

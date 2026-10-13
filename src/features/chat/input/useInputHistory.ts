@@ -19,6 +19,12 @@ interface UseInputHistoryOptions {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
   /** 输入模式：normal / shell 分轨（官方同款） */
   mode: 'normal' | 'shell'
+  /**
+   * 召回当前会话/工作区的持久化草稿（usePersistedDraft）。
+   * 空输入按 ↑ 时先注入草稿（当作「当前行」），继续 ↑ 才进入已发送历史；
+   * ↓ 越过最新一条历史时回到草稿。
+   */
+  recallDraft?: () => HistoryEntry | null
 }
 
 interface UseInputHistoryReturn {
@@ -39,7 +45,7 @@ interface UseInputHistoryReturn {
   resetHistoryIndex: () => void
 }
 
-export function useInputHistory({ textareaRef, mode }: UseInputHistoryOptions): UseInputHistoryReturn {
+export function useInputHistory({ textareaRef, mode, recallDraft }: UseInputHistoryOptions): UseInputHistoryReturn {
   // store 条目最新在前；导航时下标 0 = 最新一条
   const storeEntries = usePromptHistory(mode)
   const historyRef = useRef(storeEntries)
@@ -47,14 +53,29 @@ export function useInputHistory({ textareaRef, mode }: UseInputHistoryOptions): 
     historyRef.current = storeEntries
   }, [storeEntries])
 
+  const recallDraftRef = useRef(recallDraft)
+  useEffect(() => {
+    recallDraftRef.current = recallDraft
+  }, [recallDraft])
+
   // -1 = 未进入历史模式，0 = 最新一条，往上递增
   const historyIndexRef = useRef(-1)
   // 进入历史前暂存用户的输入
   const savedInputRef = useRef<HistoryEntry>({ text: '', attachments: [] })
+  // ↑ 召回的持久化草稿：作为「当前行」，在它之上再按 ↑ 进入已发送历史
+  const draftLineRef = useRef<HistoryEntry | null>(null)
 
   const resetHistoryIndex = useCallback(() => {
     historyIndexRef.current = -1
+    draftLineRef.current = null
   }, [])
+
+  const attachmentsMatch = (a: Attachment[], b: Attachment[]) =>
+    a.length === b.length &&
+    a.every((item, i) => {
+      const other = b[i]
+      return item.type === other.type && item.displayName === other.displayName
+    })
 
   const handleHistoryKeyDown = useCallback(
     (
@@ -63,7 +84,6 @@ export function useInputHistory({ textareaRef, mode }: UseInputHistoryOptions): 
       attachments: Attachment[],
     ): { text: string; attachments: Attachment[]; cursor: 'start' | 'end' } | null => {
       const history = historyRef.current
-      if (history.length === 0) return null
 
       const canNavigateHistoryAtCursor = (direction: 'up' | 'down', inHistory: boolean) => {
         const ta = textareaRef.current
@@ -90,11 +110,14 @@ export function useInputHistory({ textareaRef, mode }: UseInputHistoryOptions): 
         if (historyIndexRef.current < 0) return false
         const entry = history[historyIndexRef.current]
         if (!entry || text !== entry.text) return false
-        if (attachments.length !== entry.attachments.length) return false
-        return attachments.every((a, i) => {
-          const h = entry.attachments[i]
-          return a.type === h.type && a.displayName === h.displayName
-        })
+        return attachmentsMatch(attachments, entry.attachments)
+      }
+
+      // 当前内容是否就是 ↑ 召回的草稿且未被修改
+      const isDraftLineUnmodified = () => {
+        const draft = draftLineRef.current
+        if (!draft || historyIndexRef.current >= 0) return false
+        return text === draft.text && attachmentsMatch(attachments, draft.attachments)
       }
 
       const entryAt = (index: number): HistoryEntry => {
@@ -105,13 +128,27 @@ export function useInputHistory({ textareaRef, mode }: UseInputHistoryOptions): 
       if (e.key === 'ArrowUp') {
         const inHistory = historyIndexRef.current >= 0
         const isEmpty = text.trim() === '' && attachments.length === 0
-        const canRecallHistory = inHistory ? isHistoryUnmodified() : isEmpty
 
-        if (canRecallHistory && canNavigateHistoryAtCursor('up', inHistory)) {
+        // 空输入先召回持久化草稿（当作当前行），再 ↑ 才进入已发送历史
+        if (!inHistory && isEmpty && canNavigateHistoryAtCursor('up', false)) {
+          const draft = recallDraftRef.current?.()
+          if (draft && (draft.text.trim() !== '' || draft.attachments.length > 0)) {
+            e.preventDefault()
+            draftLineRef.current = draft
+            savedInputRef.current = draft
+            return { text: draft.text, attachments: draft.attachments, cursor: 'end' }
+          }
+        }
+
+        const onDraftLine = isDraftLineUnmodified()
+        const canRecallHistory = inHistory ? isHistoryUnmodified() : isEmpty || onDraftLine
+
+        if (canRecallHistory && history.length > 0 && canNavigateHistoryAtCursor('up', inHistory || onDraftLine)) {
           e.preventDefault()
           if (!inHistory) {
-            savedInputRef.current = { text, attachments: [...attachments] }
+            savedInputRef.current = draftLineRef.current ?? { text, attachments: [...attachments] }
           }
+          draftLineRef.current = null
           const nextIndex = Math.min(historyIndexRef.current + 1, history.length - 1)
           if (nextIndex !== historyIndexRef.current) {
             historyIndexRef.current = nextIndex
@@ -138,6 +175,9 @@ export function useInputHistory({ textareaRef, mode }: UseInputHistoryOptions): 
   )
 
   const handleHistoryChange = useCallback((newText: string) => {
+    if (draftLineRef.current && newText !== draftLineRef.current.text) {
+      draftLineRef.current = null
+    }
     if (historyIndexRef.current >= 0) {
       const history = historyRef.current
       const currentEntry = history[historyIndexRef.current]

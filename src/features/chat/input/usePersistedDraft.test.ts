@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useState } from 'react'
-import { usePersistedDraft, draftStorageKey, clearPersistedDraft } from './usePersistedDraft'
+import { usePersistedDraft, draftStorageKey, clearPersistedDraft, readPersistedDraft } from './usePersistedDraft'
 import type { Attachment } from '../../attachment'
 
 function renderDraft(initialKey: string | null) {
@@ -46,18 +46,50 @@ describe('usePersistedDraft（官方 composer persistence 同款）', () => {
     expect(localStorage.getItem(KEY_A)).toBeNull()
   })
 
-  it('切会话读回各自的草稿', () => {
+  it('切会话清空输入框但不预填、不删草稿（↑ 时才召回）', async () => {
     localStorage.setItem(KEY_A, JSON.stringify({ text: 'A 的草稿', attachments: [] }))
     localStorage.setItem(KEY_B, JSON.stringify({ text: 'B 的草稿', attachments: [] }))
 
     const { result, rerender } = renderDraft(KEY_A)
-    expect(result.current.text).toBe('A 的草稿')
+    // 不预填：输入框保持空
+    expect(result.current.text).toBe('')
 
+    // 预填 A 的内容再切走，模拟「在 A 输入后切到 B」
+    act(() => {
+      result.current.setText('A 输入中')
+    })
     rerender({ storageKey: KEY_B })
-    expect(result.current.text).toBe('B 的草稿')
+    // B 也不预填，输入框被清空
+    expect(result.current.text).toBe('')
 
-    rerender({ storageKey: KEY_A })
-    expect(result.current.text).toBe('A 的草稿')
+    // 程序性清空不删 B 的草稿
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 400))
+    })
+    expect(readPersistedDraft(KEY_B)?.text).toBe('B 的草稿')
+    expect(readPersistedDraft(KEY_A)?.text).toBe('A 的草稿')
+  })
+
+  it('切换后用户手动清空仍会删键（跳过标记只挡程序性清空一次）', async () => {
+    const { result, rerender } = renderDraft(KEY_A)
+
+    // 切到 B（B 无草稿），输入再清空
+    rerender({ storageKey: KEY_B })
+    act(() => {
+      result.current.setText('临时输入')
+    })
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 400))
+    })
+    expect(localStorage.getItem(KEY_B)).not.toBeNull()
+
+    act(() => {
+      result.current.setText('')
+    })
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 400))
+    })
+    expect(localStorage.getItem(KEY_B)).toBeNull()
   })
 
   it('无 key（无目录且非会话页）不持久化', async () => {

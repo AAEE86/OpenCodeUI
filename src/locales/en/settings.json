@@ -477,8 +477,8 @@
     "envVars": "Environment Variables",
     "envVarsDesc": "Passed to the opencode serve process (e.g. HTTPS_PROXY, API keys, OPENCODE_PASSWORD). OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD already set in the system environment are detected and used automatically",
     "serveArgs": "Startup Arguments",
-    "serveArgsDesc": "Appended after the opencode serve command, one per line (e.g. --cors and https://example.com on separate lines). No arguments are passed by default (opencode binds 127.0.0.1:4096 itself); args are derived only when the entry URL sets a custom host/port, and an explicit --hostname / --port here wins",
-    "serveArgPlaceholder": "--flag or value",
+    "serveArgsDesc": "Appended after the opencode serve command, one complete argument per line (e.g. --hostname 0.0.0.0; quote values containing spaces). No arguments are passed by default (opencode binds 127.0.0.1:4096 itself); args are derived only when the entry URL sets a custom host/port, and an explicit --hostname / --port here wins",
+    "serveArgPlaceholder": "--hostname 0.0.0.0",
     "keyPlaceholder": "KEY",
     "valuePlaceholder": "value"
   },

@@ -5,6 +5,20 @@
 // ============================================
 
 import { useSyncExternalStore } from 'react'
+import { splitServeArgLine } from '../utils/shellArgs'
+
+/**
+ * 启动参数行归一化：0.7.7 初版是「一行一个 token」（如 --hostname 和 0.0.0.0 分两行），
+ * 现改为「一行一条完整参数」。旧数据全是裸 token 行时合并成一行（语义完全等价），
+ * 不做双格式兼容。已在任何行里写过空格/引号的视为新格式，原样保留。
+ */
+export function normalizeServeArgsRows(rows: string[]): string[] {
+  if (rows.length > 1 && rows.every(row => !/[\s"']/.test(row.trim()))) {
+    const merged = rows.map(row => row.trim()).filter(Boolean).join(' ')
+    return merged ? [merged] : []
+  }
+  return rows
+}
 
 const STORAGE_KEY_AUTO_START = 'opencode-auto-start-service'
 const STORAGE_KEY_BINARY_PATH = 'opencode-binary-path'
@@ -30,7 +44,7 @@ interface ServiceStoreSnapshot {
   binaryPath: string
   /** 传给子进程的额外环境变量 */
   envVars: EnvVar[]
-  /** 追加到 `opencode serve` 之后的额外启动参数（每行一个，如 --cors） */
+  /** 追加到 `opencode serve` 之后的额外启动参数（一行一条完整参数，如 --hostname 0.0.0.0） */
   serveArgs: string[]
   /** 自动检测到的 opencode 可执行文件路径 */
   detectedBinaryPath: string | null
@@ -74,7 +88,16 @@ class ServiceStore {
     try {
       const raw = localStorage.getItem(STORAGE_KEY_SERVE_ARGS)
       const parsed = raw ? JSON.parse(raw) : []
-      this._serveArgs = Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+      const rows = Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+      this._serveArgs = normalizeServeArgsRows(rows)
+      // 旧格式被合并时立即回写，不再保留旧形态
+      if (this._serveArgs.length !== rows.length || this._serveArgs.some((row, i) => row !== rows[i])) {
+        try {
+          localStorage.setItem(STORAGE_KEY_SERVE_ARGS, JSON.stringify(this._serveArgs))
+        } catch {
+          /* */
+        }
+      }
     } catch {
       this._serveArgs = []
     }
@@ -120,9 +143,9 @@ class ServiceStore {
     return record
   }
 
-  /** 过滤空白后的有效启动参数（每行一个，保持顺序） */
+  /** 过滤空白后的有效启动参数（一行一条完整参数，按空白切分、支持引号，保持顺序） */
   get serveArgsList(): string[] {
-    return this._serveArgs.map(arg => arg.trim()).filter(arg => arg.length > 0)
+    return this._serveArgs.flatMap(line => splitServeArgLine(line))
   }
 
   get detectedBinaryPath() {
@@ -248,7 +271,7 @@ export function importServiceSettingsBackup(raw: unknown): void {
         .map(item => ({ key: item.key, value: item.value }))
     : []
   const serveArgs = Array.isArray(parsed?.serveArgs)
-    ? parsed.serveArgs.filter((item): item is string => typeof item === 'string')
+    ? normalizeServeArgsRows(parsed.serveArgs.filter((item): item is string => typeof item === 'string'))
     : []
 
   serviceStore.setAutoStart(parsed?.autoStart === true)

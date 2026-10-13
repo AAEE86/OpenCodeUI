@@ -213,30 +213,36 @@ fn extra_args_have_flag(extra_args: &[String], flag: &str) -> bool {
         .any(|arg| arg == flag || arg.starts_with(&eq_prefix))
 }
 
-/// 从条目 URL 派生 serve 绑定参数：用户把本机条目改成自定义主机/端口时，
-/// 让 serve 实际绑到那里（v2 serve 支持 --hostname/--port/--cors；
-/// 默认 http://127.0.0.1:4096 与显式传参行为一致）。URL 无法解析时退回裸 serve。
-/// `extra_args`（设置页「启动参数」）追加在最后；用户显式给了 --hostname/--port 时，
-/// 对应派生值直接省略——不依赖 CLI 解析器「重复 flag 后到生效」的行为，
-/// 且实际绑定地址以 serve 启动输出的 listening URL 为准（见 parse_listening_url）。
+/// 从条目 URL 派生 serve 绑定参数。
+///
+/// 原则：默认场景裸 `opencode serve`，一个参数都不加——opencode 自己的
+/// 默认值就是 127.0.0.1:4096，且端口被占时会自动换端口；实际绑定地址
+/// 以 serve stdout 的 listening URL 为准（parse_listening_url）。
+/// 只有两种情况才传参：
+/// 1. 条目 URL 配置了非默认主机/端口（用户自己的配置，serve 要绑到那里）；
+/// 2. 设置页「启动参数」（extra_args）原样追加。
+/// extra_args 显式给了 --hostname/--port 时，对应派生值省略，
+/// 不依赖 CLI 解析器「重复 flag 后到生效」的行为。
 fn serve_args_from_url(url: &str, extra_args: &[String]) -> Vec<String> {
+    const DEFAULT_PORT: u16 = 4096;
+
     let mut args = vec!["serve".to_string()];
     let user_hostname = extra_args_have_flag(extra_args, "--hostname");
     let user_port = extra_args_have_flag(extra_args, "--port");
     if let Ok(parsed) = reqwest::Url::parse(url) {
-        if !user_hostname {
-            if let Some(host) = parsed.host_str() {
-                if !host.is_empty() {
-                    args.push("--hostname".to_string());
-                    args.push(host.to_string());
-                }
-            }
+        let host = parsed.host_str().unwrap_or("");
+        // 127.0.0.1 / localhost 与 opencode 默认绑定一致，无需显式传
+        let is_default_host = host.is_empty() || host == "127.0.0.1" || host == "localhost";
+        let port = parsed.port();
+        let is_default_port = port.is_none() || port == Some(DEFAULT_PORT);
+
+        if !user_hostname && !is_default_host {
+            args.push("--hostname".to_string());
+            args.push(host.to_string());
         }
-        if !user_port {
-            if let Some(port) = parsed.port() {
-                args.push("--port".to_string());
-                args.push(port.to_string());
-            }
+        if !user_port && !is_default_port {
+            args.push("--port".to_string());
+            args.push(port.expect("non-default port is Some").to_string());
         }
     }
     args.extend(extra_args.iter().cloned());
@@ -321,51 +327,60 @@ mod tests {
     }
 
     #[test]
-    fn serve_args_derive_hostname_and_port() {
-        assert_eq!(
-            super::serve_args_from_url("http://127.0.0.1:4096", &[]),
-            vec!["serve", "--hostname", "127.0.0.1", "--port", "4096"]
-        );
-        assert_eq!(
-            super::serve_args_from_url("http://0.0.0.0:5050/", &[]),
-            vec!["serve", "--hostname", "0.0.0.0", "--port", "5050"]
-        );
-        // 默认端口不重复传；无法解析时退回裸 serve
-        assert_eq!(
-            super::serve_args_from_url("http://localhost", &[]),
-            vec!["serve", "--hostname", "localhost"]
-        );
+    fn serve_args_bare_serve_for_default_url() {
+        // 默认条目（opencode 自身的默认绑定）：一个参数都不加，
+        // 实际地址以 stdout 的 listening URL 为准（端口占用时 serve 会自己换端口）
+        assert_eq!(super::serve_args_from_url("http://127.0.0.1:4096", &[]), vec!["serve"]);
+        assert_eq!(super::serve_args_from_url("http://localhost:4096", &[]), vec!["serve"]);
+        assert_eq!(super::serve_args_from_url("http://localhost", &[]), vec!["serve"]);
         assert_eq!(super::serve_args_from_url("not a url", &[]), vec!["serve"]);
     }
 
     #[test]
+    fn serve_args_derive_only_custom_host_or_port() {
+        // 条目 URL 配了非默认主机/端口才派生（用户自己的配置，serve 要绑到那里）
+        assert_eq!(
+            super::serve_args_from_url("http://0.0.0.0:5050/", &[]),
+            vec!["serve", "--hostname", "0.0.0.0", "--port", "5050"]
+        );
+        assert_eq!(
+            super::serve_args_from_url("http://127.0.0.1:5050", &[]),
+            vec!["serve", "--port", "5050"]
+        );
+        assert_eq!(
+            super::serve_args_from_url("http://0.0.0.0:4096", &[]),
+            vec!["serve", "--hostname", "0.0.0.0"]
+        );
+    }
+
+    #[test]
     fn serve_args_append_extra_args_last() {
-        // 用户额外参数追加在派生值之后
+        // 默认条目 + 额外参数：不注入派生值，原样追加
         let extra = vec!["--cors".to_string(), "https://example.com".to_string()];
         assert_eq!(
             super::serve_args_from_url("http://127.0.0.1:4096", &extra),
-            vec!["serve", "--hostname", "127.0.0.1", "--port", "4096", "--cors", "https://example.com"]
+            vec!["serve", "--cors", "https://example.com"]
         );
     }
 
     #[test]
     fn serve_args_user_hostname_port_suppress_derived() {
-        // 用户显式给 --hostname/--port 时以用户值为准，不再重复派生
+        // 用户显式给 --hostname/--port 时以用户值为准，对应派生值省略
         let extra = vec!["--hostname".to_string(), "0.0.0.0".to_string()];
         assert_eq!(
-            super::serve_args_from_url("http://127.0.0.1:4096", &extra),
-            vec!["serve", "--port", "4096", "--hostname", "0.0.0.0"]
+            super::serve_args_from_url("http://192.168.1.2:5050", &extra),
+            vec!["serve", "--port", "5050", "--hostname", "0.0.0.0"]
         );
         // --flag=value 写法同样生效
         let extra_eq = vec!["--port=5000".to_string()];
         assert_eq!(
-            super::serve_args_from_url("http://127.0.0.1:4096", &extra_eq),
-            vec!["serve", "--hostname", "127.0.0.1", "--port=5000"]
+            super::serve_args_from_url("http://192.168.1.2:5050", &extra_eq),
+            vec!["serve", "--hostname", "192.168.1.2", "--port=5000"]
         );
         // 两者都给了就完全用用户的
         let both = vec!["--hostname".to_string(), "0.0.0.0".to_string(), "--port".to_string(), "5000".to_string()];
         assert_eq!(
-            super::serve_args_from_url("http://127.0.0.1:4096", &both),
+            super::serve_args_from_url("http://192.168.1.2:5050", &both),
             vec!["serve", "--hostname", "0.0.0.0", "--port", "5000"]
         );
     }

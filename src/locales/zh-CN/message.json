@@ -34,13 +34,17 @@
     "running": "运行中",
     "failed": "失败",
     "loadedSkill": "已加载技能",
-    "skill": "技能"
+    "skill": "技能",
+    "execute": "执行"
   },
   "toolSteps": {
     "separator": "，",
     "executeDone": "执行了 {{count}} 条命令",
     "executeActive": "正在执行命令",
     "executeFailed": "{{count}} 条命令执行失败",
+    "codeDone": "运行了 {{count}} 段代码",
+    "codeActive": "正在运行代码",
+    "codeFailed": "{{count}} 段代码运行失败",
     "writeDone": "写入了 {{count}} 个文件",
     "writeActive": "正在写入文件",
     "writeFailed": "{{count}} 次写入失败",

@@ -26,6 +26,7 @@ import {
   type ToolViewContext,
 } from '../tools'
 import { currentToolFailed, currentToolInput, currentToolMetadata } from '../../../types/api/toolState'
+import { executeSubCallSummary, parseCodeModeToolCalls } from './executeSubCallSummary'
 import { MSG_SPACING } from '../messageSpacing'
 import { MessageExpandPanel, useMessageExpandRender } from '../messageExpand'
 
@@ -62,6 +63,9 @@ export const ToolPartView = memo(function ToolPartView({
   const { state, name: toolName } = part
   const metadata = currentToolMetadata(part)
   const title = (metadata.title as string) || getInputDescription(part) || ''
+  // 官方对内置工具名做本地化（session-ui ui.tool.*）：execute → 执行/Execute，其余保持原名格式化
+  const toolDisplayName =
+    toolName.toLowerCase() === 'execute' ? t('toolPart.execute') : formatToolName(toolName)
 
   const isActive = state.status === 'running' || state.status === 'streaming'
   // 失败判定含「completed 但进程失败」（shell 非零退出 / 超时）
@@ -274,7 +278,7 @@ export const ToolPartView = memo(function ToolPartView({
                     : 'text-text-200 group-hover/header:text-text-100'
               }`}
             >
-              {formatToolName(toolName)}
+              {toolDisplayName}
             </span>
 
             {title && (
@@ -341,7 +345,7 @@ export const ToolPartView = memo(function ToolPartView({
                       : 'text-text-200 group-hover/header:text-text-100'
                 }`}
               >
-                {formatToolName(toolName)}
+                {toolDisplayName}
               </span>
               {title && (
                 <span
@@ -424,7 +428,7 @@ export const ToolPartView = memo(function ToolPartView({
                     : 'text-text-200 group-hover/header:text-text-100'
               }`}
             >
-              {formatToolName(toolName)}
+              {toolDisplayName}
             </span>
 
             {title && (
@@ -574,6 +578,16 @@ function getInputDescription(part: ToolViewPart): string | undefined {
   if (part.name === 'list' && typeof input.path === 'string') return input.path || '/'
   // skill：官方 loadedSkill 行带技能名（input.name，session-ui:2178 同款）
   if (part.name === 'skill' && typeof input.name === 'string' && input.name) return input.name
+  // execute（v2 CodeMode）：优先运行时子调用记录（metadata.toolCalls，带真实状态），
+  // 其次静态解析 code 里的 tools.xxx(...) 调用点（流式早期即可用），
+  // 最后退回官方做法——code 首行
+  if (part.name === 'execute') {
+    const chain =
+      executeSubCallSummary(currentToolMetadata(part)) ??
+      (typeof input.code === 'string' ? parseCodeModeToolCalls(input.code) : undefined)
+    if (chain) return chain
+    if (typeof input.code === 'string' && input.code.trim()) return input.code.trim().split('\n', 1)[0]
+  }
   return undefined
 }
 

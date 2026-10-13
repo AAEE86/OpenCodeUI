@@ -263,6 +263,22 @@ function bashExtractData(part: ToolViewPart): ExtractedToolData {
   return base
 }
 
+/**
+ * execute（v2 CodeMode）：input 是 { code }，直接展示代码本体（JavaScript），
+ * 而不是 JSON dump——官方 session-ui 也是把 code 当控制台命令块渲染。
+ */
+function executeExtractData(part: ToolViewPart): ExtractedToolData {
+  const base = defaultExtractData(part)
+  const input = currentToolInput(part)
+
+  if (part.state.status !== 'streaming' && typeof input.code === 'string' && input.code.trim()) {
+    base.input = input.code
+    base.inputLang = 'javascript'
+  }
+
+  return base
+}
+
 function readExtractData(part: ToolViewPart): ExtractedToolData {
   const base = defaultExtractData(part)
 
@@ -318,6 +334,13 @@ export const toolRegistry: ToolRegistry = [
     icon: <TerminalIcon />,
     extractData: bashExtractData,
     renderer: BashRenderer,
+  },
+
+  // Execute（v2 CodeMode：受限运行时里编排其它工具的 JS 代码）
+  {
+    match: exact('execute'),
+    icon: <TerminalIcon />,
+    extractData: executeExtractData,
   },
 
   // Task / Subagent（v2 工具名 subagent；task 为旧名兼容）

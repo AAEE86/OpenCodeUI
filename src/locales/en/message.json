@@ -34,7 +34,8 @@
     "running": "Running",
     "failed": "Failed",
     "loadedSkill": "Loaded skill",
-    "skill": "Skill"
+    "skill": "Skill",
+    "execute": "Execute"
   },
   "toolSteps": {
     "separator": ", ",
@@ -43,6 +44,11 @@
     "executeActive": "Running command",
     "executeFailed_one": "{{count}} command failed",
     "executeFailed_other": "{{count}} commands failed",
+    "codeDone_one": "Ran {{count}} code block",
+    "codeDone_other": "Ran {{count}} code blocks",
+    "codeActive": "Running code",
+    "codeFailed_one": "{{count}} code block failed",
+    "codeFailed_other": "{{count}} code blocks failed",
     "writeDone_one": "Wrote {{count}} file",
     "writeDone_other": "Wrote {{count}} files",
     "writeActive": "Writing file",

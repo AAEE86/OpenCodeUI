@@ -36,6 +36,7 @@ import type { AssistantContent, AssistantMessage, SessionMessageInfo, UserMessag
 import type { JsonValue } from '@opencode/client/promise'
 import { contentEntries, hasVisibleText, userMessageText, type ContentEntry } from '../../types/api/message'
 import { currentToolFailed, currentToolMetadata } from '../../types/api/toolState'
+import { expandCodeModeSubCalls } from './parts/executeSubCallSummary'
 import {
   ENTRY_GROW_DURATION_MS,
   isEntryGrowComplete,
@@ -1218,6 +1219,7 @@ function toStepFinishInfo(message: AssistantMessage): StepFinishInfo | undefined
 
 type ToolSummaryCategory =
   | 'execute'
+  | 'code'
   | 'write'
   | 'edit'
   | 'read'
@@ -1252,6 +1254,29 @@ function buildDescriptiveToolStepsSummary(
   const activeMap = new Map<ToolSummaryCategory, number>()
 
   for (const tool of tools) {
+    // v2 CodeMode（execute）：展开成实际调用的子工具分别归类计数，
+    // 摘要显示「读取了 2 个文件，写入了 1 个文件」而不是「运行了 1 段代码」
+    const subCalls = expandCodeModeSubCalls(tool.content)
+    if (subCalls) {
+      const parentActive = isToolPartActive(tool.content)
+      const parentFailed = currentToolFailed(tool.content)
+      for (const sub of subCalls) {
+        const cat = getToolSummaryCategory(sub.tool)
+        if (!doneMap.has(cat)) {
+          categoryOrder.push(cat)
+          doneMap.set(cat, 0)
+          failedMap.set(cat, 0)
+          activeMap.set(cat, 0)
+        }
+        // 有运行时状态用真实状态；纯代码静态解析的继承父工具状态
+        const status = sub.status ?? (parentActive ? 'running' : parentFailed ? 'error' : 'completed')
+        if (status === 'running') activeMap.set(cat, (activeMap.get(cat) || 0) + 1)
+        else if (status === 'error') failedMap.set(cat, (failedMap.get(cat) || 0) + 1)
+        else doneMap.set(cat, (doneMap.get(cat) || 0) + 1)
+      }
+      continue
+    }
+
     const cat = getToolSummaryCategory(tool.content.name)
     if (!doneMap.has(cat)) {
       categoryOrder.push(cat)
@@ -1341,6 +1366,8 @@ function formatToolSummarySegment(
 function getToolSummaryCategory(toolName: string): ToolSummaryCategory {
   const lower = toolName.toLowerCase()
 
+  // v2 CodeMode 的 execute 工具是「运行一段编排其它工具的代码」，区别于 shell 命令
+  if (lower === 'execute') return 'code'
   if (lower === 'task' || lower === 'subagent') return 'task'
   if (lower.includes('question') || lower.includes('ask')) return 'question'
   if (lower.includes('skill')) return 'skill'

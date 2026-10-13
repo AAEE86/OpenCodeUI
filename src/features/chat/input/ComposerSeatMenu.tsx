@@ -236,7 +236,9 @@ export function ComposerSeatMenu({
         ].join(' · ')}
       >
         <span className="text-[length:var(--fs-sm)] font-medium text-text-200 truncate max-w-[160px]">
-          {modelsLoading ? '…' : modelLabel || t('inputToolbar.seatSelectModel')}
+          {/* 有缓存标签就始终显示：后台刷新（provider/model/config 事件触发 refetch）
+              期间 isLoading 短暂为 true，若让 '…' 抢占标签会造成可见闪烁 */}
+          {modelLabel || (modelsLoading ? '…' : t('inputToolbar.seatSelectModel'))}
         </span>
         {(showVariantRow || showAgentRow) && <span className="text-text-500 shrink-0">·</span>}
         {showVariantRow && (

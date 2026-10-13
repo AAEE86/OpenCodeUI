@@ -70,12 +70,12 @@ export function useInputHistory({ textareaRef, mode, recallDraft }: UseInputHist
     draftLineRef.current = null
   }, [])
 
-  const attachmentsMatch = (a: Attachment[], b: Attachment[]) =>
-    a.length === b.length &&
-    a.every((item, i) => {
-      const other = b[i]
-      return item.type === other.type && item.displayName === other.displayName
-    })
+  // Attachment（运行时）与 HistoryAttachment（持久化序列化形态）结构不同，
+  // 比较只依赖共有字段 type/displayName（与改动前的内联比较一致）
+  const attachmentsMatch = (
+    a: readonly { type: string; displayName: string }[],
+    b: readonly { type: string; displayName: string }[],
+  ) => a.length === b.length && a.every((item, i) => item.type === b[i].type && item.displayName === b[i].displayName)
 
   const handleHistoryKeyDown = useCallback(
     (

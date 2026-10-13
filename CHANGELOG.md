@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.7.8] - 2026-10-13
+
+- fix(service): normalize IPv6 unspecified bind address in listening URL (9c0294e3)
+- feat(settings): one complete serve argument per line (fd84ca88)
+- fix(service): run bare 'opencode serve' for the default entry URL (54b2166f)
+- fix(service): let user --hostname/--port replace derived serve args (cc1e5e29)
+
 ## [v0.7.7] - 2026-10-13
 
 - fix(sessions): make unpin reachable on touch for server-deleted pinned sessions (4d80cf4c)

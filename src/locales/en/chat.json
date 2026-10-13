@@ -165,7 +165,13 @@
     "steer": "Steer",
     "steerHint": "Inject into the current turn (click to queue instead)",
     "followUp": "Queue",
-    "followUpHint": "Send after the current turn (click to steer instead)"
+    "followUpHint": "Send after the current turn (click to steer instead)",
+    "seatMenu": "Model / effort / agent menu",
+    "seatModel": "Model",
+    "seatEffort": "Reasoning effort",
+    "seatAgent": "Agent",
+    "seatSelectModel": "Select model",
+    "back": "Back"
   },
   "inputFooter": {
     "autoApproveOff": "Auto-approve: off",

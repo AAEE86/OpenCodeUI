@@ -3,7 +3,10 @@ import { useTranslation } from 'react-i18next'
 import { ChevronDownIcon, SendIcon, StopIcon, PaperclipIcon, AgentIcon, ThinkingIcon } from '../../../components/Icons'
 import { DropdownMenu, MenuItem, IconButton, AnimatedPresence } from '../../../components/ui'
 import { ModelSelector, type ModelSelectorHandle } from '../ModelSelector'
+import { ComposerSeatMenu } from './ComposerSeatMenu'
 import { useChatViewport } from '../chatViewport'
+import { useTheme } from '../../../hooks/useTheme'
+import { getModelKey } from '../../../utils/modelUtils'
 import { isTauri, isTauriMobile, extToMime } from '../../../utils/tauri'
 import type { ApiAgent } from '../../../api/client'
 import type { Model, Provider, FileCapabilities } from '../../../api'
@@ -70,7 +73,9 @@ export function InputToolbar({
 }: InputToolbarProps) {
   const { t } = useTranslation(['chat', 'common'])
   const { presentation } = useChatViewport()
+  const { composerSelectorStyle } = useTheme()
   const isCompact = presentation.isCompact
+  const useSeatSelector = composerSelectorStyle === 'seat'
   const useBrowserFileInput = !isTauri() || isTauriMobile()
 
   // 根据模型能力计算支持的文件类型
@@ -315,11 +320,51 @@ export function InputToolbar({
   const selectableAgents = agents.filter(a => a.mode !== 'subagent' && !a.hidden)
   // 选择值是 agent id（v2 的 API 用 id）；兼容历史存储的显示名
   const currentAgent = agents.find(a => a.id === selectedAgent || a.name === selectedAgent)
+  // 汇总菜单模式触发器需要当前模型名
+  const selectedModel = useMemo(
+    () => (selectedModelKey ? (models.find(m => getModelKey(m) === selectedModelKey) ?? null) : null),
+    [models, selectedModelKey],
+  )
 
   return (
     <div className="flex items-center justify-between px-3 pb-3 relative">
       {/* Left side: Model (mobile) + Agent + Variant selectors */}
       <div className={`flex items-center min-w-0 ${isCompact ? 'gap-1' : 'gap-2'}`}>
+        {useSeatSelector ? (
+          /* DSH 风格汇总选择器：模型 · 推理 · Agent 单入口（全平台一致） */
+          <div className="relative min-w-0">
+            <ComposerSeatMenu
+              modelLabel={selectedModel?.name ?? ''}
+              modelsLoading={modelsLoading}
+              variants={variants}
+              selectedVariant={selectedVariant}
+              onVariantChange={onVariantChange}
+              agents={selectableAgents}
+              selectedAgent={selectedAgent}
+              onAgentChange={onAgentChange}
+              disabled={controlsDisabled}
+              constrainToRef={inputContainerRef}
+              onOpenModelMenu={() => modelSelectorRef?.current?.openMenu()}
+              focusComposer={focusComposerInput}
+            />
+            {/* 隐藏锚点：模型行复用完整 ModelSelector 菜单（搜索/置顶/键盘导航） */}
+            {onModelChange && (
+              <ModelSelector
+                ref={modelSelectorRef}
+                models={models}
+                providers={providers}
+                selectedModelKey={selectedModelKey}
+                onSelect={onModelChange}
+                isLoading={modelsLoading}
+                position="top"
+                trigger="toolbar"
+                hideTrigger
+                constrainToRef={inputContainerRef}
+              />
+            )}
+          </div>
+        ) : (
+        <>
         {/* Model Selector — 移动端显示在最左边 */}
         {isCompact && onModelChange && (
           <ModelSelector
@@ -501,6 +546,8 @@ export function InputToolbar({
             </DropdownMenu>
           </div>
         </AnimatedPresence>
+        </>
+        )}
       </div>
 
       {/* Action Buttons */}

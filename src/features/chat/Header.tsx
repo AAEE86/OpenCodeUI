@@ -20,6 +20,7 @@ import { updateSession } from '../../api'
 import { useDirectory } from '../../contexts/useDirectory'
 import { uiErrorHandler } from '../../utils'
 import { useChatViewport } from './chatViewport'
+import { useTheme } from '../../hooks/useTheme'
 import type { Model, Provider } from '../../api'
 
 interface HeaderProps {
@@ -132,6 +133,8 @@ export function Header({
   const { refresh } = useSessionContext()
   const { currentDirectory } = useDirectory()
   const { presentation, interaction } = useChatViewport()
+  // 汇总菜单模式下模型选择器移到输入框内，标题栏不再重复显示
+  const { composerSelectorStyle } = useTheme()
 
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [isEditingTitle, setIsEditingTitle] = useState(false)
@@ -219,7 +222,7 @@ export function Header({
           </IconButton>
         )}
 
-        {!isCompact && (
+        {!isCompact && composerSelectorStyle !== 'seat' && (
           <ModelSelector
             ref={modelSelectorRef}
             models={models}

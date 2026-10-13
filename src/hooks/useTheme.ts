@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom'
 import { THEME_SWITCH_DISABLE_MS } from '../constants'
 import { themeStore, type ColorMode } from '../store/themeStore'
 import type { StepFinishDisplay, CustomCSSSnippet } from '../store/themeStore'
-import type { ReasoningDisplayMode, DiffStyle, ToolCardStyle, CompletedAtFormat, ExternalFileDropMode } from '../store/themeStore'
+import type { ReasoningDisplayMode, DiffStyle, ToolCardStyle, CompletedAtFormat, ExternalFileDropMode, ComposerSelectorStyle } from '../store/themeStore'
 
 // 保持向后兼容的类型别名
 export type ThemeMode = ColorMode
@@ -360,6 +360,13 @@ export function useTheme() {
     // 过程折叠
     processCollapseEnabled: state.processCollapseEnabled,
     setProcessCollapseEnabled,
+
+    // 输入框选择器样式（独立图标按钮 / DSH 风格汇总菜单）
+    composerSelectorStyle: state.composerSelectorStyle,
+    setComposerSelectorStyle: useCallback(
+      (style: ComposerSelectorStyle) => themeStore.setComposerSelectorStyle(style),
+      [],
+    ),
 
     // 代码块主题（Shiki）
     codeBlockThemeLight: state.codeBlockThemeLight,

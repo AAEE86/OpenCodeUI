@@ -44,6 +44,8 @@ interface ModelSelectorProps {
   constrainToRef?: React.RefObject<HTMLElement | null>
   /** 触发按钮的展示风格 */
   trigger?: 'header' | 'toolbar'
+  /** 隐藏触发按钮（仅作菜单锚点，配合 ref.openMenu() 程序化打开；用于汇总菜单模式） */
+  hideTrigger?: boolean
 }
 
 // ============================================
@@ -360,6 +362,7 @@ export const ModelSelector = memo(
       position = 'bottom',
       constrainToRef,
       trigger = 'header',
+      hideTrigger = false,
     },
     ref,
   ) {
@@ -848,10 +851,17 @@ export const ModelSelector = memo(
     return (
       <div
         ref={containerRef}
-        className={`relative font-sans ${trigger === 'toolbar' ? 'min-w-0 overflow-hidden' : ''}`}
+        className={`relative font-sans ${trigger === 'toolbar' ? 'min-w-0 overflow-hidden' : ''} ${
+          hideTrigger ? 'absolute inset-0 pointer-events-none' : ''
+        }`}
         data-dropdown-open={isOpen || undefined}
       >
-        {triggerButton}
+        {hideTrigger ? (
+          // 隐藏锚点：不可见不响应交互，仅为 DropdownMenu 提供定位矩形（= 汇总菜单触发器的位置）
+          <button ref={triggerRef} type="button" disabled tabIndex={-1} aria-hidden="true" className="absolute inset-0 w-full h-full opacity-0" />
+        ) : (
+          triggerButton
+        )}
 
         <DropdownMenu
           triggerRef={triggerRef}

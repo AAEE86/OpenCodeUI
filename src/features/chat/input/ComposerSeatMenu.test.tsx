@@ -1,0 +1,81 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import type { ApiAgent } from '../../../api/client'
+import { ComposerSeatMenu } from './ComposerSeatMenu'
+
+const agents: ApiAgent[] = [
+  { id: 'build', name: 'Build', description: 'Build things', mode: 'primary', permissions: [], request: { settings: {}, headers: {}, body: {} }, hidden: false },
+  { id: 'plan', name: 'Plan', description: 'Plan work', mode: 'primary', permissions: [], request: { settings: {}, headers: {}, body: {} }, hidden: false },
+]
+
+function renderMenu(overrides: Partial<Parameters<typeof ComposerSeatMenu>[0]> = {}) {
+  const props: Parameters<typeof ComposerSeatMenu>[0] = {
+    modelLabel: 'Kimi K3-256K',
+    variants: ['low', 'high'],
+    selectedVariant: 'high',
+    onVariantChange: vi.fn(),
+    agents,
+    selectedAgent: 'build',
+    onAgentChange: vi.fn(),
+    onOpenModelMenu: vi.fn(),
+    focusComposer: vi.fn(),
+    ...overrides,
+  }
+  const view = render(<ComposerSeatMenu {...props} />)
+  return { props, ...view }
+}
+
+describe('ComposerSeatMenu', () => {
+  it('trigger summarizes model · effort · agent', () => {
+    renderMenu()
+    const trigger = screen.getByRole('button', { name: 'Model / effort / agent menu' })
+    expect(trigger).toHaveTextContent('Kimi K3-256K')
+    expect(trigger).toHaveTextContent('High')
+    expect(trigger).toHaveTextContent('Build')
+  })
+
+  it('opens root pane with model / effort / agent rows', () => {
+    renderMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'Model / effort / agent menu' }))
+    expect(screen.getByRole('menuitem', { name: /Model/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /Reasoning effort/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /Agent/ })).toBeInTheDocument()
+  })
+
+  it('model row delegates to the full model menu', () => {
+    vi.useFakeTimers()
+    try {
+      const { props } = renderMenu()
+      fireEvent.click(screen.getByRole('button', { name: 'Model / effort / agent menu' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /Model/ }))
+      vi.runAllTimers()
+      expect(props.onOpenModelMenu).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drills into the effort pane and selects a variant', () => {
+    const { props } = renderMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'Model / effort / agent menu' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Reasoning effort/ }))
+    const low = screen.getByRole('menuitemradio', { name: 'Low' })
+    fireEvent.click(low)
+    expect(props.onVariantChange).toHaveBeenCalledWith('low')
+  })
+
+  it('drills into the agent pane and selects an agent', () => {
+    const { props } = renderMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'Model / effort / agent menu' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Agent/ }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Plan' }))
+    expect(props.onAgentChange).toHaveBeenCalledWith('plan')
+  })
+
+  it('hides effort/agent rows when not applicable', () => {
+    renderMenu({ variants: [], agents: [agents[0]] })
+    fireEvent.click(screen.getByRole('button', { name: 'Model / effort / agent menu' }))
+    expect(screen.queryByRole('menuitem', { name: /Reasoning effort/ })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /Agent/ })).toBeNull()
+  })
+})

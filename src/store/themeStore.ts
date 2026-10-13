@@ -111,6 +111,8 @@ export interface StepFinishDisplay {
 export type CompletedAtFormat = 'time' | 'dateTime'
 
 export type ReasoningDisplayMode = 'capsule' | 'italic' | 'markdown'
+/** 输入框选择器样式：icons=模型/推理/Agent 各自独立图标按钮；seat=DSH 风格汇总菜单（模型 · 推理 · Agent 单入口） */
+export type ComposerSelectorStyle = 'icons' | 'seat'
 
 export type ExternalFileDropMode = 'upload-first' | 'mention'
 
@@ -170,6 +172,8 @@ const DEFAULT_ACTIONS_ON_LATEST_ASSISTANT_ONLY = true
 const DEFAULT_DESKTOP_COLLAPSED_INPUT_DOCK = true
 /** 过程折叠：按用户消息把中间过程收成计时折叠块 */
 const DEFAULT_PROCESS_COLLAPSE_ENABLED = false
+/** 输入框选择器默认样式：独立图标按钮 */
+const DEFAULT_COMPOSER_SELECTOR_STYLE: ComposerSelectorStyle = 'icons'
 
 export interface ThemeState {
   /** 当前选中的主题风格 ID */
@@ -230,6 +234,8 @@ export interface ThemeState {
   desktopCollapsedInputDock: boolean
   /** 过程折叠：用户发送后显示 Working 计时，结束后收成折叠块，最终回答留在外面 */
   processCollapseEnabled: boolean
+  /** 输入框选择器样式：独立图标按钮 / DSH 风格汇总菜单 */
+  composerSelectorStyle: ComposerSelectorStyle
   /** 代码块语法高亮主题（亮色模式），Shiki theme id */
   codeBlockThemeLight: string
   /** 代码块语法高亮主题（暗色模式），Shiki theme id */
@@ -271,6 +277,7 @@ const STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT = 'outline-current-highlight'
 const STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY = 'actions-on-latest-assistant-only'
 const STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK = 'desktop-collapsed-input-dock'
 const STORAGE_KEY_PROCESS_COLLAPSE_ENABLED = 'process-collapse-enabled'
+const STORAGE_KEY_COMPOSER_SELECTOR_STYLE = 'composer-selector-style'
 const STORAGE_KEY_CODE_BLOCK_THEME_LIGHT = 'code-block-theme-light'
 const STORAGE_KEY_CODE_BLOCK_THEME_DARK = 'code-block-theme-dark'
 
@@ -429,6 +436,10 @@ class ThemeStore {
         ? DEFAULT_PROCESS_COLLAPSE_ENABLED
         : savedProcessCollapseEnabled === 'true'
 
+    const savedComposerSelectorStyle = localStorage.getItem(STORAGE_KEY_COMPOSER_SELECTOR_STYLE)
+    const composerSelectorStyle: ComposerSelectorStyle =
+      savedComposerSelectorStyle === 'seat' ? 'seat' : DEFAULT_COMPOSER_SELECTOR_STYLE
+
     const codeBlockThemeLight = normalizeCodeBlockTheme(
       localStorage.getItem(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT) || DEFAULT_CODE_BLOCK_THEME_LIGHT,
       DEFAULT_CODE_BLOCK_THEME_LIGHT,
@@ -468,6 +479,7 @@ class ThemeStore {
       actionsOnLatestAssistantOnly,
       desktopCollapsedInputDock,
       processCollapseEnabled,
+      composerSelectorStyle,
       codeBlockThemeLight,
       codeBlockThemeDark,
     }
@@ -569,6 +581,10 @@ class ThemeStore {
 
   get processCollapseEnabled() {
     return this.state.processCollapseEnabled
+  }
+
+  get composerSelectorStyle() {
+    return this.state.composerSelectorStyle
   }
 
   get codeBlockThemeLight() {
@@ -918,6 +934,13 @@ class ThemeStore {
     this.emit()
   }
 
+  setComposerSelectorStyle(style: ComposerSelectorStyle) {
+    if (this.state.composerSelectorStyle === style) return
+    this.state = { ...this.state, composerSelectorStyle: style }
+    localStorage.setItem(STORAGE_KEY_COMPOSER_SELECTOR_STYLE, style)
+    this.emit()
+  }
+
   setCodeBlockThemeLight(id: string) {
     const next = normalizeCodeBlockTheme(id, DEFAULT_CODE_BLOCK_THEME_LIGHT)
     if (this.state.codeBlockThemeLight === next) return
@@ -1197,6 +1220,8 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
       typeof parsed?.processCollapseEnabled === 'boolean'
         ? parsed.processCollapseEnabled
         : DEFAULT_PROCESS_COLLAPSE_ENABLED,
+    composerSelectorStyle:
+      parsed?.composerSelectorStyle === 'seat' ? 'seat' : DEFAULT_COMPOSER_SELECTOR_STYLE,
     codeBlockThemeLight: normalizeCodeBlockTheme(
       typeof parsed?.codeBlockThemeLight === 'string' ? parsed.codeBlockThemeLight : DEFAULT_CODE_BLOCK_THEME_LIGHT,
       DEFAULT_CODE_BLOCK_THEME_LIGHT,
@@ -1255,6 +1280,7 @@ export function importThemeBackup(raw: unknown): void {
   )
   localStorage.setItem(STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK, String(backup.desktopCollapsedInputDock))
   localStorage.setItem(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED, String(backup.processCollapseEnabled))
+  localStorage.setItem(STORAGE_KEY_COMPOSER_SELECTOR_STYLE, backup.composerSelectorStyle)
   localStorage.setItem(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT, backup.codeBlockThemeLight)
   localStorage.setItem(STORAGE_KEY_CODE_BLOCK_THEME_DARK, backup.codeBlockThemeDark)
 }

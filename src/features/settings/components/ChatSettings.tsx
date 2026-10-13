@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PathAutoIcon, PathUnixIcon, PathWindowsIcon } from '../../../components/Icons'
 import { usePathMode, useTheme } from '../../../hooks'
-import { themeStore, type ReasoningDisplayMode, type CompletedAtFormat } from '../../../store/themeStore'
+import { themeStore, type ReasoningDisplayMode, type CompletedAtFormat, type ComposerSelectorStyle } from '../../../store/themeStore'
 import { Toggle, SegmentedControl, SettingRow, SettingField, SettingsSection } from './SettingsUI'
 import type { PathMode } from '../../../utils/directoryUtils'
 
@@ -32,6 +32,8 @@ export function ChatSettings() {
     setDesktopCollapsedInputDock,
     renderUserMarkdown,
     setRenderUserMarkdown,
+    composerSelectorStyle,
+    setComposerSelectorStyle,
   } = useTheme()
   const [collapseUserMessages, setCollapseUserMessages] = useState(themeStore.collapseUserMessages)
   const [stepFinishDisplay, setStepFinishDisplay] = useState(themeStore.stepFinishDisplay)
@@ -139,6 +141,19 @@ export function ChatSettings() {
             onChange={() => setDesktopCollapsedInputDock(!desktopCollapsedInputDock)}
           />
         </SettingRow>
+
+        <SettingField label={t('chat.composerSelectorStyle')} description={t('chat.composerSelectorStyleDesc')}>
+          <div className="w-full max-w-[320px]">
+            <SegmentedControl
+              value={composerSelectorStyle}
+              options={[
+                { value: 'icons', label: t('chat.composerSelectorIcons') },
+                { value: 'seat', label: t('chat.composerSelectorSeat') },
+              ]}
+              onChange={v => setComposerSelectorStyle(v as ComposerSelectorStyle)}
+            />
+          </div>
+        </SettingField>
 
         <SettingField label={t('chat.thinkingDisplay')} description={t('chat.thinkingDisplayDesc')}>
           <div className="w-full max-w-[320px]">

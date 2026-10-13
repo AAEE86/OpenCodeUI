@@ -165,7 +165,13 @@
     "steer": "插队",
     "steerHint": "立即注入当前回合（点击切换为排队）",
     "followUp": "排队",
-    "followUpHint": "当前回合结束后自动发送（点击切换为插队）"
+    "followUpHint": "当前回合结束后自动发送（点击切换为插队）",
+    "seatMenu": "模型 / 推理 / Agent 菜单",
+    "seatModel": "模型",
+    "seatEffort": "推理等级",
+    "seatAgent": "Agent",
+    "seatSelectModel": "选择模型",
+    "back": "返回"
   },
   "inputFooter": {
     "autoApproveOff": "自动放行：关闭",

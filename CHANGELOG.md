@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.7.9] - 2026-10-13
+
+- fix(events): debounce catalog refetches triggered by SSE bursts (33be0456)
+- fix(chat): stop blanking the seat menu label during background refetches (85468568)
+- fix(chat): stop prefilling persisted drafts, recall them via ArrowUp instead (0ff39041)
+
 ## [v0.7.8] - 2026-10-13
 
 - fix(service): normalize IPv6 unspecified bind address in listening URL (9c0294e3)

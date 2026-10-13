@@ -851,9 +851,12 @@ export const ModelSelector = memo(
     return (
       <div
         ref={containerRef}
-        className={`relative font-sans ${trigger === 'toolbar' ? 'min-w-0 overflow-hidden' : ''} ${
-          hideTrigger ? 'absolute inset-0 pointer-events-none' : ''
-        }`}
+        className={
+          hideTrigger
+            ? // 隐藏锚点：absolute 覆盖在汇总菜单触发器上（不能同时带 relative，Tailwind 中后者会覆盖前者）
+              'absolute inset-0 pointer-events-none font-sans'
+            : `relative font-sans ${trigger === 'toolbar' ? 'min-w-0 overflow-hidden' : ''}`
+        }
         data-dropdown-open={isOpen || undefined}
       >
         {hideTrigger ? (

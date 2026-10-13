@@ -9,7 +9,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AgentIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ThinkingIcon } from '../../../components/Icons'
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon } from '../../../components/Icons'
 import { DropdownMenu } from '../../../components/ui'
 import type { ApiAgent } from '../../../api/client'
 
@@ -59,6 +59,8 @@ export function ComposerSeatMenu({
   const { t } = useTranslation('chat')
   const [isOpen, setIsOpen] = useState(false)
   const [pane, setPane] = useState<Pane>('root')
+  // 委托打开模型菜单时瞬时关闭本菜单（跳过退出动画），避免两个浮层叠化
+  const [instantClose, setInstantClose] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -150,17 +152,20 @@ export function ComposerSeatMenu({
   }, [isOpen, pane])
 
   const openModelMenu = () => {
+    setInstantClose(true)
     setIsOpen(false)
     setPane('root')
-    // 等本菜单关闭动画后再开模型菜单，避免两个浮层抢焦点
-    window.setTimeout(onOpenModelMenu, 0)
+    // 本菜单当帧卸载后再开模型菜单，避免两个浮层抢焦点
+    window.setTimeout(() => {
+      onOpenModelMenu()
+      setInstantClose(false)
+    }, 0)
   }
 
   const rootRow = (
     label: string,
     value: string,
     onClick: () => void,
-    icon?: React.ReactNode,
     valueColor?: string,
   ) => (
     <button
@@ -170,7 +175,6 @@ export function ComposerSeatMenu({
       onClick={onClick}
       className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-colors hover:bg-bg-200 cursor-pointer"
     >
-      {icon && <span className="shrink-0 text-text-400">{icon}</span>}
       <span className="text-[length:var(--fs-sm)] text-text-400 shrink-0">{label}</span>
       <span
         className="flex-1 min-w-0 text-right text-[length:var(--fs-sm)] text-text-200 truncate"
@@ -184,24 +188,12 @@ export function ComposerSeatMenu({
     </button>
   )
 
-  const paneHeader = (title: string) => (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={() => setPane('root')}
-      className="w-full flex items-center gap-1.5 px-3 py-2 rounded-lg text-left transition-colors hover:bg-bg-200 cursor-pointer text-text-400 hover:text-text-200"
-    >
-      <ChevronLeftIcon size={14} />
-      <span className="text-[length:var(--fs-sm)]">{title}</span>
-    </button>
-  )
-
+  // 下钻面板：纯文字单选列表，无图标、无返回行（重开菜单即回根面板）
   const radioItem = (
     key: string,
     label: string,
     selected: boolean,
     onClick: () => void,
-    icon?: React.ReactNode,
   ) => (
     <button
       key={key}
@@ -213,7 +205,6 @@ export function ComposerSeatMenu({
         selected ? 'bg-accent-main-100/10 text-text-100' : 'text-text-300 hover:bg-bg-200'
       }`}
     >
-      {icon && <span className="shrink-0 text-text-400">{icon}</span>}
       <span className="flex-1 min-w-0 text-[length:var(--fs-sm)] truncate">{label}</span>
       {selected && (
         <span className="shrink-0 text-accent-main-100">
@@ -265,8 +256,14 @@ export function ComposerSeatMenu({
         minWidth="240px"
         width="300px"
         constrainToRef={constrainToRef}
+        exitDuration={instantClose ? 0 : 200}
       >
-        <div ref={menuRef} role="menu" aria-label={t('inputToolbar.seatMenu')} onKeyDown={handleMenuKeyDown}>
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label={t('inputToolbar.seatMenu')}
+          onKeyDown={handleMenuKeyDown}
+        >
           {pane === 'root' && (
             <>
               {rootRow(
@@ -276,29 +273,27 @@ export function ComposerSeatMenu({
               )}
               {showVariantRow && rootRow(t('inputToolbar.seatEffort'), variantLabel, () => setPane('variant'))}
               {showAgentRow &&
-                rootRow(t('inputToolbar.seatAgent'), agentLabel, () => setPane('agent'), undefined, currentAgent?.color)}
+                rootRow(t('inputToolbar.seatAgent'), agentLabel, () => setPane('agent'), currentAgent?.color)}
             </>
           )}
 
           {pane === 'variant' && (
             <>
-              {paneHeader(t('inputToolbar.seatEffort'))}
               {radioItem('default', t('inputToolbar.default'), !selectedVariant, () => {
                 onVariantChange?.(undefined)
                 closeMenu(true)
-              }, <ThinkingIcon />)}
+              })}
               {variants.map(variant =>
                 radioItem(variant, formatVariantLabel(variant), selectedVariant === variant, () => {
                   onVariantChange?.(variant)
                   closeMenu(true)
-                }, <ThinkingIcon />),
+                }),
               )}
             </>
           )}
 
           {pane === 'agent' && (
             <>
-              {paneHeader(t('inputToolbar.seatAgent'))}
               {agents.map(agent =>
                 radioItem(
                   agent.id,
@@ -308,9 +303,6 @@ export function ComposerSeatMenu({
                     onAgentChange?.(agent.id)
                     closeMenu(true)
                   },
-                  <span style={agent.color ? { color: agent.color } : undefined}>
-                    <AgentIcon />
-                  </span>,
                 ),
               )}
             </>

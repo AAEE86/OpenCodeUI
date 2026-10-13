@@ -261,7 +261,7 @@ export function ComposerSeatMenu({
         isOpen={isOpen}
         position="top"
         align="left"
-        minWidth="240px"
+        minWidth="280px"
         width="300px"
         constrainToRef={constrainToRef}
         exitDuration={instantClose ? 0 : 200}

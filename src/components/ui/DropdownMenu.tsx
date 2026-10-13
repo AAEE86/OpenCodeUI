@@ -77,6 +77,8 @@ export function DropdownMenu({
       const btnCenter = (rect.left + rect.right) / 2
       const containerCenter = (cRect.left + cRect.right) / 2
 
+      // 约束模式下内容决定宽度：maxWidth 防溢出，minWidth 保底（面板切换时不忽宽忽窄）
+      size.minWidth = minWidth
       if (btnCenter > containerCenter) {
         // 按钮偏右 → 右对齐，maxWidth = 按钮右边缘到容器左边缘
         pos.right = window.innerWidth - rect.right

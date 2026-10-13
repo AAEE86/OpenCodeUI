@@ -12,7 +12,6 @@ import {
   Hand,
   Keyboard,
   Check,
-  Send,
   Plus,
   GraduationCap,
   Settings,
@@ -121,7 +120,7 @@ export const NewChatIcon = wrap(SquarePen)
 export const HandIcon = wrap(Hand)
 export const KeyboardIcon = wrap(Keyboard)
 export const CheckIcon = wrap(Check)
-export const SendIcon = wrap(Send)
+export const SendIcon = wrap(ArrowUp)
 export const PlusIcon = wrap(Plus)
 export const TeachIcon = wrap(GraduationCap)
 export const SettingsIcon = wrap(Settings)

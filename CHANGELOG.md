@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.7.7] - 2026-10-13
+
+- fix(sessions): make unpin reachable on touch for server-deleted pinned sessions (4d80cf4c)
+- fix(message): keep execute tool name consistent with other tools (18a7e672)
+- feat(message): surface what the v2 CodeMode execute tool actually runs (335e6e7b)
+- fix(ui): honor minWidth for constrained dropdown menus (753d4395)
+- fix(chat): seat menu reopens at root pane and tooltip skips empty segments (b676df23)
+- fix(ui): make dropdown menus instant and fix seat-model menu anchoring (cab92508)
+- feat(chat): DSH-style seat selector mode for the composer (b3ef0dbd)
+- feat(chat): make send/stop buttons circular (c2258163)
+- feat(chat): swap send button icon from paper plane to arrow-up (c56451a2)
+- feat(service): extra serve startup args setting, reusing the env-vars UI (77017397)
+
 ## [v0.7.6] - 2026-10-12
 
 - fix(service): honor explicitly configured server passwords and serve bind args (4908fa1a)

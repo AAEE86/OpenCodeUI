@@ -78,4 +78,25 @@ describe('ComposerSeatMenu', () => {
     expect(screen.queryByRole('menuitem', { name: /Reasoning effort/ })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: /Agent/ })).toBeNull()
   })
+
+  it('reopening after trigger-close returns to the root pane', () => {
+    renderMenu()
+    const trigger = screen.getByRole('button', { name: 'Model / effort / agent menu' })
+    fireEvent.click(trigger)
+    // 下钻到 Agent 面板
+    fireEvent.click(screen.getByRole('menuitem', { name: /Agent/ }))
+    expect(screen.getByRole('menuitemradio', { name: 'Plan' })).toBeInTheDocument()
+    // 直接点触发器关闭，再点开应回到根面板而不是停在 Agent 面板
+    fireEvent.click(trigger)
+    fireEvent.click(trigger)
+    expect(screen.getByRole('menuitem', { name: /Model/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /Reasoning effort/ })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitemradio')).toBeNull()
+  })
+
+  it('tooltip omits the effort segment when the model has no variants', () => {
+    renderMenu({ variants: [], selectedVariant: undefined })
+    const trigger = screen.getByRole('button', { name: 'Model / effort / agent menu' })
+    expect(trigger).toHaveAttribute('title', 'Kimi K3-256K · Build')
+  })
 })

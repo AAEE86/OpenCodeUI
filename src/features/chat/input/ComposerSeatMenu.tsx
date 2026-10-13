@@ -219,13 +219,21 @@ export function ComposerSeatMenu({
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => setIsOpen(open => !open)}
+        onClick={() => {
+          // 无论开关都回到根面板：开着时点按钮 = 关闭，再开应从根面板开始
+          setPane('root')
+          setIsOpen(open => !open)
+        }}
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-label={t('inputToolbar.seatMenu')}
         className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-all duration-150 hover:bg-bg-200 active:scale-95 cursor-pointer min-w-0 overflow-hidden"
-        title={`${modelLabel || t('inputToolbar.seatSelectModel')} · ${variantLabel} · ${agentLabel}`}
+        title={[
+          modelLabel || t('inputToolbar.seatSelectModel'),
+          ...(showVariantRow ? [variantLabel] : []),
+          ...(showAgentRow ? [agentLabel] : []),
+        ].join(' · ')}
       >
         <span className="text-[length:var(--fs-sm)] font-medium text-text-200 truncate max-w-[160px]">
           {modelsLoading ? '…' : modelLabel || t('inputToolbar.seatSelectModel')}

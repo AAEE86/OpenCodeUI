@@ -205,22 +205,38 @@ fn configured_server_password(env_vars: &std::collections::HashMap<String, Strin
     None
 }
 
+/// extra_args 里是否显式给了某个 flag（`--flag value` 或 `--flag=value` 两种写法都认）
+fn extra_args_have_flag(extra_args: &[String], flag: &str) -> bool {
+    let eq_prefix = format!("{flag}=");
+    extra_args
+        .iter()
+        .any(|arg| arg == flag || arg.starts_with(&eq_prefix))
+}
+
 /// 从条目 URL 派生 serve 绑定参数：用户把本机条目改成自定义主机/端口时，
 /// 让 serve 实际绑到那里（v2 serve 支持 --hostname/--port/--cors；
 /// 默认 http://127.0.0.1:4096 与显式传参行为一致）。URL 无法解析时退回裸 serve。
-/// `extra_args`（设置页「启动参数」）追加在最后，用户可覆盖前面派生的值。
+/// `extra_args`（设置页「启动参数」）追加在最后；用户显式给了 --hostname/--port 时，
+/// 对应派生值直接省略——不依赖 CLI 解析器「重复 flag 后到生效」的行为，
+/// 且实际绑定地址以 serve 启动输出的 listening URL 为准（见 parse_listening_url）。
 fn serve_args_from_url(url: &str, extra_args: &[String]) -> Vec<String> {
     let mut args = vec!["serve".to_string()];
+    let user_hostname = extra_args_have_flag(extra_args, "--hostname");
+    let user_port = extra_args_have_flag(extra_args, "--port");
     if let Ok(parsed) = reqwest::Url::parse(url) {
-        if let Some(host) = parsed.host_str() {
-            if !host.is_empty() {
-                args.push("--hostname".to_string());
-                args.push(host.to_string());
+        if !user_hostname {
+            if let Some(host) = parsed.host_str() {
+                if !host.is_empty() {
+                    args.push("--hostname".to_string());
+                    args.push(host.to_string());
+                }
             }
         }
-        if let Some(port) = parsed.port() {
-            args.push("--port".to_string());
-            args.push(port.to_string());
+        if !user_port {
+            if let Some(port) = parsed.port() {
+                args.push("--port".to_string());
+                args.push(port.to_string());
+            }
         }
     }
     args.extend(extra_args.iter().cloned());
@@ -324,11 +340,33 @@ mod tests {
 
     #[test]
     fn serve_args_append_extra_args_last() {
-        // 用户额外参数追加在派生值之后，重复 flag 时后到者生效（可覆盖 --port 等）
+        // 用户额外参数追加在派生值之后
         let extra = vec!["--cors".to_string(), "https://example.com".to_string()];
         assert_eq!(
             super::serve_args_from_url("http://127.0.0.1:4096", &extra),
             vec!["serve", "--hostname", "127.0.0.1", "--port", "4096", "--cors", "https://example.com"]
+        );
+    }
+
+    #[test]
+    fn serve_args_user_hostname_port_suppress_derived() {
+        // 用户显式给 --hostname/--port 时以用户值为准，不再重复派生
+        let extra = vec!["--hostname".to_string(), "0.0.0.0".to_string()];
+        assert_eq!(
+            super::serve_args_from_url("http://127.0.0.1:4096", &extra),
+            vec!["serve", "--port", "4096", "--hostname", "0.0.0.0"]
+        );
+        // --flag=value 写法同样生效
+        let extra_eq = vec!["--port=5000".to_string()];
+        assert_eq!(
+            super::serve_args_from_url("http://127.0.0.1:4096", &extra_eq),
+            vec!["serve", "--hostname", "127.0.0.1", "--port=5000"]
+        );
+        // 两者都给了就完全用用户的
+        let both = vec!["--hostname".to_string(), "0.0.0.0".to_string(), "--port".to_string(), "5000".to_string()];
+        assert_eq!(
+            super::serve_args_from_url("http://127.0.0.1:4096", &both),
+            vec!["serve", "--hostname", "0.0.0.0", "--port", "5000"]
         );
     }
 }

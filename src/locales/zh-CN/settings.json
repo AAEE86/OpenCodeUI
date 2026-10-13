@@ -477,7 +477,7 @@
     "envVars": "环境变量",
     "envVarsDesc": "传递给 opencode serve 进程（如 HTTPS_PROXY、API 密钥、OPENCODE_PASSWORD 服务密码）。系统环境中已设置的 OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD 也会被自动识别并使用",
     "serveArgs": "启动参数",
-    "serveArgsDesc": "追加到 opencode serve 命令之后，每行一个（如 --cors 和 https://example.com 分两行填）。主机和端口由本机服务器条目的 URL 自动派生，无需在此重复",
+    "serveArgsDesc": "追加到 opencode serve 命令之后，每行一个（如 --cors 和 https://example.com 分两行填）。主机和端口默认由本机服务器条目的 URL 派生；在此显式填写 --hostname / --port 时以你的值为准（不会重复传参）",
     "serveArgPlaceholder": "--flag 或参数值",
     "keyPlaceholder": "KEY",
     "valuePlaceholder": "值"

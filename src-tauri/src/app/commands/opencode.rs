@@ -151,9 +151,13 @@ fn parse_listening_url(line: &str) -> Option<String> {
         .split_whitespace()
         .next()?
         .trim_end_matches(|c| matches!(c, ',' | ';' | ')'));
+    // 未指定地址（0.0.0.0 / [::]）是「监听所有接口」的绑定地址，不可用于连接，
+    // 归一化成回环：绑 0.0.0.0/[::] 时回环必然可达
     let normalized = raw_url
         .replace("http://0.0.0.0:", "http://127.0.0.1:")
-        .replace("https://0.0.0.0:", "https://127.0.0.1:");
+        .replace("https://0.0.0.0:", "https://127.0.0.1:")
+        .replace("http://[::]:", "http://[::1]:")
+        .replace("https://[::]:", "https://[::1]:");
     let parsed = reqwest::Url::parse(&normalized).ok()?;
 
     Some(parsed.to_string().trim_end_matches('/').to_string())
@@ -292,6 +296,24 @@ mod tests {
         assert_eq!(parse_server_password(url_line), None);
         assert!(parse_server_password(password_line).is_some());
         assert_eq!(parse_listening_url(password_line), None);
+    }
+
+    #[test]
+    fn listening_url_normalizes_unspecified_bind_address() {
+        // 0.0.0.0 / [::] 是绑定地址不可连接，归一化成回环
+        assert_eq!(
+            parse_listening_url("server listening on http://0.0.0.0:4096").as_deref(),
+            Some("http://127.0.0.1:4096")
+        );
+        assert_eq!(
+            parse_listening_url("server listening on http://[::]:4096").as_deref(),
+            Some("http://[::1]:4096")
+        );
+        // 正常地址不受影响
+        assert_eq!(
+            parse_listening_url("server listening on http://192.168.1.2:5050").as_deref(),
+            Some("http://192.168.1.2:5050")
+        );
     }
 
     #[test]

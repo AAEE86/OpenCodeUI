@@ -210,7 +210,7 @@ export function SessionList({
             {hasUnavailablePinned && (
               <div className={`${isEditMode ? 'space-y-0' : 'space-y-0.5'} mt-1`}>
                 {unavailablePinnedEntries.map(entry => (
-                  <UnavailablePinnedSessionItem key={entry.sessionId} entry={entry} density={density} />
+                  <UnavailablePinnedSessionItem key={entry.sessionId} entry={entry} density={density} preferTouchUi={preferTouchUi} />
                 ))}
                 {sessions.length > 0 && <div className="mx-3 my-1.5 h-px bg-border-200/45" />}
               </div>
@@ -282,7 +282,7 @@ export function SessionList({
             {lastAvailablePinnedIndex < 0 && hasUnavailablePinned && (
               <>
                 {unavailablePinnedEntries.map(entry => (
-                  <UnavailablePinnedSessionItem key={entry.sessionId} entry={entry} density={density} />
+                  <UnavailablePinnedSessionItem key={entry.sessionId} entry={entry} density={density} preferTouchUi={preferTouchUi} />
                 ))}
                 {sessions.length > 0 && <div className="mx-3 my-1.5 h-px bg-border-200/45" />}
               </>
@@ -336,7 +336,7 @@ export function SessionList({
                   )}
                   {showUnavailableAfter &&
                     unavailablePinnedEntries.map(entry => (
-                      <UnavailablePinnedSessionItem key={entry.sessionId} entry={entry} density={density} />
+                      <UnavailablePinnedSessionItem key={entry.sessionId} entry={entry} density={density} preferTouchUi={preferTouchUi} />
                     ))}
                   {showPinnedDivider && <div className="mx-3 my-1.5 h-px bg-border-200/45" />}
                 </div>
@@ -912,21 +912,93 @@ export function SessionListItem({
 // Unavailable pinned (gray title, unpin only)
 // ============================================
 
-function UnavailablePinnedSessionItem({
+export function UnavailablePinnedSessionItem({
   entry,
   density = 'default',
+  preferTouchUi = false,
 }: {
   entry: PinnedSessionEntry
   density?: 'default' | 'compact' | 'minimal'
+  preferTouchUi?: boolean
 }) {
   const { t } = useTranslation(['commands'])
   const title = entry.title || entry.sessionId.slice(0, 12) + '...'
   const isCompact = density === 'compact'
   const padding = isCompact ? 'pl-[6px] pr-3 py-2' : 'px-3 py-2.5'
 
+  // 触屏没有 hover：和普通会话行一样长按显示操作按钮（issue #177）
+  const [showActions, setShowActions] = useState(false)
+  const itemRef = useRef<HTMLDivElement>(null)
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const touchMoved = useRef(false)
+
+  const handleTouchStart = () => {
+    if (!preferTouchUi) return
+    touchMoved.current = false
+    longPressTimer.current = setTimeout(() => {
+      if (!touchMoved.current) setShowActions(true)
+    }, 500)
+  }
+  const handleTouchMove = () => {
+    if (!preferTouchUi) return
+    touchMoved.current = true
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+  }
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+  }
+
+  // 点击外部收起操作按钮
+  useEffect(() => {
+    if (!showActions) return
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      if (itemRef.current && !itemRef.current.contains(e.target as Node)) {
+        setShowActions(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('touchstart', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('touchstart', handleClickOutside)
+    }
+  }, [showActions])
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current) clearTimeout(longPressTimer.current)
+    }
+  }, [])
+
+  const actionsVisible = preferTouchUi && showActions
+
   return (
-    <div className={`group relative flex items-start ${padding} border border-transparent`}>
-      <div className="flex-1 min-w-0 mr-1 group-hover:mr-8 transition-[margin] duration-200">
+    <div
+      ref={itemRef}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onClick={() => {
+        // 操作按钮已显示时点行本身只是收起，不做其它事
+        if (showActions) setShowActions(false)
+      }}
+      className={`group relative flex items-start ${padding} border border-transparent`}
+    >
+      <div
+        className={`flex-1 min-w-0 mr-1 ${
+          preferTouchUi
+            ? actionsVisible
+              ? 'mr-8'
+              : ''
+            : 'group-hover:mr-8 transition-[margin] duration-200'
+        }`}
+      >
         <p
           className={`${isCompact ? 'text-[length:var(--fs-md)]' : 'text-[length:var(--fs-base)]'} truncate font-medium text-text-500`}
           title={title}
@@ -943,7 +1015,9 @@ function UnavailablePinnedSessionItem({
           e.stopPropagation()
           pinnedSessionsStore.unpin(entry.sessionId)
         }}
-        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-accent-main-100 hover:text-accent-main-200 opacity-0 group-hover:opacity-100 transition-colors"
+        className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-accent-main-100 hover:text-accent-main-200 transition-colors ${
+          preferTouchUi ? (actionsVisible ? 'opacity-100' : 'hidden') : 'opacity-0 group-hover:opacity-100'
+        }`}
         title={t('sessions.unpin')}
         aria-label={t('sessions.unpin')}
       >

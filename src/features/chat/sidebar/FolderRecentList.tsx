@@ -722,7 +722,7 @@ function PinnedFolderSection({
             )
           })}
           {unavailableEntries.map(entry => (
-            <UnavailablePinnedSessionItem key={entry.sessionId} entry={entry} />
+            <UnavailablePinnedSessionItem key={entry.sessionId} entry={entry} preferTouchUi={preferTouchUi} />
           ))}
         </div>
       </ExpandableSection>
@@ -730,25 +730,102 @@ function PinnedFolderSection({
   )
 }
 
-function UnavailablePinnedSessionItem({ entry }: { entry: PinnedSessionEntry }) {
+function UnavailablePinnedSessionItem({
+  entry,
+  preferTouchUi = false,
+}: {
+  entry: PinnedSessionEntry
+  preferTouchUi?: boolean
+}) {
   const { t } = useTranslation(['commands'])
   const title = entry.title || entry.sessionId.slice(0, 12) + '...'
+
+  // 触屏没有 hover：和普通会话行一样长按显示取消置顶按钮（issue #177）
+  const [showActions, setShowActions] = useState(false)
+  const itemRef = useRef<HTMLDivElement>(null)
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const touchMoved = useRef(false)
+
+  const handleTouchStart = () => {
+    if (!preferTouchUi) return
+    touchMoved.current = false
+    longPressTimer.current = setTimeout(() => {
+      if (!touchMoved.current) setShowActions(true)
+    }, 500)
+  }
+  const handleTouchMove = () => {
+    if (!preferTouchUi) return
+    touchMoved.current = true
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+  }
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+  }
+
+  useEffect(() => {
+    if (!showActions) return
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      if (itemRef.current && !itemRef.current.contains(e.target as Node)) {
+        setShowActions(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('touchstart', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('touchstart', handleClickOutside)
+    }
+  }, [showActions])
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current) clearTimeout(longPressTimer.current)
+    }
+  }, [])
+
+  const actionsVisible = preferTouchUi && showActions
+
   // 对齐 minimal SessionListItem：单行布局，只把文字改灰
   return (
-    <div className="group relative flex items-center gap-2 px-2 py-1.5 select-none text-text-500">
+    <div
+      ref={itemRef}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onClick={() => {
+        if (showActions) setShowActions(false)
+      }}
+      className="group relative flex items-center gap-2 px-2 py-1.5 select-none text-text-500"
+    >
       <span className="relative shrink-0 flex items-center justify-center size-5" />
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 pr-0 group-hover:pr-8 transition-[padding] duration-200">
+      <div
+        className={`flex min-w-0 flex-1 items-center gap-1.5 pr-0 ${
+          preferTouchUi ? (actionsVisible ? 'pr-8' : '') : 'group-hover:pr-8 transition-[padding] duration-200'
+        }`}
+      >
         <span className="min-w-0 flex-1 truncate text-[length:var(--fs-sm)] text-text-500" title={title}>
           {title}
         </span>
-        <span className="shrink-0 text-[length:var(--fs-xxs)] text-text-500 group-hover:hidden">
+        <span
+          className={`shrink-0 text-[length:var(--fs-xxs)] text-text-500 ${
+            preferTouchUi ? (actionsVisible ? 'hidden' : '') : 'group-hover:hidden'
+          }`}
+        >
           {t('sessions.unavailable')}
         </span>
       </div>
       <button
         type="button"
         onClick={() => pinnedSessionsStore.unpin(entry.sessionId)}
-        className="absolute right-2 z-10 p-1 rounded text-accent-main-100 hover:text-accent-main-200 opacity-0 group-hover:opacity-100 transition-opacity"
+        className={`absolute right-2 z-10 p-1 rounded text-accent-main-100 hover:text-accent-main-200 transition-opacity ${
+          preferTouchUi ? (actionsVisible ? 'opacity-100' : 'hidden') : 'opacity-0 group-hover:opacity-100'
+        }`}
         title={t('sessions.unpin')}
         aria-label={t('sessions.unpin')}
       >

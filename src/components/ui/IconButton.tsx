@@ -6,6 +6,8 @@ type IconButtonVariant = 'ghost' | 'solid'
 interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   size?: IconButtonSize
   variant?: IconButtonVariant
+  /** 圆形按钮（发送/停止等主操作），默认圆角方形 */
+  round?: boolean
   'aria-label': string
   children: React.ReactNode
 }
@@ -22,14 +24,14 @@ const variantStyles: Record<IconButtonVariant, string> = {
 }
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
-  ({ size = 'md', variant = 'ghost', className = '', children, disabled, ...props }, ref) => {
+  ({ size = 'md', variant = 'ghost', round = false, className = '', children, disabled, ...props }, ref) => {
     return (
       <button
         ref={ref}
         disabled={disabled}
         className={`
           inline-flex items-center justify-center
-          rounded-lg
+          ${round ? 'rounded-full' : 'rounded-lg'}
           transition-all duration-150
           active:scale-90
           disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100

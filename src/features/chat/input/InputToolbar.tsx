@@ -543,13 +543,14 @@ export function InputToolbar({
           </>
         </AnimatedPresence>
         {!canSend && isStreaming && !isSending ? (
-          <IconButton aria-label={t('inputToolbar.stopGeneration')} variant="solid" onClick={onAbort}>
+          <IconButton aria-label={t('inputToolbar.stopGeneration')} variant="solid" round onClick={onAbort}>
             <StopIcon />
           </IconButton>
         ) : (
           <IconButton
             aria-label={isSending ? t('inputToolbar.sendingMessage') : t('inputToolbar.sendMessage')}
             variant="solid"
+            round
             disabled={!canSend || isSending}
             onClick={onSend}
           >

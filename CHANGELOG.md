@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.7.10] - 2026-10-14
+
+- fix(chat): restore session model/agent/variant from durable SessionInfo on fresh launch (c9429753)
+- fix(message): make tool-produced file capsules expandable like user attachments (d65a395e)
+- fix(file-explorer): scope preview tabs by workspace instead of one global list (eced73be)
+- fix(message): restore tool row descriptions lost in the v2 migration (4600e2dc)
+- fix(chat): keep bottom-follow alive through high-TPS streaming artifacts (136210b4)
+- fix(file-explorer): key preview cache by workspace, clear stale preview on switch (b05934f6)
+- fix(sidebar): switch workspace when opening a session from the active tab (3ef7ee3d)
+
 ## [v0.7.9] - 2026-10-13
 
 - fix(events): debounce catalog refetches triggered by SSE bursts (33be0456)

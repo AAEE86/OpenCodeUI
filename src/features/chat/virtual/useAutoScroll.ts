@@ -6,18 +6,27 @@
  * - markAuto/isAuto: 程序滚动时打标记（1500ms TTL, 2px 容差），
  *   防止自己的 scrollToBottom 被误判为用户滚动
  * - handleScroll 可无手势门控调用：靠 isAuto 区分程序滚动
+ * - ackTop（借鉴 dsh 的 ScrollFollow 归因）：记录上一次确认的滚动位置。
+ *   scroll 事件的位置与 min(ackTop, floor) 对比——内容收缩钳位、虚拟列表
+ *   未标记的锚定调整都不算读者滚动，不会误关贴底跟随；只有真实手势
+ *   （滚轮/键盘/滚动条拖拽，位置确实偏离确认点）才置 userScrolled。
+ *   高 TPS 流式下程序滚动标记错过后不再永久失贴，而是几何自愈回贴。
  * - 所有回调稳定（useCallback + useMemo），避免 ref 回调重挂载
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 const AUTO_TTL = 1500
 const AUTO_TOLERANCE = 2
+/** 读者滚动归因容差（px）：与 dsh sample() 的 0.5 同款语义，略放宽吸收亚像素抖动 */
+const READER_TOLERANCE = 1
 
 export function useAutoScroll(bottomThreshold = 10) {
   const scrollElRef = useRef<HTMLElement | undefined>(undefined)
   const contentElRef = useRef<HTMLElement | undefined>(undefined)
   const userScrolledRef = useRef(false)
   const [userScrolled, setUserScrolled] = useState(false)
+  // 上一次确认的滚动位置（程序滚动、已处理的 scroll 事件都会更新）
+  const ackTopRef = useRef<number | undefined>(undefined)
 
   const autoMark = useRef<{ top: number; time: number } | undefined>(undefined)
   const autoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -31,6 +40,7 @@ export function useAutoScroll(bottomThreshold = 10) {
     const target = el ?? scrollElRef.current
     if (!target) return
     autoMark.current = { top: target.scrollHeight - target.clientHeight, time: Date.now() }
+    ackTopRef.current = target.scrollTop
     if (autoTimer.current) clearTimeout(autoTimer.current)
     autoTimer.current = setTimeout(() => { autoMark.current = undefined }, AUTO_TTL)
   }, [])
@@ -54,6 +64,7 @@ export function useAutoScroll(bottomThreshold = 10) {
     }
     markAuto(el)
     el.scrollTop = max
+    ackTopRef.current = max
   }, [markAuto, setScrolled])
 
   const stop = useCallback(() => {
@@ -75,6 +86,7 @@ export function useAutoScroll(bottomThreshold = 10) {
       // isAuto 守卫：程序滚动（applyScrollAdjustment 经 scrollToFn→markAuto）
       // 不清 userScrolled，只有真实用户滚动到无溢出时才清。
       if (userScrolledRef.current && !isAuto(el)) setScrolled(false)
+      ackTopRef.current = el.scrollTop
       return
     }
     if (max - el.scrollTop < bottomThreshold) {
@@ -83,13 +95,34 @@ export function useAutoScroll(bottomThreshold = 10) {
       // 用户离底时不会产生自动回底滚动——所以 isAuto 标记的 scroll 事件到达
       // 这里只能是用户真实手势，直接清。
       if (userScrolledRef.current) setScrolled(false)
+      ackTopRef.current = el.scrollTop
       return
     }
     if (!userScrolledRef.current && isAuto(el)) {
       scrollToBottom(false)
       return
     }
+    if (!userScrolledRef.current) {
+      // 归因判定（dsh readScroll 同款）：与上一次确认位置对比，ackTop 先按当前
+      // floor 钳制——内容收缩把 scrollTop 钳下来时，钳制后的位置正是 min(ack, max)，
+      // 不算读者滚动；流式增长把 floor 推高而 scrollTop 没动也不算。
+      // 只有位置确实偏离确认点（滚轮/键盘/滚动条）才算读者离底。
+      const ack = ackTopRef.current
+      if (ack === undefined) {
+        // 首次观测：只建立基线，不做判定
+        ackTopRef.current = el.scrollTop
+        return
+      }
+      const movedByReader = Math.abs(el.scrollTop - Math.min(ack, max)) > READER_TOLERANCE
+      if (!movedByReader) {
+        // 布局产物（钳位/未标记的锚定调整）：贴底意图不变，几何自愈回贴
+        ackTopRef.current = el.scrollTop
+        scrollToBottom(false)
+        return
+      }
+    }
     stop()
+    ackTopRef.current = el.scrollTop
   }, [bottomThreshold, isAuto, scrollToBottom, setScrolled, stop])
 
   const handleWheel = useCallback((e: WheelEvent) => {

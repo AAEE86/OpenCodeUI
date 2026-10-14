@@ -83,28 +83,22 @@ export function useViewportHeight() {
       (window.matchMedia?.('(display-mode: standalone)').matches === true ||
         (window.navigator as Navigator & { standalone?: boolean }).standalone === true)
 
-    // standalone 视口少算量的**实测**补偿。
+    // 把 --app-height 钉到 window.innerHeight（px），实时跟随。
     //
-    // 教训：不能盲加 env(safe-area-inset-bottom)——「standalone 下 innerHeight
-    // 比物理屏幕少一截」的 WebKit bug 各版本少算量不一（实测有 <34px 的），
-    // 一刀切 34px 会把外壳顶出屏幕（底部内容掉进不可视区）。
-    // standalone 无浏览器 UI，screen.height 即物理全高，差值就是少算量；
-    // 健康版本差值为 0，自然不补。钳制上限防止键盘卡死状态污染基线
-    // （那种情况由下方 heal 修复，不靠补偿）。
-    let baselineGapPx = 0
-    const BASELINE_GAP_MAX = 40
-    const measureBaselineGap = () => {
-      if (!isStandalone || keyboardOpen) return
-      baselineGapPx = Math.min(Math.max(window.screen.height - window.innerHeight, 0), BASELINE_GAP_MAX)
-    }
-
-    // 把 --app-height 钉到真实可用高度（px）：innerHeight + 实测少算量。
-    // 键盘弹起时**不同步**（此时 #root 高度不变、由 keyboard-inset padding
-    // 让位，避免双重收缩）。
+    // 真机数据（iPhone 16 Pro / iOS 26 standalone）证伪了两条社区经验：
+    // - 「standalone 视口少算 safe-area」：该设备 ih == sh == 874，零少算，
+    //   任何补偿都会把外壳顶出屏幕；
+    // - 「启动时测一次基线差值补偿」：PWA 启动动画期间视口会从 ~834 爬升到
+    //   874，启动瞬间采样会锁存一个错误的补偿值。
+    // 该设备键盘弹起时 webview 真实收缩（ih 874→478），外壳跟随 innerHeight
+    // 即自然贴键盘，ki 保持 0 无需 padding；唯一需要兜底的是键盘收起后
+    // 视口卡住不回弹（下方 heal）。
+    // 键盘弹起（ki>0 的平台，如 in-browser Safari）时**不同步**，由
+    // keyboard-inset padding 让位，避免双重收缩。
     let keyboardOpen = false
     const syncAppHeight = () => {
       if (keyboardOpen) return
-      root.style.setProperty('--app-height', `${Math.round(window.innerHeight + baselineGapPx)}px`)
+      root.style.setProperty('--app-height', `${window.innerHeight}px`)
     }
 
     // iOS standalone PWA 键盘 bug（WebKit：键盘首次弹出后 innerHeight /
@@ -176,7 +170,6 @@ export function useViewportHeight() {
     const handleWindowResize = () => {
       if (!keyboardOpen) {
         maxInnerHeight = Math.max(maxInnerHeight, window.innerHeight)
-        measureBaselineGap()
       }
       measureSafeAreaBottom()
       updateViewport()
@@ -203,14 +196,13 @@ export function useViewportHeight() {
         debugBadge.textContent =
           `ih:${window.innerHeight} sh:${window.screen.height} ` +
           `vv:${vv ? Math.round(vv.height) : '-'} vt:${vv ? Math.round(vv.offsetTop) : '-'} ` +
-          `sa:${Math.round(safeAreaBottomPx)} bg:${Math.round(baselineGapPx)} ah:${ah} ki:${ki}`
+          `sa:${Math.round(safeAreaBottomPx)} ah:${ah} ki:${ki}`
       }
       updateBadge()
       debugTimer = window.setInterval(updateBadge, 500)
     }
     // ===== 临时诊断结束 =====
 
-    measureBaselineGap()
     updateViewport()
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', updateViewport)

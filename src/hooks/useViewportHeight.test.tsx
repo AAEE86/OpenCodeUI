@@ -127,9 +127,9 @@ describe('useViewportHeight', () => {
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
   })
 
-  it('heals the stuck standalone viewport by flipping #root display after keyboard close', async () => {
+  it('never blanks #root display, even with a stuck standalone metric (regression: display-flip caused full-screen white flashes on iOS)', () => {
     vi.useFakeTimers()
-    // iOS standalone 环境
+    // iOS standalone 环境 + 卡住的度量（innerHeight 812 < 物理屏 874）
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       value: (query: string) => ({
@@ -139,65 +139,15 @@ describe('useViewportHeight', () => {
         removeEventListener: () => undefined,
       }),
     })
-    // jsdom 的 screen.height 默认是 0，mock 成物理屏高（> innerHeight 即为"卡住"状态）
-    Object.defineProperty(window.screen, 'height', { configurable: true, value: 900 })
+    Object.defineProperty(window.screen, 'height', { configurable: true, value: 874 })
     const rootEl = document.createElement('div')
     rootEl.id = 'root'
     document.body.append(rootEl)
     const textarea = document.createElement('textarea')
     rootEl.append(textarea)
 
-    // 键盘弹出前的完整高度
-    installVisualViewportMock({ innerHeight: 800, viewportHeight: 800 })
+    installVisualViewportMock({ innerHeight: 812, viewportHeight: 812 })
     renderHook(() => useViewportHeight())
-
-    // WebKit bug：键盘收起后 innerHeight 仍然缩水（卡住）
-    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 700 })
-
-    const displays: Array<string | null> = []
-    const observer = new MutationObserver(mutations => {
-      for (const mutation of mutations) displays.push(mutation.oldValue)
-    })
-    observer.observe(rootEl, { attributes: true, attributeFilter: ['style'], attributeOldValue: true })
-
-    act(() => {
-      textarea.focus()
-      textarea.blur()
-      // standalone 下常驻 heal 心跳 interval，runAllTimers 会空转，按时间推进即可
-      vi.advanceTimersByTime(800)
-    })
-    // MutationObserver 回调是微任务，冲一下再断言
-    await act(async () => {
-      await Promise.resolve()
-    })
-    observer.disconnect()
-
-    // display 被翻动过（none → 恢复），触发 WebKit 重新测量视口
-    expect(displays.length).toBeGreaterThan(0)
-    expect(rootEl.style.display).toBe('')
-  })
-
-  it('does not flip #root display outside standalone mode', () => {
-    vi.useFakeTimers()
-    Object.defineProperty(window, 'matchMedia', {
-      configurable: true,
-      value: (query: string) => ({
-        matches: false,
-        media: query,
-        addEventListener: () => undefined,
-        removeEventListener: () => undefined,
-      }),
-    })
-    const rootEl = document.createElement('div')
-    rootEl.id = 'root'
-    document.body.append(rootEl)
-    const textarea = document.createElement('textarea')
-    rootEl.append(textarea)
-
-    installVisualViewportMock({ innerHeight: 800, viewportHeight: 800 })
-    renderHook(() => useViewportHeight())
-
-    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 700 })
 
     act(() => {
       textarea.focus()
@@ -205,6 +155,8 @@ describe('useViewportHeight', () => {
       vi.runAllTimers()
     })
 
+    // 钉高方案下卡住的 innerHeight 无害（布局钉 screen.height），
+    // 任何情况下都不得对 #root 做 display 翻动（iOS 上会闪全屏白）
     expect(rootEl.style.display).toBe('')
   })
 

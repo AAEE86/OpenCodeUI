@@ -105,57 +105,11 @@ export function useViewportHeight() {
       root.style.setProperty('--app-height', `${Math.round(height)}px`)
     }
 
-    // iOS standalone PWA 键盘 bug（WebKit：键盘弹出后 innerHeight /
-    // visualViewport.height 全部缩水且**不回弹**，实测卡在 sh-62，缺口
-    // 约等于键盘工具条高度），表现为底部永久黑带。此时 innerHeight 本身
-    // 是坏的，单纯同步高度没用。
-    // 已验证的恢复手段：对一个**全视口高度**的元素做一次
-    // display:none → 恢复 + 同步 reflow，强制 WebKit 重新测量视口。
-    // 参考：https://dev.to/cederhook/fixing-the-ios-standalone-pwa-keyboard-bug-that-shrinks-your-viewport-for-good-63d
-    let maxInnerHeight = window.innerHeight
-    let lastSeenInnerHeight = window.innerHeight
-    let lastHealAt = 0
-    let healAttempts = 0
-    const HEAL_COOLDOWN_MS = 400
-    const HEAL_ATTEMPT_MAX = 8
-
-    const healStuckStandaloneViewport = () => {
-      if (!isStandalone) return
-      // 键盘还在弹（有输入焦点）时绝不翻动
-      if (hasKeyboardFocus()) return
-      // 只在确实卡住时翻动（innerHeight 小于物理屏高）
-      if (window.screen.height - window.innerHeight <= 4) return
-      // 冷却 + 次数上限：翻动会引发 resize 事件，无效时不能无限翻
-      const now = Date.now()
-      if (now - lastHealAt < HEAL_COOLDOWN_MS || healAttempts >= HEAL_ATTEMPT_MAX) return
-      lastHealAt = now
-      healAttempts += 1
-
-      const el = document.getElementById('root')
-      if (!el) return
-
-      // display 翻动会重建布局盒，保存/恢复聊天滚动位置避免跳顶
-      const scroller = el.querySelector<HTMLElement>('[data-chat-scroll-root="true"]')
-      const scrollTop = scroller?.scrollTop ?? 0
-      el.style.display = 'none'
-      void el.offsetHeight // 同步 reflow：两次布局之间无绘制
-      el.style.display = ''
-      if (scroller) scroller.scrollTop = scrollTop
-      // 视口恢复后重新钉高度
-      maxInnerHeight = Math.max(maxInnerHeight, window.innerHeight)
-      syncAppHeight()
-    }
-
     const hasKeyboardFocus = () => isKeyboardEditableElement(document.activeElement)
 
     const updateViewport = () => {
       const viewport = window.visualViewport
       if (!viewport) return
-      // innerHeight 有变化（恢复或新的收缩）→ 重置 heal 次数，允许新一轮尝试
-      if (window.innerHeight !== lastSeenInnerHeight) {
-        lastSeenInnerHeight = window.innerHeight
-        healAttempts = 0
-      }
       const rawInset = window.innerHeight - viewport.height - viewport.offsetTop
       // 减掉 safe-area phantom，再用阈值区分键盘与 iOS Safari 底部工具栏。
       // 真实软键盘通常远高于 100px，工具栏/phantom 误差一般低于这个值。
@@ -163,12 +117,6 @@ export function useViewportHeight() {
       const keyboardInset = candidateInset >= KEYBOARD_INSET_THRESHOLD ? candidateInset : 0
       keyboardOpen = keyboardInset > 0
       setKeyboardInset(keyboardInset)
-      // 自动修复：键盘没弹（heal 内部还会查输入焦点）而视口卡住时，
-      // 任何视口事件都顺手尝试一次；不依赖 focusout/键盘转换等特定路径
-      // （滑动收起键盘不触发 focusout，且本设备 ki 恒为 0 无转换可探测）
-      if (!keyboardOpen) {
-        healStuckStandaloneViewport()
-      }
       syncAppHeight()
     }
 
@@ -182,8 +130,6 @@ export function useViewportHeight() {
             // iOS PWA 有时在键盘收起后不派发 visualViewport.resize，必须主动清掉旧 inset。
             keyboardOpen = false
             setKeyboardInset(0)
-            // 键盘已收起：standalone 卡住的视口在这里强制重测恢复
-            healStuckStandaloneViewport()
             syncAppHeight()
           }
         }, delay),
@@ -192,19 +138,9 @@ export function useViewportHeight() {
 
     // 旋转设备 / 窗口 resize 时 safe-area 可能变化，重测一次。
     const handleWindowResize = () => {
-      if (!keyboardOpen) {
-        maxInnerHeight = Math.max(maxInnerHeight, window.innerHeight)
-      }
       measureSafeAreaBottom()
       updateViewport()
     }
-
-    // 兜底心跳：滑动收键盘等零事件场景下也能自愈（heal 自带焦点/冷却/次数守卫）
-    const healHeartbeat = isStandalone
-      ? window.setInterval(() => {
-          if (!keyboardOpen) healStuckStandaloneViewport()
-        }, 2000)
-      : null
 
     updateViewport()
     if (window.visualViewport) {
@@ -218,7 +154,6 @@ export function useViewportHeight() {
     document.addEventListener('visibilitychange', syncAfterFocusSettles)
     return () => {
       clearKeyboardSettleTimers()
-      if (healHeartbeat !== null) window.clearInterval(healHeartbeat)
       if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', updateViewport)
         window.visualViewport.removeEventListener('scroll', updateViewport)

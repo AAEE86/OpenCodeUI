@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useViewportHeight } from './useViewportHeight'
 
 type VisualViewportMock = EventTarget & {
@@ -42,8 +42,17 @@ function restoreWindowProperty(name: 'innerHeight' | 'visualViewport', descripto
 }
 
 describe('useViewportHeight', () => {
+  beforeEach(() => {
+    // 键盘会话会优先钉 screen.height——默认归零，需要可信值的用例自己 mock
+    Object.defineProperty(window.screen, 'height', { configurable: true, value: 0 })
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+  })
+
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
+    // jsdom 移除 DOM 不一定清 activeElement，显式 blur 避免焦点泄漏到下个用例
+    ;(document.activeElement as HTMLElement | null)?.blur?.()
     document.body.replaceChildren()
     document.documentElement.className = ''
     document.documentElement.removeAttribute('style')
@@ -59,8 +68,9 @@ describe('useViewportHeight', () => {
 
     renderHook(() => useViewportHeight())
 
-    // 键盘弹起：单通道补偿——钉 visualViewport 可见底边（500）
-    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('500px')
+    // 键盘弹起：进入键盘会话（放开文档滚动交给原生 reveal），高度冻结
+    expect(document.documentElement.classList.contains('keyboard-session')).toBe(true)
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
 
     act(() => {
       textarea.focus()
@@ -68,11 +78,12 @@ describe('useViewportHeight', () => {
       vi.runAllTimers()
     })
 
-    // 键盘收起但 visualViewport 没派发 resize：焦点结算仍复位到 innerHeight
+    // 键盘收起但 visualViewport 没派发 resize：焦点结算仍复位
+    expect(document.documentElement.classList.contains('keyboard-session')).toBe(false)
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
   })
 
-  it('keeps the keyboard height while focus moves between text inputs', () => {
+  it('keeps the keyboard session while focus moves between text inputs', () => {
     vi.useFakeTimers()
     installVisualViewportMock({ innerHeight: 800, viewportHeight: 500 })
     const textarea = document.createElement('textarea')
@@ -87,7 +98,7 @@ describe('useViewportHeight', () => {
       vi.runAllTimers()
     })
 
-    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('500px')
+    expect(document.documentElement.classList.contains('keyboard-session')).toBe(true)
   })
 
   it('syncs --app-height to window.innerHeight when no keyboard is open', () => {
@@ -95,44 +106,34 @@ describe('useViewportHeight', () => {
 
     renderHook(() => useViewportHeight())
 
+    expect(document.documentElement.classList.contains('keyboard-session')).toBe(false)
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
   })
 
-  it('pins --app-height to the visualViewport visible bottom while the keyboard is open (single-channel compensation)', () => {
-    const viewport = installVisualViewportMock({ innerHeight: 800, viewportHeight: 800 })
-
-    renderHook(() => useViewportHeight())
-    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
-
-    // 键盘弹起：visualViewport 缩小，--app-height 跟随可见底边。
-    // 不能再叠加 padding 通道，否则双重收缩会把输入框抬到屏幕中段。
-    Object.defineProperty(viewport, 'height', { configurable: true, value: 500 })
-    act(() => {
-      viewport.dispatchEvent(new Event('resize'))
-    })
-
-    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('500px')
-  })
-
-  it('accounts for visualViewport offsetTop in the keyboard-open height', () => {
-    installVisualViewportMock({ innerHeight: 800, viewportHeight: 500, offsetTop: 30 })
+  it('pins --app-height to screen.height while the keyboard is open (metrics are untrustworthy during the IME)', () => {
+    // iOS 键盘弹起时实测：ih=685、vv=345（少报 ~120px），只有 screen.height 可信
+    Object.defineProperty(window.screen, 'height', { configurable: true, value: 874 })
+    installVisualViewportMock({ innerHeight: 685, viewportHeight: 345, offsetTop: 19 })
 
     renderHook(() => useViewportHeight())
 
-    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('530px')
+    expect(document.documentElement.classList.contains('keyboard-session')).toBe(true)
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('874px')
   })
 
   it('resyncs --app-height after the keyboard closes (iOS standalone bottom-gap guard)', () => {
     const viewport = installVisualViewportMock({ innerHeight: 800, viewportHeight: 500 })
 
     renderHook(() => useViewportHeight())
+    expect(document.documentElement.classList.contains('keyboard-session')).toBe(true)
 
-    // 键盘收起，innerHeight 恢复：--app-height 重新钉回真实高度
+    // 键盘收起，innerHeight 恢复：退出键盘会话，--app-height 重新钉回真实高度
     Object.defineProperty(viewport, 'height', { configurable: true, value: 800 })
     act(() => {
       viewport.dispatchEvent(new Event('resize'))
     })
 
+    expect(document.documentElement.classList.contains('keyboard-session')).toBe(false)
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
   })
 
@@ -188,7 +189,7 @@ describe('useViewportHeight', () => {
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('874px')
   })
 
-  it('follows innerHeight instead of screen.height while the keyboard has focus in standalone', () => {
+  it('keeps --app-height pinned to screen.height during a keyboard session in standalone', () => {
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       value: (query: string) => ({
@@ -206,7 +207,9 @@ describe('useViewportHeight', () => {
 
     renderHook(() => useViewportHeight())
 
-    // 键盘弹起（webview 真实收缩）：钉 innerHeight，不是 screen.height
-    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('478px')
+    // 键盘会话期间 standalone 也钉 screen.height（布局交给原生 reveal，
+    // 不信任任何键盘态度量——ih/vv 在 iOS 26 上都是污染值）
+    expect(document.documentElement.classList.contains('keyboard-session')).toBe(true)
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('874px')
   })
 })

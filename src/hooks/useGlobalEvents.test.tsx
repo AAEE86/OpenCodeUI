@@ -366,6 +366,33 @@ describe('useGlobalEvents', () => {
     expect(clearPaneSessionMock).toHaveBeenCalledWith('local::child-session')
   })
 
+  it('never attributes active sessions to scope directories (v2 status/permission/form lists are global)', async () => {
+    // 回归：v2 的 active/permission/form 列表接口不按目录过滤。曾经把返回的
+    // session 按「查询时的 scope 目录」写进 meta.directory，导致活跃 session 被
+    // 最后一个订阅工作区覆盖，文件预览串到别的工作区。
+    getSessionStatusMock.mockResolvedValue({ 'ses-active': { type: 'busy' } })
+    getPendingPermissionsMock.mockResolvedValue([
+      { id: 'perm-1', sessionID: 'ses-active', action: 'bash', resources: [] },
+    ])
+    getPendingFormsMock.mockResolvedValue([])
+
+    renderHook(() => useGlobalEvents(['/dir-a', '/dir-b']))
+
+    // 等待初始化完成（单服务器首次拉取走 initialize；两个 scope 的全局结果合并后写入）
+    await waitFor(() => {
+      expect(activeSessionStoreMock.initialize).toHaveBeenCalledWith({
+        'local::ses-active': { type: 'busy' },
+      })
+    })
+
+    // 不允许任何「按 scope 目录贴标签」的批量 meta 写入
+    expect(activeSessionStoreMock.setSessionMetaBulk).not.toHaveBeenCalled()
+    for (const call of activeSessionStoreMock.setSessionMeta.mock.calls) {
+      expect(call[2]).not.toBe('/dir-a')
+      expect(call[2]).not.toBe('/dir-b')
+    }
+  })
+
   it('ignores stale initialization responses after directories change', async () => {
     const statusDeferreds = new Map<string, ReturnType<typeof createDeferred<Record<string, { type: string }>>>>()
     getPendingPermissionsMock.mockResolvedValue([])

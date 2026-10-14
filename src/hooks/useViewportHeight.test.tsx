@@ -139,6 +139,8 @@ describe('useViewportHeight', () => {
         removeEventListener: () => undefined,
       }),
     })
+    // jsdom 的 screen.height 默认是 0，mock 成物理屏高（> innerHeight 即为"卡住"状态）
+    Object.defineProperty(window.screen, 'height', { configurable: true, value: 900 })
     const rootEl = document.createElement('div')
     rootEl.id = 'root'
     document.body.append(rootEl)
@@ -204,5 +206,46 @@ describe('useViewportHeight', () => {
     })
 
     expect(rootEl.style.display).toBe('')
+  })
+
+  it('pins --app-height to screen.height in standalone when the keyboard is closed', () => {
+    // standalone + 漂移的坏度量（innerHeight 812，物理屏 874）
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        matches: query === '(display-mode: standalone)',
+        media: query,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      }),
+    })
+    Object.defineProperty(window.screen, 'height', { configurable: true, value: 874 })
+    installVisualViewportMock({ innerHeight: 812, viewportHeight: 812 })
+
+    renderHook(() => useViewportHeight())
+
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('874px')
+  })
+
+  it('follows innerHeight instead of screen.height while the keyboard has focus in standalone', () => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        matches: query === '(display-mode: standalone)',
+        media: query,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      }),
+    })
+    Object.defineProperty(window.screen, 'height', { configurable: true, value: 874 })
+    installVisualViewportMock({ innerHeight: 478, viewportHeight: 478 })
+    const textarea = document.createElement('textarea')
+    document.body.append(textarea)
+    textarea.focus()
+
+    renderHook(() => useViewportHeight())
+
+    // 键盘弹起（webview 真实收缩）：钉 innerHeight，不是 screen.height
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('478px')
   })
 })

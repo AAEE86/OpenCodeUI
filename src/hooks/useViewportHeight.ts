@@ -83,36 +83,54 @@ export function useViewportHeight() {
       (window.matchMedia?.('(display-mode: standalone)').matches === true ||
         (window.navigator as Navigator & { standalone?: boolean }).standalone === true)
 
-    // 把 --app-height 钉到 window.innerHeight（px），实时跟随。
+    // 把 --app-height 钉到可信高度（px），实时跟随。
     //
-    // 真机数据（iPhone 16 Pro / iOS 26 standalone）证伪了两条社区经验：
-    // - 「standalone 视口少算 safe-area」：该设备 ih == sh == 874，零少算，
-    //   任何补偿都会把外壳顶出屏幕；
-    // - 「启动时测一次基线差值补偿」：PWA 启动动画期间视口会从 ~834 爬升到
-    //   874，启动瞬间采样会锁存一个错误的补偿值。
-    // 该设备键盘弹起时 webview 真实收缩（ih 874→478），外壳跟随 innerHeight
-    // 即自然贴键盘，ki 保持 0 无需 padding；唯一需要兜底的是键盘收起后
-    // 视口卡住不回弹（下方 heal）。
-    // 键盘弹起（ki>0 的平台，如 in-browser Safari）时**不同步**，由
-    // keyboard-inset padding 让位，避免双重收缩。
+    // 真机数据（iPhone 16 Pro / iOS 26 standalone）最终结论：
+    // - standalone 的窗口**永远全屏**，坏的是 WebKit 上报的视口度量——
+    //   innerHeight 在不同启动间随机漂移（实测 874/834/812，sh 恒为 874，
+    //   WebKit 有 bug 记录它缓存键盘态的错误度量），且与是否弹过键盘无关；
+    // - 空隙区域渲染的是网页自己的背景色 → 该区域 webview **画得出来**，
+    //   只是布局被错误度量限制了；
+    // - 因此 standalone 且键盘未弹（无输入焦点）时，外壳高度直接钉
+    //   screen.height（唯一恒定可信的值）；键盘弹起时 webview 真实收缩
+    //   （实测 ih 874→478），钉 innerHeight 自然贴键盘。
+    // - 浏览器模式（非 standalone）有工具栏，innerHeight 才是真实可视高，
+    //   且 ki>0 时冻结高度、由 keyboard-inset padding 让位（避免双重收缩）。
     let keyboardOpen = false
+    const isKeyboardActive = () => keyboardOpen || hasKeyboardFocus()
     const syncAppHeight = () => {
       if (keyboardOpen) return
-      root.style.setProperty('--app-height', `${window.innerHeight}px`)
+      const useScreenHeight = isStandalone && !isKeyboardActive() && window.screen.height > 0
+      const height = useScreenHeight ? window.screen.height : window.innerHeight
+      root.style.setProperty('--app-height', `${Math.round(height)}px`)
     }
 
-    // iOS standalone PWA 键盘 bug（WebKit：键盘首次弹出后 innerHeight /
-    // visualViewport.height / 100dvh 全部缩水且**永不回弹**，直到强杀 app），
-    // 表现为底部永久黑带。此时 innerHeight 本身是坏的，单纯同步高度没用。
-    // 已验证的恢复手段：键盘收起后对一个**全视口高度**的元素做一次
+    // iOS standalone PWA 键盘 bug（WebKit：键盘弹出后 innerHeight /
+    // visualViewport.height 全部缩水且**不回弹**，实测卡在 sh-62，缺口
+    // 约等于键盘工具条高度），表现为底部永久黑带。此时 innerHeight 本身
+    // 是坏的，单纯同步高度没用。
+    // 已验证的恢复手段：对一个**全视口高度**的元素做一次
     // display:none → 恢复 + 同步 reflow，强制 WebKit 重新测量视口。
     // 参考：https://dev.to/cederhook/fixing-the-ios-standalone-pwa-keyboard-bug-that-shrinks-your-viewport-for-good-63d
     let maxInnerHeight = window.innerHeight
+    let lastSeenInnerHeight = window.innerHeight
+    let lastHealAt = 0
+    let healAttempts = 0
+    const HEAL_COOLDOWN_MS = 400
+    const HEAL_ATTEMPT_MAX = 8
 
     const healStuckStandaloneViewport = () => {
       if (!isStandalone) return
-      // 只在确实卡住时翻动（键盘刚收起时 innerHeight 仍小于历史最大值）
-      if (maxInnerHeight - window.innerHeight <= 4) return
+      // 键盘还在弹（有输入焦点）时绝不翻动
+      if (hasKeyboardFocus()) return
+      // 只在确实卡住时翻动（innerHeight 小于物理屏高）
+      if (window.screen.height - window.innerHeight <= 4) return
+      // 冷却 + 次数上限：翻动会引发 resize 事件，无效时不能无限翻
+      const now = Date.now()
+      if (now - lastHealAt < HEAL_COOLDOWN_MS || healAttempts >= HEAL_ATTEMPT_MAX) return
+      lastHealAt = now
+      healAttempts += 1
+
       const el = document.getElementById('root')
       if (!el) return
 
@@ -133,16 +151,22 @@ export function useViewportHeight() {
     const updateViewport = () => {
       const viewport = window.visualViewport
       if (!viewport) return
+      // innerHeight 有变化（恢复或新的收缩）→ 重置 heal 次数，允许新一轮尝试
+      if (window.innerHeight !== lastSeenInnerHeight) {
+        lastSeenInnerHeight = window.innerHeight
+        healAttempts = 0
+      }
       const rawInset = window.innerHeight - viewport.height - viewport.offsetTop
       // 减掉 safe-area phantom，再用阈值区分键盘与 iOS Safari 底部工具栏。
       // 真实软键盘通常远高于 100px，工具栏/phantom 误差一般低于这个值。
       const candidateInset = rawInset - safeAreaBottomPx
       const keyboardInset = candidateInset >= KEYBOARD_INSET_THRESHOLD ? candidateInset : 0
-      const wasKeyboardOpen = keyboardOpen
       keyboardOpen = keyboardInset > 0
       setKeyboardInset(keyboardInset)
-      // 键盘刚关闭（含滑动收起、不触发 focusout 的路径）：立即尝试修复卡住的视口
-      if (wasKeyboardOpen && !keyboardOpen) {
+      // 自动修复：键盘没弹（heal 内部还会查输入焦点）而视口卡住时，
+      // 任何视口事件都顺手尝试一次；不依赖 focusout/键盘转换等特定路径
+      // （滑动收起键盘不触发 focusout，且本设备 ki 恒为 0 无转换可探测）
+      if (!keyboardOpen) {
         healStuckStandaloneViewport()
       }
       syncAppHeight()
@@ -178,9 +202,12 @@ export function useViewportHeight() {
     // ===== 临时诊断（iOS standalone 底部空隙定位用，拿到真实数据后移除）=====
     // 角标显示关键视口度量，500ms 刷新；只在 standalone PWA 出现。
     // ih=innerHeight sh=screen.height vv=visualViewport.height vt=vv.offsetTop
-    // sa=safe-area-inset-bottom(px) ah=--app-height ki=keyboard-inset
+    // sa=safe-area-inset-bottom(px) ah=--app-height ki=keyboard-inset ha=heal次数
+    // p1/p2 色带：画在视口下沿之外 30px/60px 处——用户能看到 = 缺口区域可绘制
+    // （可兜底补偿），看不到 = 系统死区（只能靠 heal 修复）。
     let debugBadge: HTMLDivElement | null = null
     let debugTimer: number | null = null
+    const debugProbes: HTMLDivElement[] = []
     if (isStandalone) {
       debugBadge = document.createElement('div')
       debugBadge.style.cssText =
@@ -196,12 +223,30 @@ export function useViewportHeight() {
         debugBadge.textContent =
           `ih:${window.innerHeight} sh:${window.screen.height} ` +
           `vv:${vv ? Math.round(vv.height) : '-'} vt:${vv ? Math.round(vv.offsetTop) : '-'} ` +
-          `sa:${Math.round(safeAreaBottomPx)} ah:${ah} ki:${ki}`
+          `sa:${Math.round(safeAreaBottomPx)} ah:${ah} ki:${ki} ha:${healAttempts}`
       }
       updateBadge()
       debugTimer = window.setInterval(updateBadge, 500)
+
+      for (const [index, offset] of [30, 60].entries()) {
+        const probe = document.createElement('div')
+        probe.style.cssText =
+          `position:fixed;left:4px;bottom:-${offset}px;width:80px;height:14px;z-index:99999;` +
+          `pointer-events:none;font:10px/14px monospace;color:#000;text-align:center;` +
+          `background:${index === 0 ? '#ff0' : '#f0f'}`
+        probe.textContent = `p${index + 1}`
+        document.body.appendChild(probe)
+        debugProbes.push(probe)
+      }
     }
     // ===== 临时诊断结束 =====
+
+    // 兜底心跳：滑动收键盘等零事件场景下也能自愈（heal 自带焦点/冷却/次数守卫）
+    const healHeartbeat = isStandalone
+      ? window.setInterval(() => {
+          if (!keyboardOpen) healStuckStandaloneViewport()
+        }, 2000)
+      : null
 
     updateViewport()
     if (window.visualViewport) {
@@ -217,6 +262,8 @@ export function useViewportHeight() {
       clearKeyboardSettleTimers()
       if (debugTimer !== null) window.clearInterval(debugTimer)
       debugBadge?.remove()
+      debugProbes.forEach(probe => probe.remove())
+      if (healHeartbeat !== null) window.clearInterval(healHeartbeat)
       if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', updateViewport)
         window.visualViewport.removeEventListener('scroll', updateViewport)

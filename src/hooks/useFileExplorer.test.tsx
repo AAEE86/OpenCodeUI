@@ -239,4 +239,37 @@ describe('useFileExplorer change scope', () => {
     })
     expect(getFileContent).toHaveBeenCalledWith('castle-village-3d/index.html', '/repo', undefined)
   })
+
+  // 切工作区后预览串内容：两个工作区都有同名相对路径文件时，预览缓存
+  // 只按 path 命中会显示上一个工作区的内容（缓存键必须带目录维度）
+  it('does not serve preview content cached from another workspace for the same relative path', async () => {
+    getFileContent.mockImplementation(async (path: string, directory: string) => ({
+      type: 'text',
+      content: `${directory} 的 ${path}`,
+    }))
+
+    const { result, rerender } = renderHook(({ directory }: { directory: string }) => useFileExplorer({ directory, autoLoad: true }), {
+      initialProps: { directory: '/repo-a' },
+    })
+
+    await waitFor(() => {
+      expect(result.current.tree.length).toBeGreaterThan(0)
+    })
+
+    await act(async () => {
+      await result.current.loadPreview('src/session.ts')
+    })
+    expect(result.current.previewContent?.content).toBe('/repo-a 的 src/session.ts')
+
+    // 切到 /repo-b：同名文件必须重新拉取，不能命中 /repo-a 的缓存
+    rerender({ directory: '/repo-b' })
+
+    await act(async () => {
+      await result.current.loadPreview('src/session.ts')
+    })
+    expect(result.current.previewContent?.content).toBe('/repo-b 的 src/session.ts')
+    expect(getFileContent).toHaveBeenCalledWith('src/session.ts', '/repo-b', undefined)
+    // 不能是缓存直出：确实发起了第二次请求
+    expect(getFileContent.mock.calls.filter(call => call[0] === 'src/session.ts')).toHaveLength(2)
+  })
 })

@@ -312,7 +312,10 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
       setPreviewLoading(true)
       setPreviewError(null)
 
-      const cached = previewCacheRef.current.get(path)
+      // 缓存键必须带服务器+目录维度：相对路径在不同工作区会撞名（两边都有
+      // src/app.ts），只按 path 缓存会在切工作区后预览到上一个工作区的同名文件
+      const cacheKey = `${serverId ?? ''}::${effectiveDirectory}::${path}`
+      const cached = previewCacheRef.current.get(cacheKey)
       if (cached) {
         if (loadId === previewLoadIdRef.current) {
           setPreviewContent(cached)
@@ -324,7 +327,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
       try {
         const content = await getFileContent(path, effectiveDirectory, serverId)
         if (loadId !== previewLoadIdRef.current) return
-        previewCacheRef.current.set(path, content)
+        previewCacheRef.current.set(cacheKey, content)
         setPreviewContent(content)
       } catch (e) {
         if (loadId !== previewLoadIdRef.current) return
@@ -345,6 +348,18 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     setPreviewError(null)
     setPreviewLoading(false)
   }, [])
+
+  // 工作区/会话目录切换：清掉旧目录的预览内容，避免在 FileExplorer 重新
+  // loadPreview 之前短暂显示上一个工作区的文件（缓存按目录分键，切回仍能秒开）
+  const prevPreviewDirectoryRef = useRef(effectiveDirectory)
+  useEffect(() => {
+    if (prevPreviewDirectoryRef.current === effectiveDirectory) return
+    prevPreviewDirectoryRef.current = effectiveDirectory
+    previewLoadIdRef.current += 1
+    setPreviewContent(null)
+    setPreviewError(null)
+    setPreviewLoading(false)
+  }, [effectiveDirectory])
 
   // 刷新
   const refresh = useCallback(async () => {

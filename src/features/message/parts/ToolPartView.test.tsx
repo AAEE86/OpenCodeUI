@@ -154,3 +154,42 @@ describe('ToolPartView running duration', () => {
     expect(container.firstElementChild?.className).toContain('pt-1')
   })
 })
+
+// v2 的工具 metadata 不再带 title，描述要从 input 派生（官方 getToolInfo 同款）
+describe('ToolPartView title fallback from input', () => {
+  function completedTool(name: string, input: { [key: string]: string }): ToolViewPart {
+    return {
+      type: 'tool',
+      id: `tool-${name}`,
+      name,
+      messageID: 'message-1',
+      state: { status: 'running', input, metadata: {} },
+      time: { created: 7_500 },
+    }
+  }
+
+  it('read/edit/write 显示文件名', () => {
+    render(<ToolPartView part={completedTool('edit', { path: 'src/features/chat/InputBox.tsx' })} context={MESSAGE_CONTEXT} />)
+    expect(screen.getByText('InputBox.tsx')).toBeInTheDocument()
+  })
+
+  it('read 兼容反斜杠路径', () => {
+    render(<ToolPartView part={completedTool('read', { path: 'src\\store\\messageStore.ts' })} context={MESSAGE_CONTEXT} />)
+    expect(screen.getByText('messageStore.ts')).toBeInTheDocument()
+  })
+
+  it('glob/grep 显示 pattern', () => {
+    render(<ToolPartView part={completedTool('grep', { pattern: 'useAutoScroll' })} context={MESSAGE_CONTEXT} />)
+    expect(screen.getByText('useAutoScroll')).toBeInTheDocument()
+  })
+
+  it('shell/bash 显示命令', () => {
+    render(<ToolPartView part={completedTool('shell', { command: 'npm run build' })} context={MESSAGE_CONTEXT} />)
+    expect(screen.getByText('npm run build')).toBeInTheDocument()
+  })
+
+  it('webfetch 显示 url', () => {
+    render(<ToolPartView part={completedTool('webfetch', { url: 'https://example.com/doc' })} context={MESSAGE_CONTEXT} />)
+    expect(screen.getByText('https://example.com/doc')).toBeInTheDocument()
+  })
+})

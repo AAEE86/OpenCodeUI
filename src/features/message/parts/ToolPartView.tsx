@@ -571,14 +571,32 @@ function getTaskChildSessionRef(part: ToolViewPart, serverId: string): TaskChild
 function getInputDescription(part: ToolViewPart): string | undefined {
   const input = currentToolInput(part)
   if (typeof input.description === 'string' && input.description) return input.description
+  // 文件名：官方 getFilename 同款（basename，兼容正反斜杠）
+  const filename = (value: unknown) =>
+    typeof value === 'string' && value ? value.split(/[\\/]/).filter(Boolean).pop() : undefined
+  const name = part.name.toLowerCase()
+  // 文件类工具：官方 v2 subtitle 是文件名（tool-renderer getToolInfo 同款）——
+  // v1 靠 metadata.title 提供描述，v2 没有了，必须从 input 派生
+  if (name === 'read' || name === 'edit' || name === 'write') return filename(input.path)
   // list：官方 subtitle 是目录路径（session-ui tool-renderer.tsx:1392-1412 同款）
-  if (part.name === 'list' && typeof input.path === 'string') return input.path || '/'
+  if (name === 'list' && typeof input.path === 'string') return input.path || '/'
+  // glob/grep：官方 subtitle 是 pattern
+  if ((name === 'glob' || name === 'grep') && typeof input.pattern === 'string' && input.pattern) {
+    return input.pattern
+  }
+  // webfetch/websearch：官方 subtitle 是 url/query
+  if (name === 'webfetch' && typeof input.url === 'string' && input.url) return input.url
+  if (name === 'websearch' && typeof input.query === 'string' && input.query) return input.query
+  // shell：官方 subtitle 是 command
+  if ((name === 'shell' || name === 'bash') && typeof input.command === 'string' && input.command) {
+    return input.command
+  }
   // skill：官方 loadedSkill 行带技能名（input.name，session-ui:2178 同款）
-  if (part.name === 'skill' && typeof input.name === 'string' && input.name) return input.name
+  if (name === 'skill' && typeof input.name === 'string' && input.name) return input.name
   // execute（v2 CodeMode）：优先运行时子调用记录（metadata.toolCalls，带真实状态），
   // 其次静态解析 code 里的 tools.xxx(...) 调用点（流式早期即可用），
   // 最后退回官方做法——code 首行
-  if (part.name === 'execute') {
+  if (name === 'execute') {
     const chain =
       executeSubCallSummary(currentToolMetadata(part)) ??
       (typeof input.code === 'string' ? parseCodeModeToolCalls(input.code) : undefined)

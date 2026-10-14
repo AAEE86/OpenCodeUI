@@ -2,7 +2,8 @@ name: Build & Push Frontend Docker Image
 
 on:
   push:
-    branches: [main]
+    # dev 推送即重建（tag: dev），main 推送出 latest —— 和 Pages 部署同节奏
+    branches: [main, dev]
     paths:
       - 'src/**'
       - 'public/**'
@@ -14,6 +15,7 @@ on:
       - 'docker/Dockerfile.frontend'
       - 'docker/Caddyfile'
       - 'docker/Caddyfile.standalone'
+      - '.github/workflows/docker-frontend.yml'
   workflow_dispatch:
 
 concurrency:

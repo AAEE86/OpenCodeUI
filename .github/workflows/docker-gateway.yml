@@ -2,12 +2,13 @@ name: Build & Push Gateway Docker Image
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'docker/Dockerfile.gateway'
       - 'docker/Caddyfile.gateway'
       - 'docker/entrypoint-gateway.sh'
       - 'src-router/**'
+      - '.github/workflows/docker-gateway.yml'
   workflow_dispatch:
 
 concurrency:

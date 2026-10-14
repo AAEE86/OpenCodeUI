@@ -34,6 +34,7 @@ import {
 } from './features/chat/chatViewport'
 import { uiErrorHandler, isSameDirectory, collectActiveDirectories } from './utils'
 import { makeSessionKey, sessionKeyToServerId, splitSessionKey } from './utils/sessionKey'
+import { sessionRouteDirectory } from './utils/sessionDirectory'
 import { multiServerStore } from './store/multiServerStore'
 import { serverStore } from './store/serverStore'
 import { initNotificationSound } from './utils/notificationSoundBridge'
@@ -217,11 +218,12 @@ function App() {
   )
 
   const handleSelectSession = useCallback(
-    (session: { id: string; serverId?: string; directory?: string }) => {
+    (session: { id: string; serverId?: string; directory?: string; location?: { directory?: string } }) => {
       const paneId = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
       if (!paneId) return
       const sessionKey = makeSessionKey(session.serverId ?? serverStore.getActiveServerId(), session.id)
-      navigatePaneToSession(paneId, sessionKey, session.directory)
+      // v2 的目录在 location.directory；扁平 directory 只有命令面板等少数路径会带
+      navigatePaneToSession(paneId, sessionKey, sessionRouteDirectory(session))
     },
     [paneLayout.focusedPaneId, navigatePaneToSession],
   )

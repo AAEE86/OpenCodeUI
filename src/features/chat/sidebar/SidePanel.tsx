@@ -777,7 +777,10 @@ export function SidePanel({
   const handleSelectActive = useCallback(
     (session: ApiSession & { serverId?: string }) => {
       if (session.location?.directory) {
-        if (session.serverId) {
+        // 调用点无条件给 session 附加 serverId（splitSessionKey 对非复合 key
+        // 也回退活动服务器），所以这里必须看模式而不是 serverId 是否存在，
+        // 否则单服务器永远走 addServerWorkspace（只添加、不切换工作区）
+        if (multiServerConfig.enabled && session.serverId) {
           // 多服务器模式：写入该 session 所属服务器的工作区（避免污染活动服务器）
           addServerWorkspace(session.serverId, session.location?.directory)
         } else {
@@ -790,7 +793,7 @@ export function SidePanel({
         onCloseMobile()
       }
     },
-    [addDirectory, addServerWorkspace, onSelectSession, onCloseMobile],
+    [multiServerConfig.enabled, addDirectory, onSelectSession, onCloseMobile],
   )
 
   const renderActiveSessionNode = useCallback(

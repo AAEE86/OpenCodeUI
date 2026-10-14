@@ -199,48 +199,6 @@ export function useViewportHeight() {
       updateViewport()
     }
 
-    // ===== 临时诊断（iOS standalone 底部空隙定位用，拿到真实数据后移除）=====
-    // 角标显示关键视口度量，500ms 刷新；只在 standalone PWA 出现。
-    // ih=innerHeight sh=screen.height vv=visualViewport.height vt=vv.offsetTop
-    // sa=safe-area-inset-bottom(px) ah=--app-height ki=keyboard-inset ha=heal次数
-    // p1/p2 色带：画在视口下沿之外 30px/60px 处——用户能看到 = 缺口区域可绘制
-    // （可兜底补偿），看不到 = 系统死区（只能靠 heal 修复）。
-    let debugBadge: HTMLDivElement | null = null
-    let debugTimer: number | null = null
-    const debugProbes: HTMLDivElement[] = []
-    if (isStandalone) {
-      debugBadge = document.createElement('div')
-      debugBadge.style.cssText =
-        'position:fixed;left:4px;bottom:4px;z-index:99999;pointer-events:none;' +
-        'font:10px/1.4 monospace;color:#0f0;background:rgba(0,0,0,.6);' +
-        'padding:2px 4px;border-radius:3px;white-space:pre'
-      document.body.appendChild(debugBadge)
-      const updateBadge = () => {
-        if (!debugBadge) return
-        const vv = window.visualViewport
-        const ah = getComputedStyle(root).getPropertyValue('--app-height').trim()
-        const ki = root.style.getPropertyValue('--keyboard-inset-bottom') || '0px'
-        debugBadge.textContent =
-          `ih:${window.innerHeight} sh:${window.screen.height} ` +
-          `vv:${vv ? Math.round(vv.height) : '-'} vt:${vv ? Math.round(vv.offsetTop) : '-'} ` +
-          `sa:${Math.round(safeAreaBottomPx)} ah:${ah} ki:${ki} ha:${healAttempts}`
-      }
-      updateBadge()
-      debugTimer = window.setInterval(updateBadge, 500)
-
-      for (const [index, offset] of [30, 60].entries()) {
-        const probe = document.createElement('div')
-        probe.style.cssText =
-          `position:fixed;left:4px;bottom:-${offset}px;width:80px;height:14px;z-index:99999;` +
-          `pointer-events:none;font:10px/14px monospace;color:#000;text-align:center;` +
-          `background:${index === 0 ? '#ff0' : '#f0f'}`
-        probe.textContent = `p${index + 1}`
-        document.body.appendChild(probe)
-        debugProbes.push(probe)
-      }
-    }
-    // ===== 临时诊断结束 =====
-
     // 兜底心跳：滑动收键盘等零事件场景下也能自愈（heal 自带焦点/冷却/次数守卫）
     const healHeartbeat = isStandalone
       ? window.setInterval(() => {
@@ -260,9 +218,6 @@ export function useViewportHeight() {
     document.addEventListener('visibilitychange', syncAfterFocusSettles)
     return () => {
       clearKeyboardSettleTimers()
-      if (debugTimer !== null) window.clearInterval(debugTimer)
-      debugBadge?.remove()
-      debugProbes.forEach(probe => probe.remove())
       if (healHeartbeat !== null) window.clearInterval(healHeartbeat)
       if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', updateViewport)

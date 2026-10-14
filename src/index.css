@@ -42,22 +42,6 @@
  * Mobile Viewport & Safe Area
  * ============================================ */
 
-/* 路由/工作区切换的 View Transition：默认交叉淡化时长缩短到 160ms，
- * 只负责消除 iOS 合成层光栅空窗的白闪，不做夸张动效。
- * 不支持的浏览器不会产生这些伪元素，天然降级。 */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 160ms;
-  animation-timing-function: ease-out;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(root),
-  ::view-transition-new(root) {
-    animation: none;
-  }
-}
-
 /* 动态视口高度变量 - 适配移动端虚拟键盘和地址栏 */
 :root {
   --app-height: 100vh;

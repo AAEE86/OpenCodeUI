@@ -508,11 +508,7 @@
     "backupImportConfirm": "导入备份会替换当前本地设置，并重新加载应用。要继续吗？",
     "backupImportConfirmWithDate": "要导入创建于 {{date}} 的备份吗？这会替换当前本地设置，并重新加载应用。",
     "toastTitle": "发现新版本：{{version}}",
-    "toastBody": "点击打开关于页，并查看发布页面。",
-    "diagnosticsTitle": "诊断",
-    "diagnosticsDesc": "应用真实启动（冷启动 / 整页重载 / WebView 崩溃重载）的时间记录。切换会话或项目不会产生新记录；如果闪白时这里多出一条，说明发生了整页重载。",
-    "bootLogEmpty": "暂无记录",
-    "bootLogClear": "清空记录"
+    "toastBody": "点击打开关于页，并查看发布页面。"
   },
   "keybindings": {
     "title": "键盘快捷键",

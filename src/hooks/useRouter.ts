@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { normalizeToForwardSlash, serverStorage } from '../utils'
-import { withViewTransition } from '../utils/viewTransition'
 import { STORAGE_KEY_LAST_DIRECTORY } from '../constants/storage'
 import { useIsMobile } from './useIsMobile'
 
@@ -105,14 +104,8 @@ function ensureSnapshot(): RouteState {
 function emitRoute(next: RouteState) {
   const prev = ensureSnapshot()
   if (isSameRoute(prev, next)) return
-  // 路由变化必然伴随大面积 DOM 重建 + 滚动恢复——iOS WebKit 对合成层
-  // 异步光栅化的空窗期会闪白（253171/310087）。View Transition 先把
-  // 新旧画面各自光栅化成快照再交叉淡化，结构上不存在这个空窗。
-  // 不支持的浏览器回退为同步直跑，行为与原来一致。
-  withViewTransition(() => {
-    routeSnapshot = next
-    for (const listener of listeners) listener()
-  })
+  routeSnapshot = next
+  for (const listener of listeners) listener()
 }
 
 function syncRouteFromHash() {

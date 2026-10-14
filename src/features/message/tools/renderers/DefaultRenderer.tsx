@@ -266,6 +266,8 @@ function ToolFilesBlock({ files }: { files: NonNullable<ExtractedToolData['toolF
             relativePath: file.name ?? undefined,
             category: 'system',
           }}
+          // 和用户消息附件胶囊同款展开：图片内嵌预览 + 详情弹窗 + 保存
+          expandable
           size="sm"
         />
       ))}

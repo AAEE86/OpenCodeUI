@@ -1,5 +1,22 @@
 # Changelog
 
+## [v0.7.11] - 2026-10-14
+
+- test(form): capture form state in an effect to satisfy the react-compiler lint rule (97a00665)
+- refactor(changes): align the review panel with the official v2 diff consumption (97c2d3db)
+- fix(chat): direction-aware scroll attribution - growth-animation frames no longer detach follow (c88444fc)
+- fix(form): restore free-form custom answer input on choice questions (5721b508)
+- chore(mobile): remove the temporary standalone viewport debug badge and probes (94ec4035)
+- fix(explorer): stop attributing sessions to scope directories - v2 lists are global (f2a98d90)
+- fix(mobile): pin standalone shell to screen.height - innerHeight drifts per launch (2e7d324e)
+- fix(mobile): drop baseline compensation - on-device data shows a healthy viewport (feb67ef4)
+- fix(mobile): measure the standalone viewport gap instead of assuming the env inset (e0d10a36)
+- fix(dialog): keep mobile sheet below the iOS status bar in browser/PWA (1a2a5ae0)
+- fix(mobile): revert blind safe-area compensation that pushed the shell off-screen (1517b62e)
+- fix(mobile): compensate iOS standalone viewport undermeasuring safe-area inset (07e8565f)
+- ci(docker): build images on dev pushes too, not just main (c298405e)
+- fix(mobile): pin app height to real innerHeight in browser/PWA mode (e3b51efb)
+
 ## [v0.7.10] - 2026-10-14
 
 - fix(chat): restore session model/agent/variant from durable SessionInfo on fresh launch (c9429753)

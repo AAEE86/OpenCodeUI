@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.7.12] - 2026-10-14
+
+- fix(mobile): scope the keyboard-session reveal to iOS - Android Chrome was already correct (f00d8952)
+- chore: remove the viewport debug badge - keyboard lift confirmed fixed on device (cd858745)
+- fix(mobile): stop deriving keyboard-open layout from viewport metrics - hand over to native scroll-into-view (ad68aefc)
+- chore: temporary viewport debug badge for the iOS keyboard-lift issue (bdceec8c)
+- fix(mobile): single-channel keyboard compensation - pin app height to the visual viewport, drop the inset padding (35dc0868)
+- chore: remove the scaffolding from the iOS white-flash hunt (c0fff34c)
+- fix(router): never assign window.location for hash navigation - iOS standalone treats it as an app navigation (a870ad3a)
+- feat(router): wrap route changes in View Transitions - snapshot crossfade instead of live re-raster (23bf0db4)
+- fix(mobile): cover the workspace switch before paint, not after (ef514680)
+- fix(mobile): composite the chat surface only while the pager is swiping (934082f7)
+- fix(mobile): veil workspace switches on iOS to hide the WebKit tile-raster white flash (155bec57)
+- fix(mobile): remove the display-flip viewport heal - it blanked the whole root on iOS (8ae5a841)
+
 ## [v0.7.11] - 2026-10-14
 
 - test(form): capture form state in an effect to satisfy the react-compiler lint rule (97a00665)

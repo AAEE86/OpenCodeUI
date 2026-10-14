@@ -126,4 +126,81 @@ describe('useViewportHeight', () => {
     expect(document.documentElement.style.getPropertyValue('--keyboard-inset-bottom')).toBe('0px')
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
   })
+
+  it('heals the stuck standalone viewport by flipping #root display after keyboard close', async () => {
+    vi.useFakeTimers()
+    // iOS standalone 环境
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        matches: query === '(display-mode: standalone)',
+        media: query,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      }),
+    })
+    const rootEl = document.createElement('div')
+    rootEl.id = 'root'
+    document.body.append(rootEl)
+    const textarea = document.createElement('textarea')
+    rootEl.append(textarea)
+
+    // 键盘弹出前的完整高度
+    installVisualViewportMock({ innerHeight: 800, viewportHeight: 800 })
+    renderHook(() => useViewportHeight())
+
+    // WebKit bug：键盘收起后 innerHeight 仍然缩水（卡住）
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 700 })
+
+    const displays: Array<string | null> = []
+    const observer = new MutationObserver(mutations => {
+      for (const mutation of mutations) displays.push(mutation.oldValue)
+    })
+    observer.observe(rootEl, { attributes: true, attributeFilter: ['style'], attributeOldValue: true })
+
+    act(() => {
+      textarea.focus()
+      textarea.blur()
+      vi.runAllTimers()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    observer.disconnect()
+
+    // display 被翻动过（none → 恢复），触发 WebKit 重新测量视口
+    expect(displays.length).toBeGreaterThan(0)
+    expect(rootEl.style.display).toBe('')
+  })
+
+  it('does not flip #root display outside standalone mode', () => {
+    vi.useFakeTimers()
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        matches: false,
+        media: query,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      }),
+    })
+    const rootEl = document.createElement('div')
+    rootEl.id = 'root'
+    document.body.append(rootEl)
+    const textarea = document.createElement('textarea')
+    rootEl.append(textarea)
+
+    installVisualViewportMock({ innerHeight: 800, viewportHeight: 800 })
+    renderHook(() => useViewportHeight())
+
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 700 })
+
+    act(() => {
+      textarea.focus()
+      textarea.blur()
+      vi.runAllTimers()
+    })
+
+    expect(rootEl.style.display).toBe('')
+  })
 })

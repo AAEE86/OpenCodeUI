@@ -77,18 +77,55 @@ export function useViewportHeight() {
       root.style.setProperty('--keyboard-inset-bottom', `${Math.round(keyboardInset)}px`)
     }
 
-    // 把 --app-height 钉到真实的 window.innerHeight（px）。
+    // iOS standalone（添加到主屏幕）判定：两种 API 都查，Tauri 排除在外
+    const isStandalone =
+      !isTauriApp &&
+      (window.matchMedia?.('(display-mode: standalone)').matches === true ||
+        (window.navigator as Navigator & { standalone?: boolean }).standalone === true)
+
+    // 把 --app-height 钉到真实可用高度（px）。
     //
-    // 为什么浏览器/PWA 不能只靠 CSS 100dvh：
-    // iOS standalone（添加到主屏幕）下 WebKit 的视口高度计算有已知缺陷——
-    // 软键盘弹收后 webview 高度偶尔不回弹、dvh 在 standalone 下也可能少算，
-    // 表现为页面底部留出一条永久空隙（Android Chrome 无此问题）。
-    // innerHeight 始终反映当前真实可用高度，键盘弹起时**不同步**
-    // （此时 #root 高度不变、由 keyboard-inset padding 让位，避免双重收缩）。
+    // 为什么浏览器/PWA 不能只靠 CSS 100dvh——iOS standalone（添加到主屏幕）
+    // 有两个叠加的 WebKit bug（Android Chrome 均无）：
+    // 1. viewport-fit=cover 下 dvh/innerHeight 等视口度量**少算
+    //    safe-area-inset-bottom**（~34px），底部永久空隙——所以 standalone
+    //    下真实高度 = innerHeight + safeAreaBottomPx，单纯钉 innerHeight
+    //    钉的是个错误值；
+    // 2. 键盘首次弹出后视口缩水且永不回弹（见下方 heal）。
+    // 键盘弹起时**不同步**（此时 #root 高度不变、由 keyboard-inset padding
+    // 让位，避免双重收缩）。
     let keyboardOpen = false
     const syncAppHeight = () => {
       if (keyboardOpen) return
-      root.style.setProperty('--app-height', `${window.innerHeight}px`)
+      const height = isStandalone ? window.innerHeight + safeAreaBottomPx : window.innerHeight
+      root.style.setProperty('--app-height', `${Math.round(height)}px`)
+    }
+
+    // iOS standalone PWA 键盘 bug（WebKit：键盘首次弹出后 innerHeight /
+    // visualViewport.height / 100dvh 全部缩水且**永不回弹**，直到强杀 app），
+    // 表现为底部永久黑带。此时 innerHeight 本身是坏的，单纯同步高度没用。
+    // 已验证的恢复手段：键盘收起后对一个**全视口高度**的元素做一次
+    // display:none → 恢复 + 同步 reflow，强制 WebKit 重新测量视口。
+    // 参考：https://dev.to/cederhook/fixing-the-ios-standalone-pwa-keyboard-bug-that-shrinks-your-viewport-for-good-63d
+    let maxInnerHeight = window.innerHeight
+
+    const healStuckStandaloneViewport = () => {
+      if (!isStandalone) return
+      // 只在确实卡住时翻动（键盘刚收起时 innerHeight 仍小于历史最大值）
+      if (maxInnerHeight - window.innerHeight <= 4) return
+      const el = document.getElementById('root')
+      if (!el) return
+
+      // display 翻动会重建布局盒，保存/恢复聊天滚动位置避免跳顶
+      const scroller = el.querySelector<HTMLElement>('[data-chat-scroll-root="true"]')
+      const scrollTop = scroller?.scrollTop ?? 0
+      el.style.display = 'none'
+      void el.offsetHeight // 同步 reflow：两次布局之间无绘制
+      el.style.display = ''
+      if (scroller) scroller.scrollTop = scrollTop
+      // 视口恢复后重新钉高度
+      maxInnerHeight = Math.max(maxInnerHeight, window.innerHeight)
+      syncAppHeight()
     }
 
     const hasKeyboardFocus = () => isKeyboardEditableElement(document.activeElement)
@@ -116,6 +153,8 @@ export function useViewportHeight() {
             // iOS PWA 有时在键盘收起后不派发 visualViewport.resize，必须主动清掉旧 inset。
             keyboardOpen = false
             setKeyboardInset(0)
+            // 键盘已收起：standalone 卡住的视口在这里强制重测恢复
+            healStuckStandaloneViewport()
             syncAppHeight()
           }
         }, delay),
@@ -124,6 +163,9 @@ export function useViewportHeight() {
 
     // 旋转设备 / 窗口 resize 时 safe-area 可能变化，重测一次。
     const handleWindowResize = () => {
+      if (!keyboardOpen) {
+        maxInnerHeight = Math.max(maxInnerHeight, window.innerHeight)
+      }
       measureSafeAreaBottom()
       updateViewport()
     }

@@ -51,7 +51,7 @@ describe('useViewportHeight', () => {
     restoreWindowProperty('visualViewport', originalVisualViewport)
   })
 
-  it('clears stale keyboard inset after an editable element blurs without a visualViewport resize', () => {
+  it('restores full height after an editable element blurs without a visualViewport resize', () => {
     vi.useFakeTimers()
     installVisualViewportMock({ innerHeight: 800, viewportHeight: 500 })
     const textarea = document.createElement('textarea')
@@ -59,7 +59,8 @@ describe('useViewportHeight', () => {
 
     renderHook(() => useViewportHeight())
 
-    expect(document.documentElement.style.getPropertyValue('--keyboard-inset-bottom')).toBe('300px')
+    // 键盘弹起：单通道补偿——钉 visualViewport 可见底边（500）
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('500px')
 
     act(() => {
       textarea.focus()
@@ -67,10 +68,11 @@ describe('useViewportHeight', () => {
       vi.runAllTimers()
     })
 
-    expect(document.documentElement.style.getPropertyValue('--keyboard-inset-bottom')).toBe('0px')
+    // 键盘收起但 visualViewport 没派发 resize：焦点结算仍复位到 innerHeight
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
   })
 
-  it('keeps the keyboard inset when focus moves between text inputs', () => {
+  it('keeps the keyboard height while focus moves between text inputs', () => {
     vi.useFakeTimers()
     installVisualViewportMock({ innerHeight: 800, viewportHeight: 500 })
     const textarea = document.createElement('textarea')
@@ -85,7 +87,7 @@ describe('useViewportHeight', () => {
       vi.runAllTimers()
     })
 
-    expect(document.documentElement.style.getPropertyValue('--keyboard-inset-bottom')).toBe('300px')
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('500px')
   })
 
   it('syncs --app-height to window.innerHeight when no keyboard is open', () => {
@@ -96,20 +98,28 @@ describe('useViewportHeight', () => {
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
   })
 
-  it('does not shrink --app-height while the keyboard is open', () => {
+  it('pins --app-height to the visualViewport visible bottom while the keyboard is open (single-channel compensation)', () => {
     const viewport = installVisualViewportMock({ innerHeight: 800, viewportHeight: 800 })
 
     renderHook(() => useViewportHeight())
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
 
-    // 键盘弹起：visualViewport 缩小，--app-height 保持不变（由 keyboard-inset 让位，避免双重收缩）
+    // 键盘弹起：visualViewport 缩小，--app-height 跟随可见底边。
+    // 不能再叠加 padding 通道，否则双重收缩会把输入框抬到屏幕中段。
     Object.defineProperty(viewport, 'height', { configurable: true, value: 500 })
     act(() => {
       viewport.dispatchEvent(new Event('resize'))
     })
 
-    expect(document.documentElement.style.getPropertyValue('--keyboard-inset-bottom')).toBe('300px')
-    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('500px')
+  })
+
+  it('accounts for visualViewport offsetTop in the keyboard-open height', () => {
+    installVisualViewportMock({ innerHeight: 800, viewportHeight: 500, offsetTop: 30 })
+
+    renderHook(() => useViewportHeight())
+
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('530px')
   })
 
   it('resyncs --app-height after the keyboard closes (iOS standalone bottom-gap guard)', () => {
@@ -123,7 +133,6 @@ describe('useViewportHeight', () => {
       viewport.dispatchEvent(new Event('resize'))
     })
 
-    expect(document.documentElement.style.getPropertyValue('--keyboard-inset-bottom')).toBe('0px')
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
   })
 

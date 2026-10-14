@@ -73,10 +73,6 @@ export function useViewportHeight() {
       keyboardSettleTimers = []
     }
 
-    const setKeyboardInset = (keyboardInset: number) => {
-      root.style.setProperty('--keyboard-inset-bottom', `${Math.round(keyboardInset)}px`)
-    }
-
     // iOS standalone（添加到主屏幕）判定：两种 API 都查，Tauri 排除在外
     const isStandalone =
       !isTauriApp &&
@@ -92,16 +88,24 @@ export function useViewportHeight() {
     // - 空隙区域渲染的是网页自己的背景色 → 该区域 webview **画得出来**，
     //   只是布局被错误度量限制了；
     // - 因此 standalone 且键盘未弹（无输入焦点）时，外壳高度直接钉
-    //   screen.height（唯一恒定可信的值）；键盘弹起时 webview 真实收缩
-    //   （实测 ih 874→478），钉 innerHeight 自然贴键盘。
-    // - 浏览器模式（非 standalone）有工具栏，innerHeight 才是真实可视高，
-    //   且 ki>0 时冻结高度、由 keyboard-inset padding 让位（避免双重收缩）。
+    //   screen.height（唯一恒定可信的值）。
+    // - 键盘弹起时只走**单通道补偿**：钉 visualViewport 的可见底边
+    //   （vv.height + vv.offsetTop），这是键盘态唯一可信的度量；
+    //   绝不再叠加 --keyboard-inset-bottom padding——innerHeight 收缩 +
+    //   padding 双通道叠加会把输入框抬到屏幕中段（iOS 实测）。
+    // - 浏览器模式（非 standalone）有工具栏，无键盘时 innerHeight 即真实可视高。
     let keyboardOpen = false
     const isKeyboardActive = () => keyboardOpen || hasKeyboardFocus()
     const syncAppHeight = () => {
-      if (keyboardOpen) return
-      const useScreenHeight = isStandalone && !isKeyboardActive() && window.screen.height > 0
-      const height = useScreenHeight ? window.screen.height : window.innerHeight
+      const viewport = window.visualViewport
+      let height: number
+      if (keyboardOpen && viewport) {
+        height = viewport.height + viewport.offsetTop
+      } else if (isStandalone && !isKeyboardActive() && window.screen.height > 0) {
+        height = window.screen.height
+      } else {
+        height = window.innerHeight
+      }
       root.style.setProperty('--app-height', `${Math.round(height)}px`)
     }
 
@@ -113,10 +117,8 @@ export function useViewportHeight() {
       const rawInset = window.innerHeight - viewport.height - viewport.offsetTop
       // 减掉 safe-area phantom，再用阈值区分键盘与 iOS Safari 底部工具栏。
       // 真实软键盘通常远高于 100px，工具栏/phantom 误差一般低于这个值。
-      const candidateInset = rawInset - safeAreaBottomPx
-      const keyboardInset = candidateInset >= KEYBOARD_INSET_THRESHOLD ? candidateInset : 0
-      keyboardOpen = keyboardInset > 0
-      setKeyboardInset(keyboardInset)
+      // inset 只用于判定键盘是否弹起，不再作为 padding 输出。
+      keyboardOpen = rawInset - safeAreaBottomPx >= KEYBOARD_INSET_THRESHOLD
       syncAppHeight()
     }
 
@@ -127,9 +129,8 @@ export function useViewportHeight() {
           if (hasKeyboardFocus()) {
             updateViewport()
           } else {
-            // iOS PWA 有时在键盘收起后不派发 visualViewport.resize，必须主动清掉旧 inset。
+            // iOS PWA 有时在键盘收起后不派发 visualViewport.resize，必须主动复位状态。
             keyboardOpen = false
-            setKeyboardInset(0)
             syncAppHeight()
           }
         }, delay),

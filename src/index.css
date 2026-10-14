@@ -55,7 +55,6 @@
   --safe-area-inset-left: env(safe-area-inset-left, 0px);
   --safe-area-inset-right: env(safe-area-inset-right, 0px);
   --app-safe-top: 0px;
-  --keyboard-inset-bottom: 0px;
 }
 
 /* 支持 dvh 的浏览器使用动态视口高度 */
@@ -236,13 +235,6 @@ body,
 .desktop-titlebar button#decorum-tb-close:hover {
   background: hsl(var(--danger-100));
   color: hsl(var(--always-white, 0 0% 100%));
-}
-
-/* Browser/PWA: keyboard inset via visualViewport (Tauri uses native insets) */
-@media (display-mode: browser), (display-mode: standalone) {
-  :root:not(.tauri-app) #root {
-    padding-bottom: var(--keyboard-inset-bottom, 0px);
-  }
 }
 
 /* ============================================

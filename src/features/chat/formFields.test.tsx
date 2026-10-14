@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { act, renderHook } from '@testing-library/react'
+import { useEffect } from 'react'
 import { describe, expect, it } from 'vitest'
 import { FormFieldInput, useFormState, type FormState } from './formFields'
 import type { ApiFormField, ApiFormInfo } from '../../api'
@@ -34,17 +35,19 @@ const CHOICE_FIELD = {
 }
 
 function renderField(form: ApiFormInfo) {
-  let stateRef: FormState | undefined
+  const ref: { current?: FormState } = {}
   function Wrapper() {
     const state = useFormState(form)
-    stateRef = state
+    useEffect(() => {
+      ref.current = state
+    })
     return <FormFieldInput field={form.fields[0]} state={state} />
   }
   render(<Wrapper />)
   return {
     getState: () => {
-      if (!stateRef) throw new Error('state not captured')
-      return stateRef
+      if (!ref.current) throw new Error('state not captured')
+      return ref.current
     },
   }
 }

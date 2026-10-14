@@ -3,14 +3,15 @@
  *
  * 核心机制：
  * - userScrolled: 用户离开底部后置 true，阻止程序拉回底部
- * - markAuto/isAuto: 程序滚动时打标记（1500ms TTL, 2px 容差），
- *   防止自己的 scrollToBottom 被误判为用户滚动
+ * - markAuto/isAuto: 程序滚动时打标记（1500ms TTL, 2px 容差点匹配），
+ *   防止自己的 scrollToBottom 被误判为用户滚动；错过标记的中间帧/迟到
+ *   事件由方向感知归因兜底（见下）
  * - handleScroll 可无手势门控调用：靠 isAuto 区分程序滚动
  * - ackTop（借鉴 dsh 的 ScrollFollow 归因）：记录上一次确认的滚动位置。
- *   scroll 事件的位置与 min(ackTop, floor) 对比——内容收缩钳位、虚拟列表
- *   未标记的锚定调整都不算读者滚动，不会误关贴底跟随；只有真实手势
- *   （滚轮/键盘/滚动条拖拽，位置确实偏离确认点）才置 userScrolled。
- *   高 TPS 流式下程序滚动标记错过后不再永久失贴，而是几何自愈回贴。
+ *   归因判定是**方向感知**的：读者「离底」手势只会把位置往上推（滚轮上滚、
+ *   触控上拖、滚动条上拖、PgUp）；向下或原地移动一律不是离底意图——程序
+ *   跟随、生长动画竞帧、内容收缩钳位（min(ack, floor)）、iOS 橡皮筋过冲
+ *   都属此类，贴底意图保留并几何自愈回贴，只有向上偏离确认点才解除跟随。
  * - 所有回调稳定（useCallback + useMemo），避免 ref 回调重挂载
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -49,6 +50,9 @@ export function useAutoScroll(bottomThreshold = 10) {
     const a = autoMark.current
     if (!a) return false
     if (Date.now() - a.time > AUTO_TTL) { autoMark.current = undefined; return false }
+    // 点匹配（2px 容差）：不能用「起点→目标区间」的路径匹配——程序从远处
+    // 跳到贴底时区间会覆盖整个可滚动范围，读者的上滚手势也会被吞掉。
+    // 中间帧/迟到事件由下方的方向感知归因兜底。
     return Math.abs(el.scrollTop - a.top) < AUTO_TOLERANCE
   }, [])
 
@@ -103,19 +107,18 @@ export function useAutoScroll(bottomThreshold = 10) {
       return
     }
     if (!userScrolledRef.current) {
-      // 归因判定（dsh readScroll 同款）：与上一次确认位置对比，ackTop 先按当前
-      // floor 钳制——内容收缩把 scrollTop 钳下来时，钳制后的位置正是 min(ack, max)，
-      // 不算读者滚动；流式增长把 floor 推高而 scrollTop 没动也不算。
-      // 只有位置确实偏离确认点（滚轮/键盘/滚动条）才算读者离底。
+      // 方向感知归因：与上一次确认位置对比（先按当前 floor 钳制，吸收内容
+      // 收缩的被动钳位）。读者「离底」手势只会把位置**向上**推——向下/原地
+      // 移动是程序跟随、生长动画竞帧或橡皮筋过冲等布局产物，贴底意图保留，
+      // 几何自愈回贴；只有向上偏离确认点才解除跟随。
       const ack = ackTopRef.current
       if (ack === undefined) {
         // 首次观测：只建立基线，不做判定
         ackTopRef.current = el.scrollTop
         return
       }
-      const movedByReader = Math.abs(el.scrollTop - Math.min(ack, max)) > READER_TOLERANCE
-      if (!movedByReader) {
-        // 布局产物（钳位/未标记的锚定调整）：贴底意图不变，几何自愈回贴
+      const movedUpByReader = el.scrollTop < Math.min(ack, max) - READER_TOLERANCE
+      if (!movedUpByReader) {
         ackTopRef.current = el.scrollTop
         scrollToBottom(false)
         return

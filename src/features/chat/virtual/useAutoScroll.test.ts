@@ -37,6 +37,10 @@ function makeScroller(clientHeight = 500) {
     scrollTo(top: number) {
       scrollTop = Math.max(0, Math.min(top, scrollHeight - clientHeight))
     },
+    /** 绕过钳位直接写位置（模拟 iOS 橡皮筋过冲等瞬时越界状态） */
+    forceTop(v: number) {
+      scrollTop = v
+    },
     get top() {
       return scrollTop
     },
@@ -127,6 +131,43 @@ describe('useAutoScroll 贴底跟随归因', () => {
     expect(auto.current.userScrolled).toBe(true)
     act(() => {
       scroller.scrollTo(scroller.floor)
+      auto.current.handleScroll()
+    })
+    expect(auto.current.userScrolled).toBe(false)
+  })
+
+  it('生长动画竞帧：程序跟随的中间帧位置不解除跟随', () => {
+    const { auto, scroller } = setup()
+    scroller.grow(1000)
+    act(() => {
+      auto.current.scrollToBottom()
+    })
+    // 内容突然蹦出一大片 + 高度生长动画：floor 从 1000 涨到 1080，
+    // 程序发起跟随滚动（scrollToFn 顺序：先 markAuto 后写 scrollTop）
+    act(() => {
+      scroller.grow(80)
+      auto.current.markAuto(scroller.el)
+    })
+    // 某一帧没跟上：scroll 事件到达时位置还在中间帧（1040），
+    // 既不等于标记目标（1080），也偏离了确认点（1000）——但不是读者手势
+    act(() => {
+      scroller.scrollTo(1040)
+      auto.current.handleScroll()
+    })
+    expect(auto.current.userScrolled).toBe(false)
+    // 几何自愈：重新贴回底部
+    expect(scroller.top).toBe(scroller.floor)
+  })
+
+  it('底部橡胶弹跳/过冲（scrollTop 瞬时超过 floor）不解除跟随', () => {
+    const { auto, scroller } = setup()
+    scroller.grow(1000)
+    act(() => {
+      auto.current.scrollToBottom()
+    })
+    // iOS 橡皮筋：scrollTop 瞬时冲过 max（mock 的 forceTop 绕过钳位模拟）
+    act(() => {
+      scroller.forceTop(scroller.floor + 40)
       auto.current.handleScroll()
     })
     expect(auto.current.userScrolled).toBe(false)

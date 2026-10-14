@@ -278,6 +278,11 @@ function App() {
   const mobileRightUnmountTimerRef = useRef<number | null>(null)
   const shouldRenderMobileRightPanelRef = useRef(false)
   const [shouldRenderMobileRightPanel, setShouldRenderMobileRightPanel] = useState(false)
+  // 聊天面板的 3D 变换只在滑动翻页时激活（true = 当前偏离 chat 页）。
+  // 常驻 translate3d + will-change 会把整个聊天面板变成常驻 GPU 合成层——
+  // iOS WebKit 对合成层异步光栅化，任何程序化滚动/大 DOM 变更都会让它
+  // 闪白（bugs.webkit.org 253171 / 310087），静止时必须是普通文档流层。
+  const [pagerTransformActive, setPagerTransformActive] = useState(false)
 
   const setMobileRightPanelRendered = useCallback((rendered: boolean) => {
     if (shouldRenderMobileRightPanelRef.current === rendered) return
@@ -369,6 +374,10 @@ function App() {
     const rightProgress = Math.max(0, progress)
     const easedRightProgress = rightProgress * rightProgress
     const originX = 50 - progress * 50
+
+    // 偏离/回到 chat 页的瞬间切换合成层状态（布尔翻转才触发渲染，每帧滚动不重复渲染）
+    const transformActive = absProgress > 0.001
+    setPagerTransformActive(prev => (prev === transformActive ? prev : transformActive))
 
     pager.style.setProperty('--mobile-chat-rotate-y', `${progress * 10}deg`)
     pager.style.setProperty('--mobile-chat-scale', `${1 - absProgress * 0.06}`)
@@ -966,13 +975,18 @@ function App() {
                     className="absolute inset-y-0 -left-4 -right-4 z-10 flex flex-col overflow-hidden bg-bg-100 rounded-xl shadow-[0_0_24px_hsl(var(--always-black)/0.15)] [contain:layout_paint]"
                     aria-hidden={mobileActivePage !== 'chat'}
                     inert={mobileActivePage !== 'chat'}
-                    style={{
-                      transform: 'translate3d(var(--mobile-chat-offset-x, 0px), 0, 0) rotateY(var(--mobile-chat-rotate-y, 0deg)) scale(var(--mobile-chat-scale, 1))',
-                      transformOrigin: 'var(--mobile-chat-transform-origin, 50% 50%)',
-                      transformStyle: 'preserve-3d',
-                      backfaceVisibility: 'hidden',
-                      willChange: 'transform',
-                    }}
+                    style={
+                      pagerTransformActive
+                        ? {
+                            transform:
+                              'translate3d(var(--mobile-chat-offset-x, 0px), 0, 0) rotateY(var(--mobile-chat-rotate-y, 0deg)) scale(var(--mobile-chat-scale, 1))',
+                            transformOrigin: 'var(--mobile-chat-transform-origin, 50% 50%)',
+                            transformStyle: 'preserve-3d',
+                            backfaceVisibility: 'hidden',
+                            willChange: 'transform',
+                          }
+                        : undefined
+                    }
                   >
                     <div className={`flex-1 min-h-0 px-4 ${paneLayout.isSplit && !paneLayout.fullscreenPaneId ? 'py-2' : ''}`}>
                       <SplitContainer

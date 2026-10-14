@@ -35,13 +35,29 @@ export function isFieldRequired(field: ApiFormField): boolean {
   return (field as { required?: boolean }).required === true
 }
 
+/**
+ * 字段是否允许自由输入（v2 的 `custom: true`）。
+ *
+ * 官方 question 工具给每个字段都带 `custom: true`——工具说明里明确写了
+ * 「"Type your own answer" option is added automatically」，即带选项的
+ * 单选/多选也必须允许用户自己输入答案。v1 时代的 ocui 有同款交互
+ * （伪选项 + 文本框），迁移 v2 表单渲染层时漏掉了这个标记。
+ */
+export function allowsCustom(field: ApiFormField): boolean {
+  return (field as { custom?: boolean }).custom === true
+}
+
 export interface FormState {
   /** 当前可见字段（已过滤 hidden 与未满足的 when） */
   visibleFields: ApiFormField[]
   selectedFor: (field: ApiFormField) => Set<string>
   textFor: (field: ApiFormField) => string
   booleanFor: (field: ApiFormField) => boolean
+  /** 自由输入模式是否开启（custom 伪选项被选中） */
+  customOnFor: (field: ApiFormField) => boolean
   selectOption: (field: ApiFormField, value: string) => void
+  /** 选中「自己输入答案」伪选项：单选清空已选项，多选只是展开输入框 */
+  selectCustom: (field: ApiFormField) => void
   setText: (field: ApiFormField, value: string) => void
   toggleBoolean: (field: ApiFormField) => void
   /** 是否所有必填项都已作答 */
@@ -85,14 +101,39 @@ export function useFormState(form: ApiFormInfo): FormState {
     return map
   })
 
-  /** 供 when 求值用的当前答案 */
+  // 自由输入模式（custom 伪选项选中态），按字段 key 索引
+  const [customOn, setCustomOn] = useState<Map<string, boolean>>(new Map())
+
+  /** 供 when 求值用的当前答案（与 buildAnswer 同规则：自定义文本优先生效） */
+  const customTextFor = useCallback(
+    (field: ApiFormField) => (textValues.get(field.key) ?? '').trim(),
+    [textValues],
+  )
+  const stringValueFor = useCallback(
+    (field: ApiFormField): string => {
+      const customText = customTextFor(field)
+      if (customOn.get(field.key) && customText) return customText
+      return Array.from(selections.get(field.key) ?? [])[0] ?? customText
+    },
+    [selections, customOn, customTextFor],
+  )
+  const multiValueFor = useCallback(
+    (field: ApiFormField): string[] => {
+      const list = Array.from(selections.get(field.key) ?? [])
+      const customText = customTextFor(field)
+      if (allowsCustom(field) && customText && !list.includes(customText)) list.push(customText)
+      return list
+    },
+    [selections, customTextFor],
+  )
+
   const currentAnswer = useMemo<FormAnswer>(() => {
     const answer: FormAnswer = {}
     for (const field of form.fields) {
       if (field.type === 'multiselect') {
-        answer[field.key] = Array.from(selections.get(field.key) ?? [])
+        answer[field.key] = multiValueFor(field)
       } else if (field.type === 'string') {
-        answer[field.key] = Array.from(selections.get(field.key) ?? [])[0] ?? textValues.get(field.key) ?? ''
+        answer[field.key] = stringValueFor(field)
       } else if (field.type === 'boolean') {
         answer[field.key] = booleans.get(field.key) ?? false
       } else if (field.type === 'number' || field.type === 'integer') {
@@ -101,7 +142,7 @@ export function useFormState(form: ApiFormInfo): FormState {
       }
     }
     return answer
-  }, [form.fields, selections, textValues, booleans])
+  }, [form.fields, textValues, booleans, multiValueFor, stringValueFor])
 
   const visibleFields = useMemo(
     () => form.fields.filter(field => !(field as { hidden?: boolean }).hidden && isFieldVisible(field, currentAnswer)),
@@ -122,6 +163,31 @@ export function useFormState(form: ApiFormInfo): FormState {
       }
       return next
     })
+    // 单选：点了普通选项就退出自由输入模式（二者互斥，与官方/v1 一致）
+    if (!multiple) {
+      setCustomOn(prev => {
+        if (!prev.get(field.key)) return prev
+        const next = new Map(prev)
+        next.set(field.key, false)
+        return next
+      })
+    }
+  }, [])
+
+  const selectCustom = useCallback((field: ApiFormField) => {
+    setCustomOn(prev => {
+      const next = new Map(prev)
+      next.set(field.key, true)
+      return next
+    })
+    // 单选：进入自由输入模式就清空已选选项（互斥）
+    if (field.type !== 'multiselect') {
+      setSelections(prev => {
+        const next = new Map(prev)
+        next.set(field.key, new Set())
+        return next
+      })
+    }
   }, [])
 
   const setText = useCallback((field: ApiFormField, value: string) => {
@@ -145,31 +211,33 @@ export function useFormState(form: ApiFormInfo): FormState {
     for (const field of form.fields) {
       if (field.type === 'external') continue
       if (field.type === 'multiselect') {
-        answer[field.key] = Array.from(selections.get(field.key) ?? [])
+        answer[field.key] = multiValueFor(field)
       } else if (field.type === 'boolean') {
         answer[field.key] = booleans.get(field.key) ?? false
       } else if (field.type === 'number' || field.type === 'integer') {
         const raw = (textValues.get(field.key) ?? '').trim()
         if (raw !== '') answer[field.key] = Number(raw)
       } else if (field.type === 'string') {
-        const picked = Array.from(selections.get(field.key) ?? [])[0]
-        const raw = picked ?? (textValues.get(field.key) ?? '').trim()
+        const raw = stringValueFor(field).trim()
         if (raw) answer[field.key] = raw
       }
     }
     return answer
-  }, [form.fields, selections, textValues, booleans])
+  }, [form.fields, textValues, booleans, multiValueFor, stringValueFor])
 
   const canSubmit = useMemo(
     () =>
       visibleFields.every(field => {
         if (!isFieldRequired(field)) return true
         if (field.type === 'external' || field.type === 'boolean') return true
-        if (field.type === 'multiselect') return (selections.get(field.key)?.size ?? 0) > 0
-        if (field.type === 'string' && isChoiceField(field)) return (selections.get(field.key)?.size ?? 0) > 0
+        if (field.type === 'multiselect') return multiValueFor(field).length > 0
+        if (field.type === 'string' && isChoiceField(field)) {
+          // 带选项的单选：选了选项，或（允许 custom 时）填了自由文本都算作答
+          return (selections.get(field.key)?.size ?? 0) > 0 || (allowsCustom(field) && customTextFor(field) !== '')
+        }
         return (textValues.get(field.key) ?? '').trim().length > 0
       }),
-    [visibleFields, selections, textValues],
+    [visibleFields, selections, textValues, multiValueFor, customTextFor],
   )
 
   return {
@@ -177,7 +245,9 @@ export function useFormState(form: ApiFormInfo): FormState {
     selectedFor: field => selections.get(field.key) ?? EMPTY_SET,
     textFor: field => textValues.get(field.key) ?? '',
     booleanFor: field => booleans.get(field.key) ?? false,
+    customOnFor: field => customOn.get(field.key) ?? false,
     selectOption,
+    selectCustom,
     setText,
     toggleBoolean,
     canSubmit,
@@ -212,6 +282,37 @@ export function FormFieldLabel({ field }: { field: ApiFormField }) {
 interface FormFieldInputProps {
   field: ApiFormField
   state: FormState
+}
+
+/** 自动增高的单行文本输入（无选项字符串与 custom 自由输入共用） */
+function FormTextInput({
+  value,
+  placeholder,
+  autoFocus,
+  onChange,
+}: {
+  value: string
+  placeholder?: string
+  autoFocus?: boolean
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="flex min-h-7 items-start gap-1.5 rounded-md border border-border-200/60 px-2.5 py-1 transition-colors focus-within:border-text-400">
+      <textarea
+        value={value}
+        autoFocus={autoFocus}
+        onChange={e => {
+          onChange(e.target.value)
+          const el = e.target
+          el.style.height = 'auto'
+          el.style.height = `${Math.min(el.scrollHeight, 100)}px`
+        }}
+        placeholder={placeholder}
+        rows={1}
+        className="min-h-5 flex-1 resize-none bg-transparent py-0 text-[length:var(--fs-sm)] leading-5 text-text-100 placeholder:text-text-500 focus:outline-none"
+      />
+    </div>
+  )
 }
 
 /** 按字段类型渲染对应输入控件 */
@@ -288,6 +389,9 @@ export function FormFieldInput({ field, state }: FormFieldInputProps) {
     const multiple = field.type === 'multiselect'
     const options = field.type === 'multiselect' ? field.options : (field.options ?? [])
     const selected = state.selectedFor(field)
+    // custom: true → 追加「自己输入答案」伪选项（官方 question 工具的行为约定）
+    const customAllowed = allowsCustom(field)
+    const customOn = state.customOnFor(field)
     return (
       <div className="space-y-2">
         <FormFieldLabel field={field} />
@@ -320,7 +424,29 @@ export function FormFieldInput({ field, state }: FormFieldInputProps) {
               </button>
             )
           })}
+          {customAllowed && (
+            <button
+              onClick={() => state.selectCustom(field)}
+              className={`inline-flex min-h-7 items-start gap-1.5 px-2.5 py-1 text-[length:var(--fs-sm)] leading-5 rounded-md border transition-all ${
+                customOn
+                  ? 'border-text-100 text-text-100 bg-bg-300/40'
+                  : 'border-dashed border-border-200/60 text-text-400 hover:border-text-400 hover:text-text-200'
+              }`}
+            >
+              <span className="min-w-0 whitespace-normal break-words text-left">
+                {t('questionDialog.typeYourAnswer')}
+              </span>
+            </button>
+          )}
         </div>
+        {customAllowed && customOn && (
+          <FormTextInput
+            value={state.textFor(field)}
+            autoFocus
+            placeholder={t('questionDialog.typeYourAnswer')}
+            onChange={value => state.setText(field, value)}
+          />
+        )}
       </div>
     )
   }
@@ -330,20 +456,11 @@ export function FormFieldInput({ field, state }: FormFieldInputProps) {
   return (
     <div className="space-y-2">
       <FormFieldLabel field={field} />
-      <div className="flex min-h-7 items-start gap-1.5 rounded-md border border-border-200/60 px-2.5 py-1 transition-colors focus-within:border-text-400">
-        <textarea
-          value={state.textFor(field)}
-          onChange={e => {
-            state.setText(field, e.target.value)
-            const el = e.target
-            el.style.height = 'auto'
-            el.style.height = `${Math.min(el.scrollHeight, 100)}px`
-          }}
-          placeholder={placeholder || t('questionDialog.typeYourAnswer')}
-          rows={1}
-          className="min-h-5 flex-1 resize-none bg-transparent py-0 text-[length:var(--fs-sm)] leading-5 text-text-100 placeholder:text-text-500 focus:outline-none"
-        />
-      </div>
+      <FormTextInput
+        value={state.textFor(field)}
+        placeholder={placeholder || t('questionDialog.typeYourAnswer')}
+        onChange={value => state.setText(field, value)}
+      />
     </div>
   )
 }

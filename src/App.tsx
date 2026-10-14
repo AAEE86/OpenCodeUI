@@ -10,6 +10,7 @@ import { UsageExceededDialog } from './components/UsageExceededDialog'
 import { RightPanel } from './components/RightPanel'
 import { BottomPanel } from './components/BottomPanel'
 import { DesktopTitlebar } from './components/DesktopTitlebar'
+import { WorkspaceSwitchVeil } from './components/WorkspaceSwitchVeil'
 import { useDirectory, useGlobalEvents, useGlobalKeybindings, useRouter } from './hooks'
 import { useSessionContext } from './contexts/useSessionContext'
 import { useViewportHeight } from './hooks/useViewportHeight'
@@ -904,6 +905,7 @@ function App() {
     <div className="relative flex h-full flex-col bg-bg-100 overflow-hidden">
       <DesktopTitlebar />
       <InternalDragLayer />
+      <WorkspaceSwitchVeil />
       <ChatViewportProvider value={chatViewport}>
         <div className="relative flex min-h-0 flex-1 overflow-hidden">
           {isMobilePanelLayout ? (

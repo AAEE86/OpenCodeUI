@@ -87,4 +87,43 @@ describe('useViewportHeight', () => {
 
     expect(document.documentElement.style.getPropertyValue('--keyboard-inset-bottom')).toBe('300px')
   })
+
+  it('syncs --app-height to window.innerHeight when no keyboard is open', () => {
+    installVisualViewportMock({ innerHeight: 800, viewportHeight: 800 })
+
+    renderHook(() => useViewportHeight())
+
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
+  })
+
+  it('does not shrink --app-height while the keyboard is open', () => {
+    const viewport = installVisualViewportMock({ innerHeight: 800, viewportHeight: 800 })
+
+    renderHook(() => useViewportHeight())
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
+
+    // 键盘弹起：visualViewport 缩小，--app-height 保持不变（由 keyboard-inset 让位，避免双重收缩）
+    Object.defineProperty(viewport, 'height', { configurable: true, value: 500 })
+    act(() => {
+      viewport.dispatchEvent(new Event('resize'))
+    })
+
+    expect(document.documentElement.style.getPropertyValue('--keyboard-inset-bottom')).toBe('300px')
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
+  })
+
+  it('resyncs --app-height after the keyboard closes (iOS standalone bottom-gap guard)', () => {
+    const viewport = installVisualViewportMock({ innerHeight: 800, viewportHeight: 500 })
+
+    renderHook(() => useViewportHeight())
+
+    // 键盘收起，innerHeight 恢复：--app-height 重新钉回真实高度
+    Object.defineProperty(viewport, 'height', { configurable: true, value: 800 })
+    act(() => {
+      viewport.dispatchEvent(new Event('resize'))
+    })
+
+    expect(document.documentElement.style.getPropertyValue('--keyboard-inset-bottom')).toBe('0px')
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('800px')
+  })
 })

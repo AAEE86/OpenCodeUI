@@ -77,6 +77,20 @@ export function useViewportHeight() {
       root.style.setProperty('--keyboard-inset-bottom', `${Math.round(keyboardInset)}px`)
     }
 
+    // 把 --app-height 钉到真实的 window.innerHeight（px）。
+    //
+    // 为什么浏览器/PWA 不能只靠 CSS 100dvh：
+    // iOS standalone（添加到主屏幕）下 WebKit 的视口高度计算有已知缺陷——
+    // 软键盘弹收后 webview 高度偶尔不回弹、dvh 在 standalone 下也可能少算，
+    // 表现为页面底部留出一条永久空隙（Android Chrome 无此问题）。
+    // innerHeight 始终反映当前真实可用高度，键盘弹起时**不同步**
+    // （此时 #root 高度不变、由 keyboard-inset padding 让位，避免双重收缩）。
+    let keyboardOpen = false
+    const syncAppHeight = () => {
+      if (keyboardOpen) return
+      root.style.setProperty('--app-height', `${window.innerHeight}px`)
+    }
+
     const hasKeyboardFocus = () => isKeyboardEditableElement(document.activeElement)
 
     const updateViewport = () => {
@@ -87,7 +101,9 @@ export function useViewportHeight() {
       // 真实软键盘通常远高于 100px，工具栏/phantom 误差一般低于这个值。
       const candidateInset = rawInset - safeAreaBottomPx
       const keyboardInset = candidateInset >= KEYBOARD_INSET_THRESHOLD ? candidateInset : 0
+      keyboardOpen = keyboardInset > 0
       setKeyboardInset(keyboardInset)
+      syncAppHeight()
     }
 
     const syncAfterFocusSettles = () => {
@@ -98,7 +114,9 @@ export function useViewportHeight() {
             updateViewport()
           } else {
             // iOS PWA 有时在键盘收起后不派发 visualViewport.resize，必须主动清掉旧 inset。
+            keyboardOpen = false
             setKeyboardInset(0)
+            syncAppHeight()
           }
         }, delay),
       )

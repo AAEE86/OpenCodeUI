@@ -5,15 +5,12 @@ import { changeScopeStore } from '../store/changeScopeStore'
 import { layoutStore } from '../store/layoutStore'
 import { FullscreenProvider } from '../contexts'
 
-const { getCurrentProject, getSessionDiff, getLastTurnDiff, getVcsInfo, getVcsDiff } = vi.hoisted(
-  () => ({
-    getCurrentProject: vi.fn(),
-    getSessionDiff: vi.fn(),
-    getLastTurnDiff: vi.fn(),
-    getVcsInfo: vi.fn(),
-    getVcsDiff: vi.fn(),
-  }),
-)
+const { getCurrentProject, getSessionDiff, getVcsInfo, getVcsDiff } = vi.hoisted(() => ({
+  getCurrentProject: vi.fn(),
+  getSessionDiff: vi.fn(),
+  getVcsInfo: vi.fn(),
+  getVcsDiff: vi.fn(),
+}))
 
 vi.mock('../api/client', () => ({
   getCurrentProject,
@@ -26,7 +23,6 @@ vi.mock('../api/vcs', () => ({
 
 vi.mock('../api/session', () => ({
   getSessionDiff,
-  getLastTurnDiff,
 }))
 
 vi.mock('./DiffViewer', () => ({
@@ -95,22 +91,6 @@ describe('SessionChangesPanel', () => {
     })
     getSessionDiff.mockResolvedValue([
       {
-        file: 'src/app.ts',
-        before: 'const a = 1',
-        after: 'const a = 2',
-        additions: 1,
-        deletions: 1,
-      },
-      {
-        file: 'src/components/Button.tsx',
-        before: 'export const Button = 1',
-        after: 'export const Button = 2',
-        additions: 1,
-        deletions: 1,
-      },
-    ])
-    getLastTurnDiff.mockResolvedValue([
-      {
         file: 'src/turn.ts',
         before: 'const turn = 1',
         after: 'const turn = 2',
@@ -125,7 +105,7 @@ describe('SessionChangesPanel', () => {
     vi.restoreAllMocks()
   })
 
-  it('loads last turn diffs and shows the first file preview by default', async () => {
+  it('loads working-tree (git) diffs by default and shows the first file preview', async () => {
     renderSessionChangesPanel()
 
     await act(async () => {
@@ -134,16 +114,17 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    expect(getLastTurnDiff).toHaveBeenCalledWith('session-1', '/repo', undefined)
+    // 官方默认模式是 git → vcs.diff(mode: 'working')
+    expect(getVcsDiff).toHaveBeenCalledWith('working', '/repo', undefined)
     expect(screen.getByText('1f')).toBeInTheDocument()
     expect(screen.getAllByText('+1').length).toBeGreaterThan(0)
     expect(screen.getAllByText('-1').length).toBeGreaterThan(0)
     expect(screen.getByTestId('diff-viewer')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Change mode: Last turn changes/ })).toBeInTheDocument()
-    expect(screen.getAllByText('turn.ts').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: /Change mode: Git changes/ })).toBeInTheDocument()
+    expect(screen.getAllByText('git.ts').length).toBeGreaterThan(0)
   })
 
-  it('switches to session changes on demand', async () => {
+  it('switches to last-turn changes on demand via session.diff', async () => {
     renderSessionChangesPanel()
 
     await act(async () => {
@@ -159,7 +140,7 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    fireEvent.click(screen.getByText('Session changes'))
+    fireEvent.click(screen.getByText('Last turn changes'))
 
     await act(async () => {
       vi.advanceTimersByTime(240)
@@ -167,10 +148,11 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    expect(getSessionDiff).toHaveBeenCalledWith('session-1', '/repo', undefined)
-    expect(changeScopeStore.getMode('session-1')).toBe('session')
-    expect(screen.getByText('2f')).toBeInTheDocument()
-    expect(screen.getAllByText('app.ts').length).toBeGreaterThan(0)
+    // turn → session.diff(sessionId)，服务端按 session 自身 location 解析，不传 directory
+    expect(getSessionDiff).toHaveBeenCalledWith('session-1', undefined)
+    expect(changeScopeStore.getMode('session-1')).toBe('turn')
+    expect(screen.getByText('1f')).toBeInTheDocument()
+    expect(screen.getAllByText('turn.ts').length).toBeGreaterThan(0)
   })
 
   it('switches to branch changes when available', async () => {
@@ -220,12 +202,13 @@ describe('SessionChangesPanel', () => {
     })
 
     const menu = screen.getByRole('menu', { name: 'Change mode' })
-    const lastTurnOption = screen.getByRole('menuitemradio', { name: 'Last turn changes' })
+    // 官方顺序：git → branch → turn；默认选中 git
     const gitChangesOption = screen.getByRole('menuitemradio', { name: 'Git changes' })
+    const branchChangesOption = screen.getByRole('menuitemradio', { name: 'Branch changes' })
 
-    expect(lastTurnOption).toHaveFocus()
-    fireEvent.keyDown(menu, { key: 'ArrowDown' })
     expect(gitChangesOption).toHaveFocus()
+    fireEvent.keyDown(menu, { key: 'ArrowDown' })
+    expect(branchChangesOption).toHaveFocus()
 
     const treeButton = screen.getByRole('button', { name: 'Tree' })
     const listButton = screen.getByRole('button', { name: 'List' })
@@ -261,7 +244,8 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByRole('menuitemradio', { name: 'Session changes' })).toHaveFocus()
+    // 官方顺序 git → branch → turn，最后一项是 turn
+    expect(screen.getByRole('menuitemradio', { name: 'Last turn changes' })).toHaveFocus()
   })
 
   it('shows a hint instead of an init action when the project is not a git repository', async () => {
@@ -301,11 +285,12 @@ describe('SessionChangesPanel', () => {
       await Promise.resolve()
     })
 
-    const fileButtons = screen.getAllByRole('button', { name: /turn\.ts/ })
+    // 默认 git 模式，文件是 git.ts
+    const fileButtons = screen.getAllByRole('button', { name: /git\.ts/ })
     fireEvent.contextMenu(fileButtons[0])
     fireEvent.click(screen.getByRole('button', { name: 'Open in Files' }))
 
     // 预览条目带工作区目录标签（按工作区作用域隔离预览）
-    expect(openFilePreview).toHaveBeenCalledWith({ path: 'src/turn.ts', name: 'turn.ts', directory: '/repo' }, 'bottom')
+    expect(openFilePreview).toHaveBeenCalledWith({ path: 'src/git.ts', name: 'git.ts', directory: '/repo' }, 'bottom')
   })
 })

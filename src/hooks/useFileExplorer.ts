@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
-import { listDirectory, getFileContent, getFileStatus, getSessionDiff, getLastTurnDiff, getVcsDiff } from '../api'
+import { listDirectory, getFileContent, getFileStatus, getSessionDiff, getVcsDiff } from '../api'
 import type { FileNode, FileContent, FileStatusItem, FileDiff } from '../api/types'
 import { useSessionChangeScope } from '../store/changeScopeStore'
 import { activeSessionStore } from '../store/activeSessionStore'
@@ -167,16 +167,13 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
           statusMap.set(normalized, { ...item, file: normalized })
         })
       } else {
-        // v2 的 vcs.diff 模式只有 working / branch / committed，
-        // UI 的 'git' 对应 working
+        // 与官方 review 三模式一致：git → vcs.diff(working)，branch →
+        // vcs.diff(branch)，turn → session.diff（服务端按 session 自身
+        // location 解析快照仓库，无需调用方传 directory）
         const diffs =
-          changeMode === 'git'
-            ? await getVcsDiff('working', effectiveDirectory, serverId)
-            : changeMode === 'branch'
-              ? await getVcsDiff('branch', effectiveDirectory, serverId)
-              : changeMode === 'turn'
-                ? await getLastTurnDiff(sessionId, effectiveDirectory, serverId)
-                : await getSessionDiff(sessionId, effectiveDirectory, serverId)
+          changeMode === 'turn'
+            ? await getSessionDiff(sessionId, serverId)
+            : await getVcsDiff(changeMode === 'git' ? 'working' : 'branch', effectiveDirectory, serverId)
 
         if (loadId !== statusLoadIdRef.current) return
 

@@ -3,23 +3,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useFileExplorer } from './useFileExplorer'
 import { changeScopeStore } from '../store/changeScopeStore'
 
-const { listDirectory, getFileContent, getFileStatus, getSessionDiff, getLastTurnDiff, getVcsDiff } = vi.hoisted(
-  () => ({
-    listDirectory: vi.fn(),
-    getFileContent: vi.fn(),
-    getFileStatus: vi.fn(),
-    getSessionDiff: vi.fn(),
-    getLastTurnDiff: vi.fn(),
-    getVcsDiff: vi.fn(),
-  }),
-)
+const { listDirectory, getFileContent, getFileStatus, getSessionDiff, getVcsDiff } = vi.hoisted(() => ({
+  listDirectory: vi.fn(),
+  getFileContent: vi.fn(),
+  getFileStatus: vi.fn(),
+  getSessionDiff: vi.fn(),
+  getVcsDiff: vi.fn(),
+}))
 
 vi.mock('../api', () => ({
   listDirectory,
   getFileContent,
   getFileStatus,
   getSessionDiff,
-  getLastTurnDiff,
   getVcsDiff,
 }))
 
@@ -30,22 +26,21 @@ describe('useFileExplorer change scope', () => {
 
     listDirectory.mockResolvedValue([
       { name: 'src', path: 'src', absolute: '/repo/src', type: 'directory', ignored: false },
-      { name: 'session.ts', path: 'src/session.ts', absolute: '/repo/src/session.ts', type: 'file', ignored: false },
+      { name: 'git.ts', path: 'src/git.ts', absolute: '/repo/src/git.ts', type: 'file', ignored: false },
       { name: 'turn.ts', path: 'src/turn.ts', absolute: '/repo/src/turn.ts', type: 'file', ignored: false },
     ])
     getFileContent.mockResolvedValue({ type: 'text', content: 'test' })
     getFileStatus.mockResolvedValue([])
-    getVcsDiff.mockResolvedValue([])
-    getSessionDiff.mockResolvedValue([
+    getVcsDiff.mockResolvedValue([
       {
-        file: 'src/session.ts',
-        before: 'const session = 1',
-        after: 'const session = 2',
+        file: 'src/git.ts',
+        before: 'const git = 1',
+        after: 'const git = 2',
         additions: 1,
         deletions: 1,
       },
     ])
-    getLastTurnDiff.mockResolvedValue([
+    getSessionDiff.mockResolvedValue([
       {
         file: 'src/turn.ts',
         before: '',
@@ -57,24 +52,26 @@ describe('useFileExplorer change scope', () => {
   })
 
   it('updates file statuses when the shared change mode changes', async () => {
+    // 与官方 review 对齐：turn → session.diff（不传 directory），git → vcs.diff(working)
+    changeScopeStore.setMode('session-1', 'turn')
     const { result } = renderHook(() => useFileExplorer({ directory: '/repo', autoLoad: true, sessionId: 'session-1' }))
 
     await waitFor(() => {
       expect(result.current.fileStatus.get('src/turn.ts')?.status).toBe('added')
     })
 
-    expect(getLastTurnDiff).toHaveBeenCalledWith('session-1', '/repo', undefined)
+    expect(getSessionDiff).toHaveBeenCalledWith('session-1', undefined)
 
     act(() => {
-      changeScopeStore.setMode('session-1', 'session')
+      changeScopeStore.setMode('session-1', 'git')
     })
 
     await waitFor(() => {
-      expect(result.current.fileStatus.get('src/session.ts')?.status).toBe('modified')
+      expect(result.current.fileStatus.get('src/git.ts')?.status).toBe('modified')
     })
 
     expect(result.current.fileStatus.get('src/turn.ts')).toBeUndefined()
-    expect(getSessionDiff).toHaveBeenCalledWith('session-1', '/repo', undefined)
+    expect(getVcsDiff).toHaveBeenCalledWith('working', '/repo', undefined)
   })
 
   it('restores expanded folders per directory when switching projects', async () => {

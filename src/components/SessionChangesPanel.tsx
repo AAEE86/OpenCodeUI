@@ -7,14 +7,14 @@
 import { memo, useState, useEffect, useCallback, useRef, useMemo, useId } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { RetryIcon, ChevronRightIcon, MaximizeIcon, ClockIcon, GitBranchIcon, GitDiffIcon, LayersIcon } from './Icons'
+import { RetryIcon, ChevronRightIcon, MaximizeIcon, ClockIcon, GitBranchIcon, GitDiffIcon } from './Icons'
 import { getMaterialIconUrl } from '../utils/materialIcons'
 import { DiffViewer, useDiffViewerData, type ViewMode } from './DiffViewer'
 import { ViewModeSwitch } from './FullscreenViewer'
 import { getCurrentProject } from '../api/client'
-import { getLastTurnDiff, getSessionDiff } from '../api/session'
+import { getSessionDiff } from '../api/session'
 import { getVcsDiff, getVcsInfo } from '../api/vcs'
-import type { ApiProject, FileDiff, VcsDiffMode, VcsInfo } from '../api/types'
+import type { ApiProject, FileDiff, VcsInfo } from '../api/types'
 import { detectLanguage } from '../utils/languageUtils'
 import { extractContentFromUnifiedDiff } from '../utils/diffUtils'
 import { sessionErrorHandler } from '../utils'
@@ -33,11 +33,8 @@ const MIN_PREVIEW_HEIGHT = 120
 type ChangeMode = ChangeScopeMode
 
 function getDefaultChangeMode(options: ChangeMode[]) {
-  if (options.includes('turn')) return 'turn'
-  if (options.includes('git')) return 'git'
-  if (options.includes('branch')) return 'branch'
-  if (options.includes('session')) return 'session'
-  return options[0] ?? 'session'
+  // 官方语义：存储的选择不在当前可选项里时，落到第一个可选项
+  return options[0] ?? 'git'
 }
 
 function reconcileDiffPreviewState(diffs: FileDiff[], openFiles: string[], activeFile: string | null) {
@@ -91,11 +88,10 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   const [project, setProject] = useState<ApiProject | null>(null)
   const [vcsInfo, setVcsInfo] = useState<VcsInfo | null>(null)
   const [projectLoading, setProjectLoading] = useState(false)
-  const [loadingModes, setLoadingModes] = useState({ git: false, branch: false, session: false, turn: false })
-  const [loadedModes, setLoadedModes] = useState({ git: false, branch: false, session: false, turn: false })
+  const [loadingModes, setLoadingModes] = useState({ git: false, branch: false, turn: false })
+  const [loadedModes, setLoadedModes] = useState({ git: false, branch: false, turn: false })
   const [gitDiffs, setGitDiffs] = useState<FileDiff[]>([])
   const [branchDiffs, setBranchDiffs] = useState<FileDiff[]>([])
-  const [sessionDiffs, setSessionDiffs] = useState<FileDiff[]>([])
   const [turnDiffs, setTurnDiffs] = useState<FileDiff[]>([])
   const [error, setError] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('unified')
@@ -113,7 +109,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   const [fileContextMenu, setFileContextMenu] = useState<{ x: number; y: number; file: string } | null>(null)
 
   const projectRequestIdRef = useRef(0)
-  const diffRequestIdRef = useRef({ git: 0, branch: 0, session: 0, turn: 0 })
+  const diffRequestIdRef = useRef({ git: 0, branch: 0, turn: 0 })
   const openDiffFilesRef = useRef<string[]>([])
   const selectedFileRef = useRef<string | null>(null)
   const changeMenuTriggerRef = useRef<HTMLButtonElement>(null)
@@ -129,15 +125,17 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     },
     [sessionId],
   )
+  // 可选项与官方 review 一致（gui-extensions/review/model.ts options()）：
+  // git：有 vcs 即可；branch：当前分支≠默认分支才有意义；turn：快照只有 git 项目才采集
   const changeOptions = useMemo<ChangeMode[]>(() => {
     const options: ChangeMode[] = []
-    if (project?.vcs) options.push('turn', 'git')
+    if (project?.vcs) options.push('git')
     if (project?.vcs && vcsInfo?.branch?.current && vcsInfo.branch.default && vcsInfo.branch.current !== vcsInfo.branch.default) {
       options.push('branch')
     }
-    if (project?.vcs) options.push('session')
+    if (project?.vcs === 'git' && sessionId) options.push('turn')
     return options
-  }, [project?.vcs, vcsInfo?.branch?.current, vcsInfo?.branch?.default])
+  }, [project?.vcs, vcsInfo?.branch?.current, vcsInfo?.branch?.default, sessionId])
   const preferredChangeMode = useMemo(() => getDefaultChangeMode(changeOptions), [changeOptions])
   const changeModeMeta = useMemo(
     () => ({
@@ -151,11 +149,6 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         description: t('sessionChanges.branchScopeHint', { branch: vcsInfo?.branch?.default ?? 'main' }),
         icon: <GitBranchIcon size={12} />,
       },
-      session: {
-        label: t('sessionChanges.sessionScope'),
-        description: t('sessionChanges.sessionScopeHint'),
-        icon: <LayersIcon size={12} />,
-      },
       turn: {
         label: t('sessionChanges.turnScope'),
         description: t('sessionChanges.turnScopeHint'),
@@ -165,15 +158,8 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     [t, vcsInfo?.branch?.default],
   )
   const diffs = useMemo(
-    () =>
-      changeMode === 'git'
-        ? gitDiffs
-        : changeMode === 'branch'
-          ? branchDiffs
-          : changeMode === 'session'
-            ? sessionDiffs
-            : turnDiffs,
-    [branchDiffs, changeMode, gitDiffs, sessionDiffs, turnDiffs],
+    () => (changeMode === 'git' ? gitDiffs : changeMode === 'branch' ? branchDiffs : turnDiffs),
+    [branchDiffs, changeMode, gitDiffs, turnDiffs],
   )
   const loading = projectLoading || loadingModes[changeMode]
 
@@ -364,14 +350,12 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       setError(null)
 
       try {
-        let data: FileDiff[]
-        if (mode === 'git' || mode === 'branch') {
-          data = await getVcsDiff(mode as VcsDiffMode, directory, serverId)
-        } else if (mode === 'session') {
-          data = await getSessionDiff(sessionId, directory, serverId)
-        } else {
-          data = await getLastTurnDiff(sessionId, directory, serverId)
-        }
+        // 接口调用与官方一致：git/branch → vcs.diff（git 映射 working），
+        // turn → session.diff（服务端按 session 自身 location 解析，无需 directory）
+        const data: FileDiff[] =
+          mode === 'turn'
+            ? await getSessionDiff(sessionId, serverId)
+            : await getVcsDiff(mode === 'git' ? 'working' : 'branch', directory, serverId)
 
         if (requestId !== diffRequestIdRef.current[mode]) return
 
@@ -379,8 +363,6 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
           setGitDiffs(data)
         } else if (mode === 'branch') {
           setBranchDiffs(data)
-        } else if (mode === 'session') {
-          setSessionDiffs(data)
         } else {
           setTurnDiffs(data)
         }
@@ -403,17 +385,15 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     diffRequestIdRef.current = {
       git: diffRequestIdRef.current.git + 1,
       branch: diffRequestIdRef.current.branch + 1,
-      session: diffRequestIdRef.current.session + 1,
       turn: diffRequestIdRef.current.turn + 1,
     }
     setProject(null)
     setVcsInfo(null)
     setGitDiffs([])
     setBranchDiffs([])
-    setSessionDiffs([])
     setTurnDiffs([])
-    setLoadedModes({ git: false, branch: false, session: false, turn: false })
-    setLoadingModes({ git: false, branch: false, session: false, turn: false })
+    setLoadedModes({ git: false, branch: false, turn: false })
+    setLoadingModes({ git: false, branch: false, turn: false })
     setError(null)
     setOpenDiffFiles([])
     setSelectedFile(null)
@@ -609,9 +589,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       ? t('sessionChanges.noGitChanges')
       : changeMode === 'branch'
         ? t('sessionChanges.noBranchChanges')
-        : changeMode === 'session'
-          ? t('sessionChanges.noChanges')
-          : t('sessionChanges.noTurnChanges')
+        : t('sessionChanges.noTurnChanges')
 
   const activeChangeModeMeta = changeModeMeta[changeMode]
   const compactFileCountLabel = t('sessionChanges.fileCountCompact', { count: diffs.length })

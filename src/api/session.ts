@@ -62,17 +62,14 @@ export async function getSessionStatus(_directory?: string, serverId?: string): 
 // ============================================
 
 /**
- * 获取会话的 diff。
+ * 获取会话当前轮的 diff（v2 `session.diff`，对齐官方 review 的 turn 模式）。
  *
- * v2 的 `session.diff({ sessionID, from?, to?, context? })` 返回 `FileDiffInfo[]`，
- * 其中 `patch` 是 unified diff 文本。
+ * v2 的 `session.diff({ sessionID })` 不带 from/to 时锚定最后一条 user
+ * message 所在的 turn（快照差：turn 起始快照 vs 结束快照/运行中的工作区）。
+ * from/to 可扩展范围（官方 UI 未暴露，这里也不透传）。
+ * 服务端按 session 自身 location 解析快照仓库，不需要调用方传 directory。
  */
-export async function getSessionDiff(
-  sessionId: string,
-  _directory?: string,
-  _messageId?: string,
-  serverId?: string,
-): Promise<FileDiff[]> {
+export async function getSessionDiff(sessionId: string, serverId?: string): Promise<FileDiff[]> {
   const target = resolveSessionTarget(sessionId, serverId)
   const sdk = getSDKClient(target.serverId)
   const diffs = await sdk.session.diff({ sessionID: target.sessionId })
@@ -420,16 +417,6 @@ export async function importSession(
     ...transfer,
     ...(location ? { location: { directory: location.directory as string } } : {}),
   })
-}
-
-/**
- * 取本轮可见 diff。
- *
- * v2 的会话不再带 `summary.diffs`，diff 统一由 `session.diff()` 提供，
- * 因此这里退化为直接取会话 diff。
- */
-export async function getLastTurnDiff(sessionId: string, directory?: string, serverId?: string): Promise<FileDiff[]> {
-  return getSessionDiff(sessionId, directory, undefined, serverId)
 }
 
 // ============================================

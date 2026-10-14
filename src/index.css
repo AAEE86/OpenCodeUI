@@ -96,11 +96,6 @@ body,
 @media (display-mode: standalone) {
   :root:not(.tauri-app) {
     --safe-area-inset-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
-    /* iOS standalone + viewport-fit=cover 的 WebKit bug：dvh/innerHeight 等
-     * 视口度量会少算 safe-area-inset-bottom（~34px），底部留出永久空隙。
-     * 外壳高度补回这一截；底部栏自己的 safe-area padding 再把内容抬到
-     * home indicator 上方（JS 侧 useViewportHeight 的 px 同步同款逻辑）。 */
-    --app-height: calc(100dvh + env(safe-area-inset-bottom, 0px));
   }
 }
 

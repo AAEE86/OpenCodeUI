@@ -83,22 +83,21 @@ export function useViewportHeight() {
       (window.matchMedia?.('(display-mode: standalone)').matches === true ||
         (window.navigator as Navigator & { standalone?: boolean }).standalone === true)
 
-    // 把 --app-height 钉到真实可用高度（px）。
+    // 把 --app-height 钉到 window.innerHeight（px）。
     //
     // 为什么浏览器/PWA 不能只靠 CSS 100dvh——iOS standalone（添加到主屏幕）
-    // 有两个叠加的 WebKit bug（Android Chrome 均无）：
-    // 1. viewport-fit=cover 下 dvh/innerHeight 等视口度量**少算
-    //    safe-area-inset-bottom**（~34px），底部永久空隙——所以 standalone
-    //    下真实高度 = innerHeight + safeAreaBottomPx，单纯钉 innerHeight
-    //    钉的是个错误值；
-    // 2. 键盘首次弹出后视口缩水且永不回弹（见下方 heal）。
+    // 下 WebKit 会在键盘弹收后让视口度量缩水且不回弹（见下方 heal），
+    // dvh 跟着错；innerHeight 钉高至少保证键盘未弹起时外壳贴合真实视口。
+    //
+    // 注意：不要在这里盲加 safe-area-inset-bottom——「standalone 视口少算
+    // safe-area」的 WebKit bug 并非全版本生效，在健康的版本上多加 34px
+    // 会让整个外壳超出屏幕，底部内容被顶出可视区（实测翻车）。
     // 键盘弹起时**不同步**（此时 #root 高度不变、由 keyboard-inset padding
     // 让位，避免双重收缩）。
     let keyboardOpen = false
     const syncAppHeight = () => {
       if (keyboardOpen) return
-      const height = isStandalone ? window.innerHeight + safeAreaBottomPx : window.innerHeight
-      root.style.setProperty('--app-height', `${Math.round(height)}px`)
+      root.style.setProperty('--app-height', `${window.innerHeight}px`)
     }
 
     // iOS standalone PWA 键盘 bug（WebKit：键盘首次弹出后 innerHeight /
@@ -138,8 +137,13 @@ export function useViewportHeight() {
       // 真实软键盘通常远高于 100px，工具栏/phantom 误差一般低于这个值。
       const candidateInset = rawInset - safeAreaBottomPx
       const keyboardInset = candidateInset >= KEYBOARD_INSET_THRESHOLD ? candidateInset : 0
+      const wasKeyboardOpen = keyboardOpen
       keyboardOpen = keyboardInset > 0
       setKeyboardInset(keyboardInset)
+      // 键盘刚关闭（含滑动收起、不触发 focusout 的路径）：立即尝试修复卡住的视口
+      if (wasKeyboardOpen && !keyboardOpen) {
+        healStuckStandaloneViewport()
+      }
       syncAppHeight()
     }
 

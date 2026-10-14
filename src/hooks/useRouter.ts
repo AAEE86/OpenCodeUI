@@ -119,6 +119,20 @@ function syncRouteFromHash() {
   emitRoute(parseHash())
 }
 
+/**
+ * 通过 hash 导航并留下历史条目。
+ *
+ * 绝不用 `window.location.hash =` / `location.assign`：iOS standalone PWA
+ * 会把对 location 的赋值当成一次"导航"，重新走启动画面序列（WKWebView
+ * 默认白底 → 整屏白闪，体感像整页刷新）；history API 无此问题。
+ * 桌面端后退按钮不受影响：历史遍历到不同 fragment 会同时派发
+ * popstate 和 hashchange，我们的 hashchange 监听照样生效。
+ */
+export function navigateByHash(hash: string) {
+  window.history.pushState(null, '', hash)
+  syncRouteFromHash()
+}
+
 function ensureWindowListener() {
   if (typeof window === 'undefined' || isListening) return
   routeSnapshot = parseHash()
@@ -159,7 +173,8 @@ export function useRouter() {
     if (isMobileRef.current) {
       window.history.replaceState(null, '', newHash)
     } else {
-      window.location.hash = newHash
+      // 见 navigateByHash：不用 location.hash =（iOS standalone 白闪）
+      window.history.pushState(null, '', newHash)
     }
     emitRoute(next)
   }, [])
@@ -172,7 +187,7 @@ export function useRouter() {
     if (isMobileRef.current) {
       window.history.replaceState(null, '', newHash)
     } else {
-      window.location.hash = newHash
+      window.history.pushState(null, '', newHash)
     }
     emitRoute(next)
   }, [])
@@ -195,7 +210,8 @@ export function useRouter() {
     } else {
       serverStorage.remove(STORAGE_KEY_LAST_DIRECTORY)
     }
-    window.location.hash = newHash
+    // 见 navigateByHash：不用 location.hash =（iOS standalone 白闪）
+    window.history.pushState(null, '', newHash)
     emitRoute(next)
   }, [])
 

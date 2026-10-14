@@ -18,6 +18,11 @@ import { resetPathModeCache } from './utils/directoryUtils'
 import { isTauri, isTauriMobile } from './utils/tauri'
 import { apiErrorHandler, globalErrorHandler } from './utils/errorHandling'
 import { applyLocalServiceUrl } from './utils/localServiceUrl'
+import { recordBoot } from './utils/bootLog'
+
+// 诊断：记录真实启动（整页重载 / WebView 崩溃重载都会留痕），
+// 「设置 → 关于」里可查，用于区分「渲染层闪烁」与「整页重载」
+recordBoot()
 
 // Polyfill: randomUUID 在非 HTTPS 环境可能缺失（如局域网 HTTP）
 // 统一补齐，避免业务层 scattered fallback。

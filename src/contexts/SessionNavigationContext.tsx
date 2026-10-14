@@ -10,6 +10,7 @@
 // window.location.hash，而是通过 context 获取导航方法。
 
 import { createContext, useContext } from 'react'
+import { navigateByHash } from '../hooks/useRouter'
 
 export interface SessionNavigationContextValue {
   /** 导航到指定 session */
@@ -20,10 +21,10 @@ export interface SessionNavigationContextValue {
   currentDirectory?: string
 }
 
-/** 默认实现：走 hash 路由 */
+/** 默认实现：走 hash 路由（history API，不碰 location——iOS standalone 白闪） */
 function defaultNavigateToSession(sessionId: string, directory?: string) {
   const hash = directory ? `#/session/${sessionId}?dir=${encodeURIComponent(directory)}` : `#/session/${sessionId}`
-  window.location.hash = hash
+  navigateByHash(hash)
 }
 
 export const SessionNavigationContext = createContext<SessionNavigationContextValue>({

@@ -17,6 +17,7 @@ import {
   type NotificationType,
 } from '../store/notificationStore'
 import { hasUpdateAvailable, shouldShowUpdateToast, updateStore, useUpdateStore } from '../store/updateStore'
+import { navigateByHash } from '../hooks/useRouter'
 import { CloseIcon, HandIcon, QuestionIcon, CheckIcon, AlertCircleIcon, DownloadIcon } from './Icons'
 
 // ============================================
@@ -182,7 +183,7 @@ export function ToastContainer({ onOpenAbout }: { onOpenAbout: () => void }) {
     notificationStore.markRead(id)
     if (sessionId) {
       const dir = directory ? `?dir=${directory}` : ''
-      window.location.assign(`#/session/${sessionId}${dir}`)
+      navigateByHash(`#/session/${sessionId}${dir}`)
     }
   }
 

@@ -23,6 +23,7 @@ import { listWorktrees, createWorktree, removeWorktree, refreshWorktrees } from 
 import { getBranchList } from '../api/vcs'
 import { subscribeToEvents } from '../api/events'
 import { useDirectory, useVcsInfo } from '../hooks'
+import { navigateByHash } from '../hooks/useRouter'
 import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../utils'
 import type { ApiProject } from '../api'
 import { ConfirmDialog } from './ui/ConfirmDialog'
@@ -159,8 +160,9 @@ export const WorktreePanel = memo(function WorktreePanel({ isResizing: _isResizi
       const normalized = normalizeToForwardSlash(worktreeDir)
       // 把 worktree 目录加入项目列表（同时切换过去）
       addDirectory(normalized)
-      // 直接设置 URL hash 到新 session 状态（清掉 sessionId，用 worktree 目录）
-      window.location.hash = `#/?dir=${normalized}`
+      // 导航到新 session 状态（清掉 sessionId，用 worktree 目录）
+      // 用 history API 而非 location.hash =（iOS standalone 白闪）
+      navigateByHash(`#/?dir=${normalized}`)
     },
     [addDirectory],
   )

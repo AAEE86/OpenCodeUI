@@ -6,7 +6,10 @@ import { hasUpdateAvailable, updateStore, useUpdateStore, RELEASES_PAGE_URL } fr
 import { saveData } from '../../../utils/downloadUtils'
 import { exportSettingsBackup, importSettingsBackup, previewBackupMeta } from '../../../utils/settingsBackup'
 import { openExternalUrl } from '../../../utils/externalUrl'
+import { readBootLog } from '../../../utils/bootLog'
 import { SettingsSection } from './SettingsUI'
+
+const BOOT_LOG_KEY = 'ocui.bootLog'
 
 export function AboutSettings() {
   const { t } = useTranslation(['settings'])
@@ -149,6 +152,45 @@ export function AboutSettings() {
           </div>
         )}
       </SettingsSection>
+
+      <DiagnosticsSection t={t} />
     </div>
+  )
+}
+
+/** 启动记录诊断：区分「渲染层闪烁」与「整页重载」（iOS 白闪排查用） */
+function DiagnosticsSection({ t }: { t: (key: string) => string }) {
+  const [bootLog, setBootLog] = useState<number[]>(() => readBootLog())
+
+  const handleClear = useCallback(() => {
+    try {
+      localStorage.removeItem(BOOT_LOG_KEY)
+    } catch {
+      // 忽略
+    }
+    setBootLog([])
+  }, [])
+
+  return (
+    <SettingsSection title={t('about.diagnosticsTitle')} description={t('about.diagnosticsDesc')}>
+      {bootLog.length === 0 ? (
+        <div className="text-[length:var(--fs-sm)] text-text-400">{t('about.bootLogEmpty')}</div>
+      ) : (
+        <div className="max-h-40 overflow-y-auto custom-scrollbar font-mono text-[length:var(--fs-xs)] text-text-300 space-y-0.5">
+          {[...bootLog].reverse().map((timestamp, index) => (
+            <div key={`${timestamp}-${index}`} className="tabular-nums">
+              {new Date(timestamp).toLocaleString()}
+            </div>
+          ))}
+        </div>
+      )}
+      {bootLog.length > 0 && (
+        <div className="flex">
+          <Button size="sm" variant="ghost" onClick={handleClear}>
+            {t('about.bootLogClear')}
+          </Button>
+        </div>
+      )}
+    </SettingsSection>
   )
 }

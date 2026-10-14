@@ -508,7 +508,11 @@
     "backupImportConfirm": "Importing a backup will replace the current local settings and reload the app. Continue?",
     "backupImportConfirmWithDate": "Import the backup created at {{date}}? This will replace the current local settings and reload the app.",
     "toastTitle": "New version available: {{version}}",
-    "toastBody": "Click to open About and view the release page."
+    "toastBody": "Click to open About and view the release page.",
+    "diagnosticsTitle": "Diagnostics",
+    "diagnosticsDesc": "Timestamps of real app boots (cold start / full reload / WebView crash reload). Switching sessions or projects never adds an entry; if a new row appears right when the screen flashes white, a full page reload happened.",
+    "bootLogEmpty": "No records yet",
+    "bootLogClear": "Clear"
   },
   "keybindings": {
     "title": "Keyboard Shortcuts",

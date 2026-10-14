@@ -12,6 +12,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { STORAGE_KEY_NOTIFICATIONS_ENABLED } from '../constants/storage'
 import { isTauri } from '../utils/tauri'
+import { navigateByHash } from './useRouter'
 
 // ============================================
 // Types
@@ -140,7 +141,7 @@ export function useNotification() {
         const { sessionId, directory } = event.data
         if (sessionId) {
           const dir = directory ? `?dir=${directory}` : ''
-          window.location.hash = `#/session/${sessionId}${dir}`
+          navigateByHash(`#/session/${sessionId}${dir}`)
         }
       }
     }
@@ -220,7 +221,7 @@ export function useNotification() {
         if (data?.sessionId) {
           const path = `#/session/${data.sessionId}`
           const dir = data.directory ? `?dir=${data.directory}` : ''
-          window.location.hash = `${path}${dir}`
+          navigateByHash(`${path}${dir}`)
         }
         notification.close()
       }

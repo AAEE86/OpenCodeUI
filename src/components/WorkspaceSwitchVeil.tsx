@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { useCurrentDirectory } from '../contexts'
+import { supportsViewTransition } from '../utils/viewTransition'
 
 // ============================================
 // WorkspaceSwitchVeil — iOS WebKit 白闪遮罩
@@ -27,6 +28,9 @@ const SETTLE_MS = 500
 const FADE_OUT_MS = 180
 
 function isIosWebKit(): boolean {
+  // View Transitions 可用时（Safari 18.2+/iOS 18.2+）由路由层的
+  // 快照交叉淡化接管，遮罩反而会把淡化盖住——这里只兜底更旧的 iOS
+  if (supportsViewTransition()) return false
   // Tauri 桌面/安卓走 Chromium 系 WebView，不存在该问题
   if (document.documentElement.classList.contains('tauri-app')) return false
   const ua = navigator.userAgent

@@ -81,6 +81,14 @@ export function useViewportHeight() {
       (window.matchMedia?.('(display-mode: standalone)').matches === true ||
         (window.navigator as Navigator & { standalone?: boolean }).standalone === true)
 
+    // iOS 判定（含 iPadOS 桌面 UA）。键盘会话/原生 reveal 方案只对 iOS 启用：
+    // Android Chrome 的 interactive-widget=resizes-content 会真实收缩视口且
+    // 度量准确，live innerHeight 就是正确行为——钉 screen.height + 放开滚动
+    // 反而会和浏览器自己的收缩打架（实测安卓跳动退步）。
+    const isIos =
+      /iPad|iPhone|iPod/i.test(window.navigator.userAgent) ||
+      (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1)
+
     // 把 --app-height 钉到可信高度（px），实时跟随。
     //
     // 真机数据（iPhone 16 Pro / iOS 26）最终结论：
@@ -95,11 +103,12 @@ export function useViewportHeight() {
     //   文档滚动——iOS 会像对待设置弹窗里的输入框一样，把聚焦的输入框
     //   scroll-into-view 到键盘上方，全程不需要知道键盘具体多高。
     // - 键盘收起、无焦点：standalone 钉 screen.height，浏览器钉 innerHeight。
+    // - 非 iOS 不进入键盘会话：高度 live 跟随，浏览器原生 resize 行为已正确。
     let keyboardOpen = false
     const hasKeyboardFocus = () => isKeyboardEditableElement(document.activeElement)
 
     const syncLayoutMode = () => {
-      const session = keyboardOpen || hasKeyboardFocus()
+      const session = isIos && (keyboardOpen || hasKeyboardFocus())
       root.classList.toggle('keyboard-session', session)
       if (!session) {
         // 会话结束：文档可能被原生 reveal 滚动过，先复位再钉回常规高度

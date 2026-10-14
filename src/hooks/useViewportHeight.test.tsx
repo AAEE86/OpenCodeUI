@@ -41,6 +41,20 @@ function restoreWindowProperty(name: 'innerHeight' | 'visualViewport', descripto
   }
 }
 
+function mockIosDevice() {
+  Object.defineProperty(window.navigator, 'userAgent', {
+    configurable: true,
+    value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15',
+  })
+}
+
+function mockAndroidDevice() {
+  Object.defineProperty(window.navigator, 'userAgent', {
+    configurable: true,
+    value: 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36',
+  })
+}
+
 describe('useViewportHeight', () => {
   beforeEach(() => {
     // 键盘会话会优先钉 screen.height——默认归零，需要可信值的用例自己 mock
@@ -58,10 +72,12 @@ describe('useViewportHeight', () => {
     document.documentElement.removeAttribute('style')
     restoreWindowProperty('innerHeight', originalInnerHeight)
     restoreWindowProperty('visualViewport', originalVisualViewport)
+    Reflect.deleteProperty(window.navigator, 'userAgent')
   })
 
   it('restores full height after an editable element blurs without a visualViewport resize', () => {
     vi.useFakeTimers()
+    mockIosDevice()
     installVisualViewportMock({ innerHeight: 800, viewportHeight: 500 })
     const textarea = document.createElement('textarea')
     document.body.append(textarea)
@@ -85,6 +101,7 @@ describe('useViewportHeight', () => {
 
   it('keeps the keyboard session while focus moves between text inputs', () => {
     vi.useFakeTimers()
+    mockIosDevice()
     installVisualViewportMock({ innerHeight: 800, viewportHeight: 500 })
     const textarea = document.createElement('textarea')
     const input = document.createElement('input')
@@ -112,6 +129,7 @@ describe('useViewportHeight', () => {
 
   it('pins --app-height to screen.height while the keyboard is open (metrics are untrustworthy during the IME)', () => {
     // iOS 键盘弹起时实测：ih=685、vv=345（少报 ~120px），只有 screen.height 可信
+    mockIosDevice()
     Object.defineProperty(window.screen, 'height', { configurable: true, value: 874 })
     installVisualViewportMock({ innerHeight: 685, viewportHeight: 345, offsetTop: 19 })
 
@@ -122,6 +140,7 @@ describe('useViewportHeight', () => {
   })
 
   it('resyncs --app-height after the keyboard closes (iOS standalone bottom-gap guard)', () => {
+    mockIosDevice()
     const viewport = installVisualViewportMock({ innerHeight: 800, viewportHeight: 500 })
 
     renderHook(() => useViewportHeight())
@@ -190,6 +209,7 @@ describe('useViewportHeight', () => {
   })
 
   it('keeps --app-height pinned to screen.height during a keyboard session in standalone', () => {
+    mockIosDevice()
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       value: (query: string) => ({
@@ -211,5 +231,26 @@ describe('useViewportHeight', () => {
     // 不信任任何键盘态度量——ih/vv 在 iOS 26 上都是污染值）
     expect(document.documentElement.classList.contains('keyboard-session')).toBe(true)
     expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('874px')
+  })
+
+  it('never enters the keyboard session on Android - live innerHeight with resizes-content is already correct', () => {
+    mockAndroidDevice()
+    const viewport = installVisualViewportMock({ innerHeight: 800, viewportHeight: 800 })
+
+    renderHook(() => useViewportHeight())
+
+    // 键盘弹起：Android Chrome 的 resizes-content 让视口真实收缩，
+    // ih/vv 同步缩小且度量准确——高度 live 跟随即可，不进键盘会话
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 500 })
+    Object.defineProperty(viewport, 'height', { configurable: true, value: 500 })
+    const textarea = document.createElement('textarea')
+    document.body.append(textarea)
+    act(() => {
+      textarea.focus()
+      viewport.dispatchEvent(new Event('resize'))
+    })
+
+    expect(document.documentElement.classList.contains('keyboard-session')).toBe(false)
+    expect(document.documentElement.style.getPropertyValue('--app-height')).toBe('500px')
   })
 })

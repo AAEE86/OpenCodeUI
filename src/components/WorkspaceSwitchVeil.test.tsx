@@ -80,10 +80,11 @@ describe('WorkspaceSwitchVeil', () => {
 
     // 落定后淡出（带过渡）
     act(() => {
-      vi.advanceTimersByTime(400)
+      vi.advanceTimersByTime(600)
     })
     expect(veil!.style.opacity).toBe('0')
     expect(veil!.style.transition).toContain('opacity')
+    expect(veil!.style.pointerEvents).toBe('none')
   })
 
   it('非 iOS 环境（安卓/PC/Tauri）不渲染遮罩', () => {

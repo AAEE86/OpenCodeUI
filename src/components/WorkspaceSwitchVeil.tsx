@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useCurrentDirectory } from '../contexts'
 
 // ============================================
@@ -20,8 +20,9 @@ import { useCurrentDirectory } from '../contexts'
 // 淡出。白色画布被这层深色彻底盖住。仅 iOS WebKit 启用。
 // ============================================
 
-/** 盖上后等待新内容光栅完成的时长（白闪一般持续 2~3 帧，留足余量） */
-const SETTLE_MS = 320
+/** 盖上后等待新内容光栅完成的时长（白闪一般持续 2~3 帧，但项目切换
+ * 后列表/聊天区是异步数据到达才重建，遮盖期要覆盖到那次重绘） */
+const SETTLE_MS = 500
 /** 淡出动画时长（盖上是瞬时的，不能渐变，否则挡不住白闪） */
 const FADE_OUT_MS = 180
 
@@ -45,7 +46,10 @@ export function WorkspaceSwitchVeil() {
 
   // 直接操作 DOM 而不走 setState：盖上必须是同一帧内的瞬时变化，
   // 也避免为此多渲染一轮。
-  useEffect(() => {
+  // 必须用 useLayoutEffect：目录变化触发的大 commit 在提交后、绘制前
+  // 同步盖上——useEffect 要等绘制后才跑，白闪那一帧 veil 还是透明的，
+  // 根本盖不住（首版无效的原因）。
+  useLayoutEffect(() => {
     if (!enabled) return
     // 首次挂载不盖（首屏有自己的加载态）
     if (isFirstRenderRef.current) {
@@ -58,10 +62,13 @@ export function WorkspaceSwitchVeil() {
     // 工作区切换：立即盖上（无过渡）。连续切换时重置计时。
     veil.style.transition = 'none'
     veil.style.opacity = '1'
+    // 遮盖期间拦截触摸，避免点到尚未重建完的界面
+    veil.style.pointerEvents = 'auto'
     window.clearTimeout(settleTimerRef.current)
     settleTimerRef.current = window.setTimeout(() => {
       veil.style.transition = `opacity ${FADE_OUT_MS}ms ease-out`
       veil.style.opacity = '0'
+      veil.style.pointerEvents = 'none'
     }, SETTLE_MS)
     return () => window.clearTimeout(settleTimerRef.current)
   }, [directory, enabled])

@@ -22,6 +22,7 @@
 // store 只读负载里的 sessionID，**从不**读事件信封上的 sessionID —— 读原始
 // id 会让两个服务器上的同 id 会话串台。
 
+import type { ModelRef } from '@opencode/client/promise'
 import type {
   AssistantContent,
   AssistantMessage,
@@ -511,6 +512,10 @@ class MessageStore {
       title?: string
       loadState?: SessionState['loadState']
       loadError?: APIError
+      /** durable 会话级 agent（SessionInfo）——只补空缺，不覆盖 live SSE 更新的值 */
+      agent?: string
+      /** durable 会话级模型（SessionInfo）——同上 */
+      model?: ModelRef
     },
   ) {
     const state = this.sessions.get(sessionId)
@@ -522,6 +527,8 @@ class MessageStore {
     if (options.title !== undefined) state.title = options.title
     if (options.loadState !== undefined) state.loadState = options.loadState
     if (options.loadError !== undefined) state.loadError = options.loadError
+    if (state.agent === undefined && options.agent !== undefined) state.agent = options.agent
+    if (state.model === undefined && options.model !== undefined) state.model = options.model
 
     this.notify([sessionId])
   }
@@ -655,6 +662,10 @@ class MessageStore {
       hasMoreHistory?: boolean
       historyCursor?: string | null
       revertState?: SessionRevert | null
+      /** durable 会话级 agent（SessionInfo）——只补空缺，不覆盖 live SSE 更新的值 */
+      agent?: string
+      /** durable 会话级模型（SessionInfo）——同上 */
+      model?: ModelRef
     },
   ) {
     const state = this.ensureSession(sessionId)
@@ -689,6 +700,10 @@ class MessageStore {
     if (options?.historyCursor !== undefined) state.historyCursor = options.historyCursor
     state.directory = options?.directory ?? ''
     if (options?.title !== undefined) state.title = options.title
+    // durable 会话级 agent/model（SessionInfo）：只补空缺——live SSE 的
+    // session.agent/model.selected 可能更新过，服务端快照不覆盖它们
+    if (state.agent === undefined && options?.agent !== undefined) state.agent = options.agent
+    if (state.model === undefined && options?.model !== undefined) state.model = options.model
     state.isStale = false
 
     // Revert 状态

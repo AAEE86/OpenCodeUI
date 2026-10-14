@@ -165,6 +165,9 @@ export function useSessionManager({
                 : {}),
               directory: sessionInfo?.location?.directory ?? dir ?? '',
               title: sessionInfo?.title,
+              // durable 会话级 agent/model：只补空缺（官方 selection.tsx 的 durable() 同款来源）
+              agent: sessionInfo?.agent,
+              model: sessionInfo?.model,
             })
           })
           .catch(() => {
@@ -210,6 +213,8 @@ export function useSessionManager({
             directory: sessionInfo?.location?.directory ?? dir ?? '',
             title: sessionInfo?.title,
             loadState: 'loaded',
+            agent: sessionInfo?.agent,
+            model: sessionInfo?.model,
           })
           onLoadComplete?.()
           return
@@ -224,6 +229,10 @@ export function useSessionManager({
           // v2 的 SessionInfo 不再携带 revert / share：
           // 回退状态由 session.revert 接口与事件维护，分享改为导出
           revertState: null,
+          // 会话级 agent/model 的 durable 来源（官方 selection.tsx 同款）：
+          // 新鲜客户端没有 live SSE 历史时，composer 从这里恢复
+          agent: sessionInfo?.agent,
+          model: sessionInfo?.model,
         })
 
         // 首屏窗口可能从半截回合开始（首条 assistant 的父 user 在更深的历史页）：

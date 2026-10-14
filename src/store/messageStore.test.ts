@@ -127,6 +127,43 @@ describe('messageStore（原生 v2 消息）', () => {
     messageStore.clearAll()
   })
 
+  it('setMessages 补种 durable 会话级 agent/model（SessionInfo 来源），但不覆盖 live SSE 的值', () => {
+    // 新鲜客户端：live 状态空缺 → 服务端快照补种
+    messageStore.setMessages(SESSION, [createUserMessage('msg-1')], {
+      agent: 'plan',
+      model: { id: 'gpt-4o', providerID: 'openai', variant: 'high' },
+    })
+
+    let state = messageStore.getSessionState(SESSION)
+    expect(state?.agent).toBe('plan')
+    expect(state?.model).toEqual({ id: 'gpt-4o', providerID: 'openai', variant: 'high' })
+
+    // live SSE 先落定过的会话：快照重拉不覆盖
+    messageStore.handleAgentSelected({ sessionID: SESSION, agent: 'build' })
+    messageStore.handleModelSelected({ sessionID: SESSION, model: { id: 'gpt-5', providerID: 'openai' } })
+    messageStore.setMessages(SESSION, [createUserMessage('msg-1')], {
+      agent: 'plan',
+      model: { id: 'gpt-4o', providerID: 'openai' },
+    })
+
+    state = messageStore.getSessionState(SESSION)
+    expect(state?.agent).toBe('build')
+    expect(state?.model).toEqual({ id: 'gpt-5', providerID: 'openai' })
+  })
+
+  it('updateSessionMetadata 同样只补空缺的 agent/model', () => {
+    messageStore.setMessages(SESSION, [createUserMessage('msg-1')])
+
+    messageStore.updateSessionMetadata(SESSION, { agent: 'plan', model: { id: 'gpt-4o', providerID: 'openai' } })
+    expect(messageStore.getSessionState(SESSION)?.agent).toBe('plan')
+    expect(messageStore.getSessionState(SESSION)?.model).toEqual({ id: 'gpt-4o', providerID: 'openai' })
+
+    messageStore.updateSessionMetadata(SESSION, { agent: 'build', model: { id: 'gpt-5', providerID: 'openai' } })
+    expect(messageStore.getSessionState(SESSION)?.agent).toBe('plan')
+    expect(messageStore.getSessionState(SESSION)?.model).toEqual({ id: 'gpt-4o', providerID: 'openai' })
+  })
+
+
   // ============================================
   // 整条落库
   // ============================================

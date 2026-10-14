@@ -546,8 +546,8 @@ export const ChatPane = memo(function ChatPane({
   useEffect(() => {
     // 没有 session、或者这个 session 已经恢复过了 → 跳过
     if (!routeSessionId || restoredSessionRef.current === routeSessionId) return
-    // messages 还没加载完 → 等下次
-    if (messages.length === 0) return
+    // 还没加载完（空会话也算：loadState 到达 loaded 即放行）→ 等下次
+    if (messages.length === 0 && loadState !== 'loaded') return
 
     restoredSessionRef.current = routeSessionId
 
@@ -557,7 +557,7 @@ export const ChatPane = memo(function ChatPane({
     }
     // 依赖 routeSessionId 和 messages.length（等加载完），不依赖 messages 引用
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeSessionId, messages.length, visibleModels, restoreFromMessage])
+  }, [routeSessionId, messages.length, loadState, visibleModels, restoreFromMessage])
 
   // ============================================
   // Agent Restoration Effect
@@ -571,14 +571,15 @@ export const ChatPane = memo(function ChatPane({
   const restoredAgentSessionRef = useRef<string | null>(null)
   useEffect(() => {
     if (!routeSessionId || restoredAgentSessionRef.current === routeSessionId) return
-    if (messages.length === 0) return
+    // 同模型恢复：等会话加载完（空会话以 loadState 为准）
+    if (messages.length === 0 && loadState !== 'loaded') return
 
     restoredAgentSessionRef.current = routeSessionId
     // 同模型恢复：v2 的 agent 也是会话级状态
     restoreAgentFromMessage(messageStore.getSessionState(routeSessionId)?.agent)
     // Streaming only changes message content; agent restoration follows session/load boundaries.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeSessionId, messages.length, restoreAgentFromMessage])
+  }, [routeSessionId, messages.length, loadState, restoreAgentFromMessage])
 
   // ============================================
   // Focus handling

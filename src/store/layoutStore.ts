@@ -35,9 +35,23 @@ export interface PanelTab {
 export interface PreviewFile {
   path: string
   name: string
+  /** 打开时所属工作区目录（规范化正斜杠）——预览状态按工作区作用域，
+   *  切工作区后另一个工作区的预览不再串到当前文件面板（官方按 session tab 作用域的等价物） */
+  directory?: string
   targetLine?: number
   targetKey?: string
   targetRanges?: Array<{ from: number; to: number }>
+}
+
+/** 预览条目身份 = 相对路径 + 工作区目录（同一路径在不同工作区是不同文件） */
+function samePreviewIdentity(a: { path: string; directory?: string }, b: { path: string; directory?: string }) {
+  return a.path === b.path && (a.directory ?? '') === (b.directory ?? '')
+}
+
+/** 条目是否属于当前工作区：无目录信息（旧数据/无工作区上下文）时始终可见 */
+export function previewMatchesDirectory(file: { directory?: string }, directory: string | undefined): boolean {
+  if (!file.directory || !directory) return true
+  return isSameDirectory(file.directory, directory)
 }
 
 const MAX_RIGHT_PANEL_WIDTH = 1280
@@ -821,45 +835,54 @@ export class LayoutStore {
     const targetTab = this.getTargetFilesTab(position)
     if (!targetTab) return
 
-    const previewFiles = targetTab.previewFiles ?? []
-    const existingIndex = previewFiles.findIndex(item => item.path === file.path)
-    const nextPreviewFiles =
-      existingIndex === -1 ? [...previewFiles, file] : previewFiles.map(item => (item.path === file.path ? file : item))
+    // 目录规范化（正斜杠）：身份比较是字符串级，避免同目录不同写法产生重复条目
+    const normalizedFile = file.directory
+      ? { ...file, directory: normalizeToForwardSlash(file.directory) }
+      : file
 
-    targetTab.previewFiles = nextPreviewFiles
-    targetTab.previewFile = file
+    // 按身份（path+工作区）去重；已存在则移到末尾——列表顺序即「最近使用序」，
+    // FileExplorer 用它推导每个工作区自己的最近预览
+    const rest = (targetTab.previewFiles ?? []).filter(item => !samePreviewIdentity(item, normalizedFile))
+
+    targetTab.previewFiles = [...rest, normalizedFile]
+    targetTab.previewFile = normalizedFile
     this.state.activeTabId[targetTab.position] = targetTab.id
     this.setPanelOpen(targetTab.position, true)
     this.notify()
   }
 
-  activateFilePreview(tabId: string, path: string) {
+  activateFilePreview(tabId: string, path: string, directory?: string) {
     const tab = this.state.panelTabs.find(item => item.id === tabId && item.type === 'files')
-    const file = tab?.previewFiles?.find(item => item.path === path)
-    if (!tab || !file) return
+    const files = tab?.previewFiles
+    if (!tab || !files) return
+    const identity = { path, directory }
+    const file = files.find(item => samePreviewIdentity(item, identity))
+    if (!file) return
+    // 激活即最近：移到末尾，保持每个工作区的最近序
+    tab.previewFiles = [...files.filter(item => !samePreviewIdentity(item, identity)), file]
     tab.previewFile = file
     this.notify()
   }
 
-  closeFilePreview(tabId: string, path?: string) {
+  closeFilePreview(tabId: string, path?: string, directory?: string) {
     const tab = this.state.panelTabs.find(item => item.id === tabId && item.type === 'files')
     const previewFiles = tab?.previewFiles
     const targetPath = path ?? tab?.previewFile?.path
     if (!tab || !previewFiles || !targetPath) return
+    const identity = { path: targetPath, directory: directory ?? tab.previewFile?.directory }
 
-    const index = previewFiles.findIndex(item => item.path === targetPath)
-    if (index === -1) return
+    if (!previewFiles.some(item => samePreviewIdentity(item, identity))) return
 
-    const isActive = tab.previewFile?.path === targetPath
-    const nextPreviewFiles = previewFiles.filter(item => item.path !== targetPath)
+    const isActive = !!tab.previewFile && samePreviewIdentity(tab.previewFile, identity)
+    const nextPreviewFiles = previewFiles.filter(item => !samePreviewIdentity(item, identity))
 
     tab.previewFiles = nextPreviewFiles
 
     if (nextPreviewFiles.length === 0) {
       tab.previewFile = null
     } else if (isActive) {
-      const nextIndex = Math.min(index, nextPreviewFiles.length - 1)
-      tab.previewFile = nextPreviewFiles[nextIndex] ?? null
+      // 关闭活跃预览后回退到最近使用的条目（末尾 = 最近）
+      tab.previewFile = nextPreviewFiles[nextPreviewFiles.length - 1] ?? null
     }
 
     this.notify()
@@ -873,13 +896,13 @@ export class LayoutStore {
     this.notify()
   }
 
-  reorderFilePreviews(tabId: string, draggedPath: string, targetPath: string) {
+  reorderFilePreviews(tabId: string, draggedPath: string, targetPath: string, directory?: string) {
     const tab = this.state.panelTabs.find(item => item.id === tabId && item.type === 'files')
     const previewFiles = tab?.previewFiles
     if (!tab || !previewFiles) return
 
-    const draggedIndex = previewFiles.findIndex(item => item.path === draggedPath)
-    const targetIndex = previewFiles.findIndex(item => item.path === targetPath)
+    const draggedIndex = previewFiles.findIndex(item => samePreviewIdentity(item, { path: draggedPath, directory }))
+    const targetIndex = previewFiles.findIndex(item => samePreviewIdentity(item, { path: targetPath, directory }))
 
     if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return
 
@@ -1271,6 +1294,7 @@ export function importLayoutBackup(raw: unknown): void {
 // ============================================
 
 import { useSyncExternalStore } from 'react'
+import { isSameDirectory, normalizeToForwardSlash } from '../utils'
 
 // 兼容的 snapshot 类型，包含派生属性
 interface LayoutSnapshot extends LayoutState {

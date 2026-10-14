@@ -305,6 +305,7 @@ describe('SessionChangesPanel', () => {
     fireEvent.contextMenu(fileButtons[0])
     fireEvent.click(screen.getByRole('button', { name: 'Open in Files' }))
 
-    expect(openFilePreview).toHaveBeenCalledWith({ path: 'src/turn.ts', name: 'turn.ts' }, 'bottom')
+    // 预览条目带工作区目录标签（按工作区作用域隔离预览）
+    expect(openFilePreview).toHaveBeenCalledWith({ path: 'src/turn.ts', name: 'turn.ts', directory: '/repo' }, 'bottom')
   })
 })

@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useFileExplorer, type FileTreeNode } from '../hooks'
 import { useVerticalSplitResize } from '../hooks/useVerticalSplitResize'
-import { layoutStore, type PreviewFile } from '../store/layoutStore'
+import { layoutStore, previewMatchesDirectory, type PreviewFile } from '../store/layoutStore'
 import {
   ChevronRightIcon,
   ChevronDownIcon,
@@ -145,25 +145,38 @@ export const FileExplorer = memo(function FileExplorer({
     previewError,
     loadPreview,
     clearPreview,
+    effectiveDirectory,
     fileStatus,
     refresh,
   } = useFileExplorer({ directory, autoLoad: true, sessionId: sessionId || undefined, serverId, consumerId: `file-explorer-${panelTabId}` })
 
+  // 预览状态按工作区作用域（官方 session tab 作用域的等价物）：
+  // 面板 tab 里的 previewFiles 是全局列表，这里只取属于当前工作区的部分；
+  // 切工作区后另一个工作区的预览不再串过来，切回时恢复该工作区最近打开的预览。
+  const scopedPreviewFiles = useMemo(
+    () => previewFiles.filter(file => previewMatchesDirectory(file, effectiveDirectory)),
+    [previewFiles, effectiveDirectory],
+  )
+  const scopedPreviewFile = useMemo(() => {
+    if (previewFile && previewMatchesDirectory(previewFile, effectiveDirectory)) return previewFile
+    return scopedPreviewFiles[scopedPreviewFiles.length - 1] ?? null
+  }, [previewFile, scopedPreviewFiles, effectiveDirectory])
+
   // 当 previewFile 改变时加载预览
   useEffect(() => {
-    if (previewFile) {
-      loadPreview(previewFile.path)
+    if (scopedPreviewFile) {
+      loadPreview(scopedPreviewFile.path)
     } else {
       clearPreview()
     }
-  }, [previewFile, loadPreview, clearPreview])
+  }, [scopedPreviewFile, loadPreview, clearPreview])
 
   const handleRefresh = useCallback(async () => {
     await refresh()
-    if (previewFile) {
-      await loadPreview(previewFile.path)
+    if (scopedPreviewFile) {
+      await loadPreview(scopedPreviewFile.path)
     }
-  }, [loadPreview, previewFile, refresh])
+  }, [loadPreview, scopedPreviewFile, refresh])
 
   // 处理文件点击
   const handleFileClick = useCallback(
@@ -171,10 +184,13 @@ export const FileExplorer = memo(function FileExplorer({
       if (node.type === 'directory') {
         toggleExpand(node.path)
       } else {
-        layoutStore.openFilePreview({ path: node.path, name: node.name }, position)
+        layoutStore.openFilePreview(
+          { path: node.path, name: node.name, directory: effectiveDirectory },
+          position,
+        )
       }
     },
-    [toggleExpand, position],
+    [toggleExpand, position, effectiveDirectory],
   )
 
   const resolveAbsolutePath = useCallback(
@@ -231,29 +247,34 @@ export const FileExplorer = memo(function FileExplorer({
     resetSplitHeight()
   }, [panelTabId, resetSplitHeight])
 
+  // 激活/关闭/重排预览 tab：path 在当前工作区的可见列表里唯一，
+  // 从可见列表取回目录身份再交给 store（跨工作区同路径不撞）
   const handleActivatePreview = useCallback(
     (path: string) => {
-      layoutStore.activateFilePreview(panelTabId, path)
+      const file = scopedPreviewFiles.find(item => item.path === path)
+      layoutStore.activateFilePreview(panelTabId, path, file?.directory)
     },
-    [panelTabId],
+    [panelTabId, scopedPreviewFiles],
   )
 
   const handleClosePreviewTab = useCallback(
     (path: string) => {
-      layoutStore.closeFilePreview(panelTabId, path)
+      const file = scopedPreviewFiles.find(item => item.path === path)
+      layoutStore.closeFilePreview(panelTabId, path, file?.directory)
     },
-    [panelTabId],
+    [panelTabId, scopedPreviewFiles],
   )
 
   const handleReorderPreviewTabs = useCallback(
     (draggedPath: string, targetPath: string) => {
-      layoutStore.reorderFilePreviews(panelTabId, draggedPath, targetPath)
+      const directory = scopedPreviewFiles.find(item => item.path === draggedPath)?.directory
+      layoutStore.reorderFilePreviews(panelTabId, draggedPath, targetPath, directory)
     },
-    [panelTabId],
+    [panelTabId, scopedPreviewFiles],
   )
 
   // 是否显示预览
-  const showPreview = Boolean(previewFile) || previewLoading || Boolean(previewError)
+  const showPreview = Boolean(scopedPreviewFile) || previewLoading || Boolean(previewError)
   const trimmedSearchQuery = searchQuery.trim()
   const isSearching = trimmedSearchQuery.length > 0
 
@@ -293,9 +314,9 @@ export const FileExplorer = memo(function FileExplorer({
   const handleFileResultClick = useCallback(
     (path: string) => {
       const name = path.split(/[/\\]/).pop() || path
-      layoutStore.openFilePreview({ path, name }, position)
+      layoutStore.openFilePreview({ path, name, directory: effectiveDirectory }, position)
     },
-    [position],
+    [position, effectiveDirectory],
   )
 
   const handleSearchQueryChange = useCallback((value: string) => {
@@ -456,11 +477,11 @@ export const FileExplorer = memo(function FileExplorer({
       {showPreview && (
         <div className="flex-1 flex flex-col min-h-0" style={{ minHeight: MIN_PREVIEW_HEIGHT }}>
           <FilePreview
-            previewFiles={previewFiles}
-            path={previewFile?.path ?? null}
-            targetLine={previewFile?.targetLine}
-            targetKey={previewFile?.targetKey}
-            targetRanges={previewFile?.targetRanges}
+            previewFiles={scopedPreviewFiles}
+            path={scopedPreviewFile?.path ?? null}
+            targetLine={scopedPreviewFile?.targetLine}
+            targetKey={scopedPreviewFile?.targetKey}
+            targetRanges={scopedPreviewFile?.targetRanges}
             content={previewContent}
             isLoading={previewLoading}
             error={previewError}

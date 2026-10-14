@@ -240,10 +240,13 @@ function App() {
       })),
     [allSessions],
   )
-  const handlePaletteOpenFile = useCallback((path: string) => {
-    const name = path.split(/[\\/]/).pop() ?? path
-    layoutStore.openFilePreview({ path, name })
-  }, [])
+  const handlePaletteOpenFile = useCallback(
+    (path: string) => {
+      const name = path.split(/[\\/]/).pop() ?? path
+      layoutStore.openFilePreview({ path, name, directory: currentDirectory })
+    },
+    [currentDirectory],
+  )
 
   const handleNewSession = useCallback(() => {
     const paneId = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()

@@ -66,6 +66,9 @@ export interface UseFileExplorerResult {
   loadPreview: (path: string) => Promise<void>
   clearPreview: () => void
 
+  /** 实际生效的目录（session 目录优先于传入目录）；预览按此作用域分键 */
+  effectiveDirectory: string | undefined
+
   // 文件状态
   fileStatus: Map<string, FileStatusItem>
 
@@ -349,17 +352,6 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     setPreviewLoading(false)
   }, [])
 
-  // 工作区/会话目录切换：清掉旧目录的预览内容，避免在 FileExplorer 重新
-  // loadPreview 之前短暂显示上一个工作区的文件（缓存按目录分键，切回仍能秒开）
-  const prevPreviewDirectoryRef = useRef(effectiveDirectory)
-  useEffect(() => {
-    if (prevPreviewDirectoryRef.current === effectiveDirectory) return
-    prevPreviewDirectoryRef.current = effectiveDirectory
-    previewLoadIdRef.current += 1
-    setPreviewContent(null)
-    setPreviewError(null)
-    setPreviewLoading(false)
-  }, [effectiveDirectory])
 
   // 刷新
   const refresh = useCallback(async () => {
@@ -415,7 +407,8 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
   }, [effectiveDirectory, expandedPaths, loadChildren, tree])
 
   useEffect(() => {
-    previewCacheRef.current.clear()
+    // 目录/会话/服务器切换：清的是「当前显示」与在途请求，缓存按目录分键保留——
+    // 切回工作区时预览秒开，且绝不会串到另一个工作区的同名文件内容
     previewLoadIdRef.current += 1
     setPreviewContent(null)
     setPreviewError(null)
@@ -435,6 +428,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     previewError,
     loadPreview,
     clearPreview,
+    effectiveDirectory,
     fileStatus,
     refresh,
     softRefresh,

@@ -160,3 +160,65 @@ describe('LayoutStore panel and terminal layout', () => {
     expect(restored.terminalRightClickPaste).toBe(true)
   })
 })
+
+// 文件预览按工作区作用域：不同工作区的同名相对路径互不干扰（官方 session tab 作用域的等价物）
+describe('LayoutStore file preview workspace scoping', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it('同一路径在不同工作区是独立条目', () => {
+    const store = new LayoutStore()
+    store.openFilePreview({ path: 'src/app.ts', name: 'app.ts', directory: '/repo-a' })
+    store.openFilePreview({ path: 'src/app.ts', name: 'app.ts', directory: '/repo-b' })
+
+    const tab = store.getState().panelTabs.find(item => item.id === 'files')
+    expect(tab?.previewFiles).toHaveLength(2)
+    expect(tab?.previewFile).toMatchObject({ path: 'src/app.ts', directory: '/repo-b' })
+  })
+
+  it('同一工作区内重复打开只保留一个条目', () => {
+    const store = new LayoutStore()
+    store.openFilePreview({ path: 'src/app.ts', name: 'app.ts', directory: '/repo-a' })
+    store.openFilePreview({ path: 'src/app.ts', name: 'app.ts', directory: '/repo-a' })
+
+    const tab = store.getState().panelTabs.find(item => item.id === 'files')
+    expect(tab?.previewFiles).toHaveLength(1)
+  })
+
+  it('目录写法不同（反斜杠）仍视为同一工作区条目', () => {
+    const store = new LayoutStore()
+    store.openFilePreview({ path: 'src/app.ts', name: 'app.ts', directory: 'C:\\repo\\a' })
+    store.openFilePreview({ path: 'src/app.ts', name: 'app.ts', directory: 'C:/repo/a' })
+
+    const tab = store.getState().panelTabs.find(item => item.id === 'files')
+    expect(tab?.previewFiles).toHaveLength(1)
+    expect(tab?.previewFiles?.[0]?.directory).toBe('C:/repo/a')
+  })
+
+  it('关闭活跃预览回退到最近使用的条目', () => {
+    const store = new LayoutStore()
+    store.openFilePreview({ path: 'a.ts', name: 'a.ts', directory: '/repo' })
+    store.openFilePreview({ path: 'b.ts', name: 'b.ts', directory: '/repo' })
+    store.activateFilePreview('files', 'a.ts', '/repo')
+
+    // a.ts 是活跃（且因激活移到末尾=最近）
+    expect(store.getState().panelTabs.find(t => t.id === 'files')?.previewFile?.path).toBe('a.ts')
+
+    store.closeFilePreview('files', 'a.ts', '/repo')
+    const tab = store.getState().panelTabs.find(t => t.id === 'files')
+    expect(tab?.previewFile?.path).toBe('b.ts')
+    expect(tab?.previewFiles).toHaveLength(1)
+  })
+
+  it('关闭一个工作区的预览不影响另一个工作区', () => {
+    const store = new LayoutStore()
+    store.openFilePreview({ path: 'src/app.ts', name: 'app.ts', directory: '/repo-a' })
+    store.openFilePreview({ path: 'src/app.ts', name: 'app.ts', directory: '/repo-b' })
+
+    store.closeFilePreview('files', 'src/app.ts', '/repo-b')
+    const tab = store.getState().panelTabs.find(t => t.id === 'files')
+    expect(tab?.previewFiles).toHaveLength(1)
+    expect(tab?.previewFiles?.[0]?.directory).toBe('/repo-a')
+  })
+})

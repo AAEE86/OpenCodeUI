@@ -83,21 +83,28 @@ export function useViewportHeight() {
       (window.matchMedia?.('(display-mode: standalone)').matches === true ||
         (window.navigator as Navigator & { standalone?: boolean }).standalone === true)
 
-    // 把 --app-height 钉到 window.innerHeight（px）。
+    // standalone 视口少算量的**实测**补偿。
     //
-    // 为什么浏览器/PWA 不能只靠 CSS 100dvh——iOS standalone（添加到主屏幕）
-    // 下 WebKit 会在键盘弹收后让视口度量缩水且不回弹（见下方 heal），
-    // dvh 跟着错；innerHeight 钉高至少保证键盘未弹起时外壳贴合真实视口。
-    //
-    // 注意：不要在这里盲加 safe-area-inset-bottom——「standalone 视口少算
-    // safe-area」的 WebKit bug 并非全版本生效，在健康的版本上多加 34px
-    // 会让整个外壳超出屏幕，底部内容被顶出可视区（实测翻车）。
+    // 教训：不能盲加 env(safe-area-inset-bottom)——「standalone 下 innerHeight
+    // 比物理屏幕少一截」的 WebKit bug 各版本少算量不一（实测有 <34px 的），
+    // 一刀切 34px 会把外壳顶出屏幕（底部内容掉进不可视区）。
+    // standalone 无浏览器 UI，screen.height 即物理全高，差值就是少算量；
+    // 健康版本差值为 0，自然不补。钳制上限防止键盘卡死状态污染基线
+    // （那种情况由下方 heal 修复，不靠补偿）。
+    let baselineGapPx = 0
+    const BASELINE_GAP_MAX = 40
+    const measureBaselineGap = () => {
+      if (!isStandalone || keyboardOpen) return
+      baselineGapPx = Math.min(Math.max(window.screen.height - window.innerHeight, 0), BASELINE_GAP_MAX)
+    }
+
+    // 把 --app-height 钉到真实可用高度（px）：innerHeight + 实测少算量。
     // 键盘弹起时**不同步**（此时 #root 高度不变、由 keyboard-inset padding
     // 让位，避免双重收缩）。
     let keyboardOpen = false
     const syncAppHeight = () => {
       if (keyboardOpen) return
-      root.style.setProperty('--app-height', `${window.innerHeight}px`)
+      root.style.setProperty('--app-height', `${Math.round(window.innerHeight + baselineGapPx)}px`)
     }
 
     // iOS standalone PWA 键盘 bug（WebKit：键盘首次弹出后 innerHeight /
@@ -169,11 +176,41 @@ export function useViewportHeight() {
     const handleWindowResize = () => {
       if (!keyboardOpen) {
         maxInnerHeight = Math.max(maxInnerHeight, window.innerHeight)
+        measureBaselineGap()
       }
       measureSafeAreaBottom()
       updateViewport()
     }
 
+    // ===== 临时诊断（iOS standalone 底部空隙定位用，拿到真实数据后移除）=====
+    // 角标显示关键视口度量，500ms 刷新；只在 standalone PWA 出现。
+    // ih=innerHeight sh=screen.height vv=visualViewport.height vt=vv.offsetTop
+    // sa=safe-area-inset-bottom(px) ah=--app-height ki=keyboard-inset
+    let debugBadge: HTMLDivElement | null = null
+    let debugTimer: number | null = null
+    if (isStandalone) {
+      debugBadge = document.createElement('div')
+      debugBadge.style.cssText =
+        'position:fixed;left:4px;bottom:4px;z-index:99999;pointer-events:none;' +
+        'font:10px/1.4 monospace;color:#0f0;background:rgba(0,0,0,.6);' +
+        'padding:2px 4px;border-radius:3px;white-space:pre'
+      document.body.appendChild(debugBadge)
+      const updateBadge = () => {
+        if (!debugBadge) return
+        const vv = window.visualViewport
+        const ah = getComputedStyle(root).getPropertyValue('--app-height').trim()
+        const ki = root.style.getPropertyValue('--keyboard-inset-bottom') || '0px'
+        debugBadge.textContent =
+          `ih:${window.innerHeight} sh:${window.screen.height} ` +
+          `vv:${vv ? Math.round(vv.height) : '-'} vt:${vv ? Math.round(vv.offsetTop) : '-'} ` +
+          `sa:${Math.round(safeAreaBottomPx)} bg:${Math.round(baselineGapPx)} ah:${ah} ki:${ki}`
+      }
+      updateBadge()
+      debugTimer = window.setInterval(updateBadge, 500)
+    }
+    // ===== 临时诊断结束 =====
+
+    measureBaselineGap()
     updateViewport()
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', updateViewport)
@@ -186,6 +223,8 @@ export function useViewportHeight() {
     document.addEventListener('visibilitychange', syncAfterFocusSettles)
     return () => {
       clearKeyboardSettleTimers()
+      if (debugTimer !== null) window.clearInterval(debugTimer)
+      debugBadge?.remove()
       if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', updateViewport)
         window.visualViewport.removeEventListener('scroll', updateViewport)

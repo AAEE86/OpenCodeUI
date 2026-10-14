@@ -161,8 +161,10 @@ describe('useViewportHeight', () => {
     act(() => {
       textarea.focus()
       textarea.blur()
-      vi.runAllTimers()
+      // 诊断角标的 setInterval 会让 runAllTimers 空转，按时间推进即可
+      vi.advanceTimersByTime(800)
     })
+    // MutationObserver 回调是微任务，冲一下再断言
     await act(async () => {
       await Promise.resolve()
     })

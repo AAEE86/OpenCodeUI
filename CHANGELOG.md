@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.7.14] - 2026-10-15
+
+- fix(chat): decide the permission notification after the session chain is known (09c8d8a9)
+- fix(chat): never notify about a permission that is already on screen (1d74fed8)
+- fix(chat): mount live child-session permissions instead of only toasting (cac92e36)
+- fix(chat): make subagent card binding deterministic and bounded (ec96b783)
+- fix(store): make childSessionStore.subscribe safe to pass unbound (3cbadce3)
+- feat(servers): re-pair from the edit form and grant Android camera access (ab061980)
+- fix(chat): keep subagent permissions visible and mounted while tools run (c21fa795)
+- feat(desktop): adopt the shared background service and manage it from settings (3f9dc4a9)
+- feat(servers): scan pairing QR codes when adding a server (98cb17ff)
+- fix(servers): redeem pair links before diagnosing mixed content (99837f92)
+- feat(servers): add servers via opencode pair links and pair from the UI (9363caca)
+- fix(message): restore the inline subagent transcript in task tool cards (f3f32510)
+
 ## [v0.7.13] - 2026-10-15
 
 - fix(chat): refresh stale session state after an SSE reconnect (09163a20)

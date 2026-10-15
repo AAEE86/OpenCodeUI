@@ -30,7 +30,9 @@
     "restoringSessions": "恢复会话中...",
     "noTerminals": "没有终端",
     "createTerminal": "创建终端",
-    "closeTerminal": "关闭终端"
+    "closeTerminal": "关闭终端",
+    "connectFailed": "连接失败：{{message}}",
+    "connectForbiddenHint": "服务端拒绝了终端连接票据。允许的来源只有同源、localhost、tauri 与 *.opencode.ai，当前页面来源（{{origin}}）不在其中。请把该来源加入服务端的 cors 配置，或从服务端自身的地址打开应用。"
   },
   "diffViewer": {
     "noChanges": "无变更",

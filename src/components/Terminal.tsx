@@ -20,6 +20,38 @@ import { isTauri } from '../utils/tauri'
 import { copyTextToClipboard, readTextFromClipboard } from '../utils/clipboard'
 import { hapticTap } from '../utils/haptics'
 import { keybindingStore } from '../store/keybindingStore'
+import i18n from '../i18n'
+
+/**
+ * 终端连接失败的原因与排查方向。
+ *
+ * 浏览器 WebSocket 带不了 Authorization，v2 必须先 POST `/api/pty/:id/connect-token`
+ * 换一次性票据。服务端对该接口有两道闸（官方 packages/server/src/handlers/pty.ts:125-129）：
+ * 必须带 `x-opencode-ticket: 1` 头（强制跨域预检），且 Origin 必须在允许列表内
+ * （同源 / localhost / tauri / *.opencode.ai / 服务端 cors 配置，见 packages/server/src/cors.ts）。
+ * 403 时把原因写进终端——之前只重连不解释，用户只能看到无限
+ * [Disconnected, reconnecting...]（issue #181）。
+ */
+function describePtyConnectFailure(error: unknown): { message: string; hint?: string } {
+  const tagged =
+    typeof error === 'object' && error !== null
+      ? (error as { _tag?: unknown; message?: unknown })
+      : undefined
+  const tag = typeof tagged?._tag === 'string' ? tagged._tag : ''
+  const message =
+    typeof tagged?.message === 'string'
+      ? tagged.message
+      : error instanceof Error
+        ? error.message
+        : String(error)
+  if (tag === 'ForbiddenError' || /403|forbidden/i.test(`${tag} ${message}`)) {
+    return {
+      message,
+      hint: i18n.t('components:terminal.connectForbiddenHint', { origin: window.location.origin }),
+    }
+  }
+  return { message }
+}
 
 const TERMINAL_FONT_FALLBACK =
   "'Fira Code', 'Noto Sans Mono CJK SC', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'Noto Sans Mono', 'Ubuntu Mono', 'WenQuanYi Micro Hei Mono', 'DejaVu Sans Mono', 'Noto Sans CJK SC', ui-monospace, monospace"
@@ -612,6 +644,8 @@ export const Terminal = memo(function Terminal({ ptyId, directory, serverId, isA
     const BASE_RECONNECT_DELAY = 1000 // 起始 1s
     let intentionalClose = false // 标记主动关闭
     const useNativePtyBridge = isTauri()
+    // 已经提示过的排查方向（重连会反复失败，同一条只写一次，避免刷屏）
+    const printedHintsRef = new Set<string>()
 
     const resetTransport = () => {
       transportSendRef.current = null
@@ -628,7 +662,16 @@ export const Terminal = memo(function Terminal({ ptyId, directory, serverId, isA
       updatePtySession(ptyId, { size: { cols, rows } }, terminalDirectory, serverId).catch(() => {})
     }
 
-    const handleDisconnected = ({ code, reason }: { code?: number; reason?: string }) => {
+    const handleDisconnected = ({
+      code,
+      reason,
+      hint,
+    }: {
+      code?: number
+      reason?: string
+      /** 可执行的排查提示（目前只有票据 403 会带）——同一条只打印一次 */
+      hint?: string
+    }) => {
       logger.log(
         useNativePtyBridge ? '[Terminal/Tauri] Disconnected:' : '[Terminal] WebSocket closed:',
         ptyId,
@@ -642,6 +685,15 @@ export const Terminal = memo(function Terminal({ ptyId, directory, serverId, isA
       if (intentionalClose || code === 1000) {
         terminal.write('\r\n\x1b[90m[Connection closed]\x1b[0m\r\n')
         return
+      }
+
+      // 把服务端给的原因写出来（之前只进日志），否则用户只看到无限重连
+      if (reason) {
+        terminal.write(`\r\n\x1b[31m${i18n.t('components:terminal.connectFailed', { message: reason })}\x1b[0m\r\n`)
+      }
+      if (hint && !printedHintsRef.has(hint)) {
+        printedHintsRef.add(hint)
+        terminal.write(`\x1b[33m${hint}\x1b[0m\r\n`)
       }
 
       reconnectAttempt++
@@ -702,9 +754,9 @@ export const Terminal = memo(function Terminal({ ptyId, directory, serverId, isA
             transportDisconnectRef.current = () => connection.close()
           })
           .catch(error => {
-            const message = error instanceof Error ? error.message : String(error)
+            const { message, hint } = describePtyConnectFailure(error)
             logger.log('[Terminal/Tauri] Failed to initialize PTY bridge:', ptyId, message)
-            handleDisconnected({ reason: message })
+            handleDisconnected({ reason: message, hint })
           })
       } else {
         // v2 的 WS 连接需要先异步换取一次性 ticket（见 api/pty.getPtyConnectUrl）
@@ -745,9 +797,9 @@ export const Terminal = memo(function Terminal({ ptyId, directory, serverId, isA
             }
           })
           .catch(error => {
-            const message = error instanceof Error ? error.message : String(error)
+            const { message, hint } = describePtyConnectFailure(error)
             logger.log('[Terminal] Failed to prepare PTY WebSocket URL:', ptyId, message)
-            handleDisconnected({ reason: message })
+            handleDisconnected({ reason: message, hint })
           })
       }
 

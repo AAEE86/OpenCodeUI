@@ -25,12 +25,8 @@ import {
   type ToolViewPart,
   type ToolViewContext,
 } from '../tools'
-import {
-  currentToolChildSessionId,
-  currentToolFailed,
-  currentToolInput,
-  currentToolMetadata,
-} from '../../../types/api/toolState'
+import { currentToolFailed, currentToolInput, currentToolMetadata } from '../../../types/api/toolState'
+import { resolveTaskChildSessionRef } from '../../../utils/taskChildBinding'
 import { executeSubCallSummary, parseCodeModeToolCalls } from './executeSubCallSummary'
 import { MSG_SPACING } from '../messageSpacing'
 import { MessageExpandPanel, useMessageExpandRender } from '../messageExpand'
@@ -566,10 +562,9 @@ const ToolBody = memo(function ToolBody({
   return <DefaultRenderer part={part} data={data} context={context} onFullscreenChange={onFullscreenChange} />
 })
 
-/** task/subagent 工具派出的子 session：metadata 里是原始 id，服务器以 pane 绑定的 serverId 为权威 */
+/** task/subagent 工具派出的子 session：metadata 权威值 + 早期绑定表兜底（刷新后 progress 不可回放） */
 function getTaskChildSessionRef(part: ToolViewPart, serverId: string): TaskChildSessionRef | undefined {
-  const sessionId = currentToolChildSessionId(part)
-  return sessionId ? { sessionKey: sessionId, serverId } : undefined
+  return resolveTaskChildSessionRef(part, serverId)
 }
 
 /** Extract description from tool input as title fallback (available while running) */

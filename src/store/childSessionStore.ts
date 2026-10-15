@@ -36,6 +36,14 @@ class ChildSessionStore {
   private childrenByParent = new Map<string, Set<string>>()
   // sessionID -> ChildSessionInfo
   private sessionInfo = new Map<string, ChildSessionInfo>()
+  // task/subagent 工具卡片 → 子 session 的早期绑定：
+  // `${serverId}:${partId}` -> childSessionKey（复合 key）。
+  // metadata.sessionID 只在 tool.success 落库、progress 不落库（官方 message-updater.ts:341-342
+  // 明示不投影 ephemeral progress），刷新/重连后运行中的工具拿不到子 session id，
+  // 只能靠 session.created（带 parentID/agent/title）启发式重建——绑定结果放这里。
+  private toolBindings = new Map<string, string>()
+  // 反向索引：childSessionKey -> partKey（一个子 session 只属于一张卡片）
+  private toolBindingsByChild = new Map<string, string>()
   private subscribers = new Set<Subscriber>()
   private version = 0
 
@@ -142,6 +150,32 @@ class ChildSessionStore {
 
   getVersion = (): number => this.version
 
+  // ============================================
+  // 工具卡片 ↔ 子 session 早期绑定
+  // ============================================
+
+  /** 把子 session 绑定到父 session 里发起它的 task/subagent 工具卡片 */
+  bindToolPart(serverId: string, partId: string, childSessionKey: string) {
+    const partKey = `${serverId}:${partId}`
+    if (this.toolBindings.get(partKey) === childSessionKey) return
+    // 一个子 session 只挂一张卡片：换绑时清掉旧反向索引
+    const previousPartKey = this.toolBindingsByChild.get(childSessionKey)
+    if (previousPartKey && previousPartKey !== partKey) this.toolBindings.delete(previousPartKey)
+    this.toolBindings.set(partKey, childSessionKey)
+    this.toolBindingsByChild.set(childSessionKey, partKey)
+    this.notify()
+  }
+
+  /** 查某张工具卡片绑定的子 session（复合 key）；未绑定返回 undefined */
+  getBoundChildForToolPart(serverId: string, partId: string): string | undefined {
+    return this.toolBindings.get(`${serverId}:${partId}`)
+  }
+
+  /** 查子 session 是否已绑定到某张工具卡片 */
+  getBoundToolPartForChild(childSessionKey: string): string | undefined {
+    return this.toolBindingsByChild.get(childSessionKey)
+  }
+
   /**
    * 检查 sessionId 是否是 parentId 的子 session（或子孙 session）
    */
@@ -191,6 +225,8 @@ class ChildSessionStore {
   clearAll() {
     this.childrenByParent.clear()
     this.sessionInfo.clear()
+    this.toolBindings.clear()
+    this.toolBindingsByChild.clear()
     this.notify()
   }
 
@@ -202,6 +238,7 @@ class ChildSessionStore {
     if (children) {
       for (const childId of children) {
         this.sessionInfo.delete(childId)
+        this.dropToolBinding(childId)
         // 递归清理子 session 的子 session
         this.clearChildren(childId)
       }
@@ -226,9 +263,19 @@ class ChildSessionStore {
 
       if (this.childrenByParent.delete(id)) changed = true
       if (this.sessionInfo.delete(id)) changed = true
+      if (this.dropToolBinding(id)) changed = true
     }
 
     if (changed) this.notify()
+  }
+
+  /** 移除子 session 的卡片绑定（双向索引一起清），返回是否有变化 */
+  private dropToolBinding(childSessionKey: string): boolean {
+    const partKey = this.toolBindingsByChild.get(childSessionKey)
+    if (!partKey) return false
+    this.toolBindingsByChild.delete(childSessionKey)
+    this.toolBindings.delete(partKey)
+    return true
   }
 }
 

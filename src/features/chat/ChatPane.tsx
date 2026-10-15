@@ -22,7 +22,7 @@ import { useServerStore } from '../../hooks/useServerStore'
 import { useCancelHint } from '../../hooks/useCancelHint'
 import { makeSessionKey, sessionKeyToServerId, splitSessionKey } from '../../utils/sessionKey'
 import { serverStore } from '../../store/serverStore'
-import { InlineToolRequestContext, type InlineToolRequestContextValue } from './InlineToolRequestContext'
+import { InlineToolRequestContext, partitionUnclaimedRequests, type InlineToolRequestContextValue } from './InlineToolRequestContext'
 import { ChatViewportProvider, canUseSplitPane, useChatViewportMaybe, type ChatViewportValue } from './chatViewport'
 import { useChatPageViewModel } from './useChatPageViewModel'
 import { findBlockingBackgroundTasks, mergeRunningShells, useRunningShells } from './backgroundTasks'
@@ -33,7 +33,7 @@ import { SessionNavigationContext } from '../../contexts/SessionNavigationContex
 import { useDirectory } from '../../contexts/useDirectory'
 import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { autoApproveStore } from '../../store/autoApproveStore'
-import { messageStore, paneControllerStore, useHiddenModelKeys } from '../../store'
+import { messageStore, paneControllerStore, useHiddenModelKeys, childSessionStore } from '../../store'
 import { restoreModelSelection } from '../../utils/sessionHelpers'
 import { uiErrorHandler } from '../../utils'
 import { findModelByKey, getModelKey } from '../../utils/modelUtils'
@@ -826,16 +826,65 @@ export const ChatPane = memo(function ChatPane({
   const [permissionCollapsed, setPermissionCollapsed] = useState(false)
   const [questionCollapsed, setQuestionCollapsed] = useState(false)
 
-  const permissionRequestId = pendingPermissionRequests[0]?.id
-  const questionRequestId = pendingQuestionRequests[0]?.id
+  const { inlineToolRequests, outlineCurrentHighlight } = useTheme()
+
+  // inline 模式下未被任何工具卡片认领的 family 请求仍走底部会话级弹窗——
+  // 典型场景：刷新后运行中的子代理要权限（progress 不落库，metadata.sessionID
+  // 丢失）、OMO 后台子代理没有可见卡片。不兜底的话请求彻底不可见、会话假死。
+  // 官方同款：权限 dock 按 sessionID 子树收集，与卡片匹配无关。
+  const childSessionVersion = useSyncExternalStore(childSessionStore.subscribe, childSessionStore.getVersion)
+  const allPendingForms = useMemo(
+    () => (pendingWebsearchRequest ? [...pendingQuestionRequests, pendingWebsearchRequest] : pendingQuestionRequests),
+    [pendingQuestionRequests, pendingWebsearchRequest],
+  )
+  const unclaimed = useMemo(
+    () => {
+      // childSessionVersion 是绑定表版本号：卡片↔子会话绑定变化不改任何入参引用，
+      // 但认领判定会变——引用它让依赖数组语义完整（也让 memo 正确失效）
+      void childSessionVersion
+      return inlineToolRequests && routeSessionId
+        ? partitionUnclaimedRequests(messages, pendingPermissionRequests, allPendingForms, paneServerId, routeSessionId)
+        : { permissions: [], questions: [] }
+    },
+    [
+      inlineToolRequests,
+      routeSessionId,
+      messages,
+      pendingPermissionRequests,
+      allPendingForms,
+      paneServerId,
+      childSessionVersion,
+    ],
+  )
+  const isWebsearchForm = (form: (typeof allPendingForms)[number]) =>
+    (form.metadata as Record<string, unknown> | undefined)?.kind === 'websearch.provider'
+  // inline 模式底部只渲染未认领的；非 inline 模式维持原样（全量会话级弹窗）。
+  // 提问维持原有优先级：有待处理权限时提问排队不弹。
+  const visiblePermissionRequests = inlineToolRequests ? unclaimed.permissions : pendingPermissionRequests
+  const visibleQuestionRequests =
+    visiblePermissionRequests.length === 0
+      ? inlineToolRequests
+        ? unclaimed.questions.filter(form => !isWebsearchForm(form))
+        : pendingQuestionRequests
+      : []
+  const visibleWebsearchRequest =
+    visiblePermissionRequests.length === 0
+      ? inlineToolRequests
+        ? visibleQuestionRequests.length === 0
+          ? unclaimed.questions.find(isWebsearchForm)
+          : undefined
+        : pendingWebsearchRequest
+      : undefined
+
+  // 新请求出现（含 inline 模式底部兜底）时解除折叠
+  const permissionRequestId = visiblePermissionRequests[0]?.id
+  const questionRequestId = visibleQuestionRequests[0]?.id
   useEffect(() => {
     if (permissionRequestId) setPermissionCollapsed(false)
   }, [permissionRequestId])
   useEffect(() => {
     if (questionRequestId) setQuestionCollapsed(false)
   }, [questionRequestId])
-
-  const { inlineToolRequests, outlineCurrentHighlight } = useTheme()
 
   const inlineToolRequestCtx = useMemo<InlineToolRequestContextValue>(
     () => ({
@@ -1028,24 +1077,21 @@ export const ChatPane = memo(function ChatPane({
           showScrollToBottom={!isAtBottom}
           onScrollToBottom={handleScrollToBottom}
           collapsedPermission={
-            !inlineToolRequests && pendingPermissionRequests.length > 0 && permissionCollapsed
+            visiblePermissionRequests.length > 0 && permissionCollapsed
               ? {
                   label: t('chat:permissionDialog.permission', {
-                    permission: pendingPermissionRequests[0].action,
+                    permission: visiblePermissionRequests[0].action,
                   }),
-                  queueLength: pendingPermissionRequests.length,
+                  queueLength: visiblePermissionRequests.length,
                   onExpand: () => setPermissionCollapsed(false),
                 }
               : undefined
           }
           collapsedQuestion={
-            !inlineToolRequests &&
-            pendingPermissionRequests.length === 0 &&
-            pendingQuestionRequests.length > 0 &&
-            questionCollapsed
+            visiblePermissionRequests.length === 0 && visibleQuestionRequests.length > 0 && questionCollapsed
               ? {
                   label: t('chat:questionDialog.title'),
-                  queueLength: pendingQuestionRequests.length,
+                  queueLength: visibleQuestionRequests.length,
                   onExpand: () => setQuestionCollapsed(false),
                 }
               : undefined
@@ -1062,18 +1108,18 @@ export const ChatPane = memo(function ChatPane({
         askNonce={btwNonce}
       />
 
-      {!inlineToolRequests && pendingPermissionRequests.length > 0 && (
+      {visiblePermissionRequests.length > 0 && (
         <PermissionDialog
-          request={pendingPermissionRequests[0]}
+          request={visiblePermissionRequests[0]}
           onReply={reply =>
             handlePermissionReply(
-              pendingPermissionRequests[0].id,
+              visiblePermissionRequests[0].id,
               reply,
               effectiveDirectory,
-              pendingPermissionRequests[0].sessionID,
+              visiblePermissionRequests[0].sessionID,
             )
           }
-          queueLength={pendingPermissionRequests.length}
+          queueLength={visiblePermissionRequests.length}
           isReplying={isReplying}
           currentSessionId={routeSessionId}
           collapsed={permissionCollapsed}
@@ -1081,12 +1127,12 @@ export const ChatPane = memo(function ChatPane({
         />
       )}
 
-      {!inlineToolRequests && pendingPermissionRequests.length === 0 && pendingQuestionRequests.length > 0 && (
+      {visiblePermissionRequests.length === 0 && visibleQuestionRequests.length > 0 && (
         <QuestionDialog
-          form={pendingQuestionRequests[0]}
-          onReply={(_formId, answer) => handleFormReply(pendingQuestionRequests[0], answer)}
-          onCancel={() => handleFormCancel(pendingQuestionRequests[0])}
-          queueLength={pendingQuestionRequests.length}
+          form={visibleQuestionRequests[0]}
+          onReply={(_formId, answer) => handleFormReply(visibleQuestionRequests[0], answer)}
+          onCancel={() => handleFormCancel(visibleQuestionRequests[0])}
+          queueLength={visibleQuestionRequests.length}
           isReplying={isReplying}
           collapsed={questionCollapsed}
           onCollapsedChange={setQuestionCollapsed}
@@ -1094,11 +1140,11 @@ export const ChatPane = memo(function ChatPane({
       )}
 
       {/* websearch.provider 表单 → 专用 dock（官方 session-websearch-dock） */}
-      {!inlineToolRequests && pendingPermissionRequests.length === 0 && pendingWebsearchRequest && (
+      {visibleWebsearchRequest && (
         <div className="absolute bottom-0 left-0 right-0 z-[9] pointer-events-none">
           <div className="mx-auto max-w-3xl px-3.5 pb-2">
             <WebsearchDock
-              form={pendingWebsearchRequest}
+              form={visibleWebsearchRequest}
               directory={effectiveDirectory}
               onReply={handleFormReply}
             />

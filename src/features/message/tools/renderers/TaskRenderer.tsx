@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useRef, useEffect, type RefCallback } from 'react'
+import { memo, useState, useCallback, useRef, useEffect, useSyncExternalStore, type RefCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ContentBlock } from '../../../../components'
 import { ChevronRightIcon, ExternalLinkIcon, StopIcon } from '../../../../components/Icons'
@@ -11,12 +11,18 @@ import { serverStore } from '../../../../store/serverStore'
 import { sessionErrorHandler } from '../../../../utils'
 import { formatToolName } from '../../../../utils/formatUtils'
 import { useUiDisclosureState } from '../../../../utils/uiDisclosureState'
+import { resolveTaskChildSessionId } from '../../../../utils/taskChildBinding'
+import {
+  useInlineToolRequests,
+  findPermissionRequestForTool,
+  findQuestionRequestForTool,
+  type TaskChildSessionRef,
+} from '../../../chat/InlineToolRequestContext'
 import type { ToolRendererProps, ToolViewPart } from '../types'
 import { MessageExpandPanel, useMessageExpandRender } from '../../messageExpand'
 import type { AssistantTool, SessionMessageInfo } from '../../../../types/api/message'
 import { contentEntries, type ContentEntry } from '../../../../types/api/message'
 import {
-  currentToolChildSessionId,
   currentToolError,
   currentToolFailed,
   currentToolInput,
@@ -48,8 +54,6 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
   )
   const [isContentFullscreen, setIsContentFullscreen] = useState(false)
   const { rootRef, headerRef, withScrollLock } = useDisclosureScrollLock()
-  const effectiveExpanded = expanded || isContentFullscreen
-  const shouldRenderBody = useMessageExpandRender(effectiveExpanded)
 
   // 从 input 中提取任务信息（v2 参数名是 agent，v1 是 subagent_type——helper 两个都认）
   const input = currentToolInput(part)
@@ -57,19 +61,34 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
   const prompt = (input.prompt as string) || ''
   const agentType = currentToolSubagentName(part) || 'general'
 
-  // 获取子 session ID —— 只信任 metadata 里的 sessionID/sessionId（v2/v1 键名，
-  // 见 currentToolChildSessionId），它是后端为这个 tool call 精确设置的
-  // 不再用 useChildSessions fallback 取"最新子 session"，因为同一父 session 下多个 task
-  // 同时运行时，fallback 会导致所有 task 都渲染最新的那个子 session
-  const targetSessionId = currentToolChildSessionId(part)
+  // 获取子 session ID —— 优先 metadata 里的 sessionID/sessionId（v2/v1 键名，
+  // 见 currentToolChildSessionId），它是后端为这个 tool call 精确设置的；
+  // metadata 缺失（progress 不落库，刷新/重连后运行中恒为空）时查早期绑定表
+  // （session.created / REST children 的 agent+title 启发式配对，见 taskChildBinding）。
+  // childVersion 订阅绑定表：绑定到达不改 part 引用，靠它触发重渲染重查。
+  useSyncExternalStore(childSessionStore.subscribe, childSessionStore.getVersion)
+  const taskServerId = currentSessionId
+    ? splitSessionKey(currentSessionId).serverId
+    : serverStore.getActiveServerId()
+  const targetSessionId = resolveTaskChildSessionId(part, taskServerId)
+
+  // 子 session（含子孙）有待处理权限/提问时强制展开——权限请求挂在卡片下方，
+  // 展开让内联子会话过程与权限操作同屏可见
+  const { pendingPermissions, pendingQuestions } = useInlineToolRequests()
+  const childRef: TaskChildSessionRef | undefined = targetSessionId
+    ? { sessionKey: targetSessionId, serverId: taskServerId }
+    : undefined
+  const hasPendingInteraction =
+    !!findPermissionRequestForTool(pendingPermissions, part.id, childRef) ||
+    !!findQuestionRequestForTool(pendingQuestions, part.id, childRef)
+
+  const effectiveExpanded = expanded || isContentFullscreen || hasPendingInteraction
+  const shouldRenderBody = useMessageExpandRender(effectiveExpanded)
 
   const isRunning = state.status === 'running'
   const isCompleted = state.status === 'completed'
   const isError = state.status === 'error'
   const resultOutput = currentToolOutput(part)
-
-  // 子 session 属于当前消息所属 session（父 session）的服务器
-  const taskServerId = currentSessionId ? splitSessionKey(currentSessionId).serverId : undefined
 
   const handleContentFullscreenChange = useCallback(
     (isFullscreen: boolean) => {
@@ -99,11 +118,11 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
     [targetSessionId, currentSessionId, currentDirectory],
   )
 
-  // 运行时自动展开
+  // 运行时或有待处理交互时自动展开
   useEffect(() => {
     let frameId: number | null = null
 
-    if (isRunning) {
+    if (isRunning || hasPendingInteraction) {
       frameId = requestAnimationFrame(() => {
         setExpanded(true, { touched: false, respectUser: true })
       })
@@ -112,7 +131,7 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
     return () => {
       if (frameId !== null) cancelAnimationFrame(frameId)
     }
-  }, [isRunning, setExpanded])
+  }, [isRunning, hasPendingInteraction, setExpanded])
 
   return (
     <div ref={rootRef} className="min-w-0">

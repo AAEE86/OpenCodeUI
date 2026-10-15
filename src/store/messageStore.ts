@@ -224,6 +224,34 @@ class MessageStore {
   // rAF 回调里只给它们换新引用，同消息内稳定的片段继续复用引用，
   // 否则流式期间每个工具结果都会跟着重渲染。
   private dirtyContentBySession = new Map<string, Map<string, Set<AssistantContent>>>()
+  // `session.tool.progress` 先于 called 到达（重连/回放乱序）时暂存的 metadata，
+  // key = `${sessionID}:${assistantMessageID}:${partId}`，called 时合并、终态清除。
+  // 主要保护 subagent 的 metadata.sessionID——丢了会导致子会话内联与权限挂载失效。
+  private pendingToolProgress = new Map<string, ToolPayload<'session.tool.progress'>['metadata']>()
+
+  private static toolProgressKey(sessionID: string, assistantMessageID: string, partId: string): string {
+    return `${sessionID}:${assistantMessageID}:${partId}`
+  }
+
+  private stashPendingToolProgress(
+    sessionID: string,
+    assistantMessageID: string,
+    partId: string,
+    metadata: ToolPayload<'session.tool.progress'>['metadata'],
+  ) {
+    this.pendingToolProgress.set(MessageStore.toolProgressKey(sessionID, assistantMessageID, partId), metadata)
+  }
+
+  private takePendingToolProgress(
+    sessionID: string,
+    assistantMessageID: string,
+    partId: string,
+  ): ToolPayload<'session.tool.progress'>['metadata'] | undefined {
+    const key = MessageStore.toolProgressKey(sessionID, assistantMessageID, partId)
+    const value = this.pendingToolProgress.get(key)
+    if (value !== undefined) this.pendingToolProgress.delete(key)
+    return value
+  }
 
   // ============================================
   // Subscription & Notification
@@ -752,6 +780,7 @@ class MessageStore {
     this.sessions.clear()
     this.sessionAccessTime.clear()
     this.dirtyContentBySession.clear()
+    this.pendingToolProgress.clear()
     if (this.rafId !== null) {
       cancelAnimationFrame(this.rafId)
       this.rafId = null
@@ -764,6 +793,9 @@ class MessageStore {
     this.sessions.delete(sessionId)
     this.sessionAccessTime.delete(sessionId)
     this.dirtyContentBySession.delete(sessionId)
+    for (const key of this.pendingToolProgress.keys()) {
+      if (key.startsWith(`${sessionId}:`)) this.pendingToolProgress.delete(key)
+    }
     this.notify([sessionId])
   }
 
@@ -1040,24 +1072,36 @@ class MessageStore {
       case 'session.tool.called': {
         const { input: toolInput, executed, state: providerState } = input.data
         const ranAt = created
+        // 重连/回放时 progress 可能先于 called 被处理（彼时 part 还在 streaming，
+        // progress 的 metadata 会被运行态守卫丢弃）——先签收暂存，这里合并
+        const stashed = this.takePendingToolProgress(sessionID, assistantMessageID, id)
         this.editTool(sessionID, assistantMessageID, id, tool => {
           tool.time.ran = ranAt
           tool.executed = executed
           tool.providerState = providerState
-          tool.state = { status: 'running', input: toolInput, metadata: {} }
+          tool.state = { status: 'running', input: toolInput, metadata: stashed ?? {} }
         })
         break
       }
       case 'session.tool.progress': {
         const { metadata } = input.data
+        let applied = false
         this.editTool(sessionID, assistantMessageID, id, tool => {
-          if (tool.state.status === 'running') tool.state.metadata = metadata
+          if (tool.state.status === 'running') {
+            tool.state.metadata = metadata
+            applied = true
+          }
         })
+        // 部件还没进入 running（事件乱序/回放）时暂存，called 时合并；
+        // 找不到部件（编辑失败）也暂存——subagent 的 sessionID 丢了会导致
+        // 子会话内联与权限挂载整条链失效
+        if (!applied) this.stashPendingToolProgress(sessionID, assistantMessageID, id, metadata)
         break
       }
       case 'session.tool.success': {
         const { content, metadata, executed, resultState } = input.data
         const completedAt = created
+        this.takePendingToolProgress(sessionID, assistantMessageID, id)
         this.editTool(sessionID, assistantMessageID, id, tool => {
           if (tool.state.status !== 'running') return
           tool.state = {
@@ -1075,6 +1119,7 @@ class MessageStore {
       case 'session.tool.failed': {
         const { error, content, metadata, executed, resultState } = input.data
         const completedAt = created
+        this.takePendingToolProgress(sessionID, assistantMessageID, id)
         this.editTool(sessionID, assistantMessageID, id, tool => {
           if (tool.state.status !== 'streaming' && tool.state.status !== 'running') return
           tool.state = {

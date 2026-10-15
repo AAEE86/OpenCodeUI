@@ -35,7 +35,8 @@ import { MessageExpandPanel, useMessageExpandRender } from './messageExpand'
 import type { AssistantContent, AssistantMessage, SessionMessageInfo, UserMessage } from '../../types/api/message'
 import type { JsonValue } from '@opencode/client/promise'
 import { contentEntries, hasVisibleText, userMessageText, type ContentEntry } from '../../types/api/message'
-import { currentToolChildSessionId, currentToolFailed } from '../../types/api/toolState'
+import { currentToolFailed } from '../../types/api/toolState'
+import { resolveTaskChildSessionRef } from '../../utils/taskChildBinding'
 import { expandCodeModeSubCalls } from './parts/executeSubCallSummary'
 import {
   ENTRY_GROW_DURATION_MS,
@@ -1413,13 +1414,12 @@ function toToolRenderPart(tool: Extract<AssistantContent, { type: 'tool' }>, mes
   return { ...tool, messageID }
 }
 
-/** task/subagent 工具派出的子 session：metadata 里是原始 id，服务器以 pane 绑定的 serverId 为权威 */
+/** task/subagent 工具派出的子 session：metadata 权威值 + 早期绑定表兜底（服务器以 pane 绑定的 serverId 为权威） */
 function getTaskChildSessionRef(
   tool: Extract<AssistantContent, { type: 'tool' }>,
   serverId: string,
 ): TaskChildSessionRef | undefined {
-  const sessionId = currentToolChildSessionId(tool)
-  return sessionId ? { sessionKey: sessionId, serverId } : undefined
+  return resolveTaskChildSessionRef(tool, serverId)
 }
 
 /** 从 extractToolData 的结果计算 diff stats（当 metadata 没给 diffStats 时） */

@@ -524,6 +524,57 @@ describe('messageStore（原生 v2 消息）', () => {
     expect(assistantAt(SESSION).content).toEqual([])
   })
 
+  it('progress 先于 called 处理时暂存 metadata，called 时合并（subagent sessionID 不丢）', () => {
+    // 乱序/批处理场景：part 还在 streaming 时 progress 先到。
+    // subagent 的 metadata.sessionID 若在这里丢掉，子会话内联与权限挂载整条链失效。
+    messageStore.handleStepStarted(stepStartedData())
+    messageStore.handleToolEvent({
+      type: 'session.tool.input.started',
+      data: { sessionID: SESSION, assistantMessageID: 'message-1', id: 'tool-1', name: 'subagent' },
+    })
+    messageStore.handleToolEvent({
+      type: 'session.tool.progress',
+      data: {
+        sessionID: SESSION,
+        assistantMessageID: 'message-1',
+        id: 'tool-1',
+        metadata: { sessionID: 'ses_child', status: 'running' },
+      },
+    })
+    // streaming 态本身不受影响（live 路径语义不变）
+    expect(toolAt(SESSION).state).toEqual({ status: 'streaming', input: '' })
+
+    messageStore.handleToolEvent({
+      type: 'session.tool.called',
+      data: {
+        sessionID: SESSION,
+        assistantMessageID: 'message-1',
+        id: 'tool-1',
+        input: { agent: 'explore', description: 'task', prompt: 'p' },
+        executed: true,
+      },
+    })
+    expect(toolAt(SESSION).state).toEqual({
+      status: 'running',
+      input: { agent: 'explore', description: 'task', prompt: 'p' },
+      metadata: { sessionID: 'ses_child', status: 'running' },
+    })
+
+    // 终态事件清掉暂存：success 的权威 metadata 覆盖
+    messageStore.handleToolEvent({
+      type: 'session.tool.success',
+      data: {
+        sessionID: SESSION,
+        assistantMessageID: 'message-1',
+        id: 'tool-1',
+        content: [{ type: 'text', text: 'done' }],
+        metadata: { sessionID: 'ses_child', status: 'completed' },
+        executed: true,
+      },
+    })
+    expect(toolAt(SESSION).state).toMatchObject({ status: 'completed', metadata: { status: 'completed' } })
+  })
+
   it('助手消息尚不存在时也能建出 tool 片段（工具先于文本出现）', () => {
     messageStore.handleToolEvent({
       type: 'session.tool.input.started',

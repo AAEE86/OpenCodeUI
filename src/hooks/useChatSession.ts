@@ -66,6 +66,7 @@ import { saveData } from '../utils/downloadUtils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { serverStorage } from '../utils/perServerStorage'
 import { sessionKeyToServerId, splitSessionKey } from '../utils/sessionKey'
+import { sweepTaskChildBindings } from '../utils/taskChildBinding'
 import { createMessageId } from '../utils/identifier'
 import { serverStore } from '../store/serverStore'
 import { STORAGE_KEY_SELECTED_AGENT } from '../constants'
@@ -701,6 +702,10 @@ export function useChatSession({
           // 获取子 session 失败不影响主流程
         }
       }
+
+      // 刷新/重进后运行中的 task 卡片 metadata 里没有 sessionID（progress 不落库），
+      // 用「agent/title 配对」把子 session 绑回发起它的卡片
+      sweepTaskChildBindings(paneServerId, routeSessionId!)
 
       if (cancelled) return
 

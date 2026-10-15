@@ -29,6 +29,7 @@ import {
   getSessionMessage,
 } from '../api'
 import { createSessionPlaceholder } from '../utils/sessionPlaceholder'
+import { sweepTaskChildBindings } from '../utils/taskChildBinding'
 import { refreshModels, ensureModelsFresh } from './useModels'
 import { ensureServerAgentsFresh, refreshServerAgents } from './useAgents'
 import type { EventCallbacks } from '../types/api/event'
@@ -646,6 +647,8 @@ export function useGlobalEvents(directories?: string[]) {
             data: { ...data, sessionID: scopedId },
             facts,
           })
+          // task/subagent 进入 running：若子 session 先于卡片就绪（乱序/回放），补配对
+          sweepTaskChildBindings(serverId, scopedId)
           scheduleScroll(scopedId)
         },
 
@@ -957,9 +960,16 @@ export function useGlobalEvents(directories?: string[]) {
                 ...placeholder,
                 parentID: scope(data.parentID),
                 projectID: data.projectID,
+                // agent/title 是卡片配对信号（title 即工具 input.description）
+                agent: data.agent,
               },
               serverId,
             )
+
+            // 子 session 创建即尝试绑定到父 session 里发起它的 task/subagent 卡片
+            // （title=description / agent 名配对）——metadata.sessionID 走 ephemeral
+            // progress 不落库，这个绑定是刷新/重连后权限挂载与子会话内联的底座
+            sweepTaskChildBindings(serverId, scope(data.parentID))
 
             // 处理因时序问题缓存的权限/表单请求
             if (belongsToCurrentSession(scopedId)) {

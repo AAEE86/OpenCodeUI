@@ -16,8 +16,10 @@
 
 import { createContext, useContext } from 'react'
 import type { ApiPermissionRequest, ApiFormInfo, PermissionReply, FormAnswer } from '../../api'
+import type { SessionMessageInfo } from '../../types/api/message'
 import { childSessionStore } from '../../store'
 import { makeSessionKey, splitSessionKey } from '../../utils/sessionKey'
+import { resolveTaskChildSessionRef } from '../../utils/taskChildBinding'
 
 /**
  * task 工具匹配子 session 请求时的定位信息。
@@ -88,6 +90,27 @@ function formToolCallId(form: ApiFormInfo): string | undefined {
 }
 
 /**
+ * 构造「sessionID 是否属于 child 子树」的判定器。
+ *
+ * 复合 key 以调用方传入的权威 serverId 合成：对原始 id 做 splitSessionKey 会回退到
+ * 全局活动服务器，pane 绑定其他服务器时（多服务器 / WSL）孙 session 永远匹配不上。
+ * 消息 metadata 里的 sessionId 是原始 id，pending 请求的 sessionID 可能是复合 key（SSE）
+ * 或原始 id（轮询）：统一按原始 id 比较，isChildOf 需要复合 key（childSessionStore 存复合）。
+ */
+function childSessionMatcher(child: TaskChildSessionRef): (sid: string) => boolean {
+  const childScoped = child.sessionKey.includes('::')
+    ? child.sessionKey
+    : makeSessionKey(child.serverId, child.sessionKey)
+  const { serverId: childServerId, sessionId: childRawId } = splitSessionKey(childScoped)
+  return (sid: string) => {
+    const { sessionId: raw } = splitSessionKey(sid)
+    if (raw === childRawId) return true
+    const scoped = sid.includes('::') ? sid : makeSessionKey(childServerId, raw)
+    return childSessionStore.isChildOf(scoped, childScoped)
+  }
+}
+
+/**
  * 根据 callID 查找关联的权限请求。
  *
  * v2 用 `source.id` 关联工具调用；对 task tool 额外传入 child，
@@ -104,20 +127,7 @@ export function findPermissionRequestForTool(
 
   // 对 task tool，按子 session 归属匹配
   if (child) {
-    // 复合 key 以调用方传入的权威 serverId 合成：对原始 id 做 splitSessionKey 会回退到
-    // 全局活动服务器，pane 绑定其他服务器时（多服务器 / WSL）孙 session 永远匹配不上
-    const childScoped = child.sessionKey.includes('::')
-      ? child.sessionKey
-      : makeSessionKey(child.serverId, child.sessionKey)
-    const { serverId: childServerId, sessionId: childRawId } = splitSessionKey(childScoped)
-    const isMatch = (sid: string) => {
-      const { sessionId: raw } = splitSessionKey(sid)
-      // 消息 metadata 里的 sessionId 是原始 id，pending 请求的 sessionID 可能是复合 key（SSE）
-      // 或原始 id（轮询）：统一按原始 id 比较，isChildOf 需要复合 key（childSessionStore 存复合）
-      if (raw === childRawId) return true
-      const scoped = sid.includes('::') ? sid : makeSessionKey(childServerId, raw)
-      return childSessionStore.isChildOf(scoped, childScoped)
-    }
+    const isMatch = childSessionMatcher(child)
     return pendingPermissions.find(p => isMatch(p.sessionID))
   }
 
@@ -137,18 +147,71 @@ export function findQuestionRequestForTool(
   if (direct) return direct
 
   if (child) {
-    const childScoped = child.sessionKey.includes('::')
-      ? child.sessionKey
-      : makeSessionKey(child.serverId, child.sessionKey)
-    const { serverId: childServerId, sessionId: childRawId } = splitSessionKey(childScoped)
-    const isMatch = (sid: string) => {
-      const { sessionId: raw } = splitSessionKey(sid)
-      if (raw === childRawId) return true
-      const scoped = sid.includes('::') ? sid : makeSessionKey(childServerId, raw)
-      return childSessionStore.isChildOf(scoped, childScoped)
-    }
+    const isMatch = childSessionMatcher(child)
     return pendingQuestions.find(form => isMatch(form.sessionID))
   }
 
   return undefined
+}
+
+/**
+ * 把 pending 请求分成「有工具卡片认领」和「无人认领」两组。
+ *
+ * inlineToolRequests 开启时卡片只渲染能匹配上的请求；无人认领的（典型：
+ * 刷新后运行中的子代理权限——progress 不落库导致 metadata.sessionID 丢失，
+ * 或 OMO 后台子代理本就没有可见卡片）必须退回会话级弹窗，
+ * 否则请求彻底不可见、会话假死。官方同款语义：权限 dock 按 sessionID
+ * 子树收集，与工具卡片无关（app/session/requests/session-request-tree.ts）。
+ *
+ * rootSessionKey 提供时，未认领组只保留当前 session family 的请求——
+ * 别的会话的 pending 不该弹在这个 pane 上。
+ */
+export function partitionUnclaimedRequests(
+  messages: SessionMessageInfo[],
+  pendingPermissions: ApiPermissionRequest[],
+  pendingQuestions: ApiFormInfo[],
+  serverId: string,
+  rootSessionKey?: string,
+): { permissions: ApiPermissionRequest[]; questions: ApiFormInfo[] } {
+  const claimedPermissions = new Set<string>()
+  const claimedQuestions = new Set<string>()
+
+  for (const message of messages) {
+    if (message.type !== 'assistant') continue
+    for (const content of message.content) {
+      if (content.type !== 'tool') continue
+      const child = resolveTaskChildSessionRef(content, serverId)
+      const isChildMatch = child ? childSessionMatcher(child) : undefined
+      for (const request of pendingPermissions) {
+        if (claimedPermissions.has(request.id)) continue
+        if (request.source?.type === 'tool' && request.source.id === content.id) {
+          claimedPermissions.add(request.id)
+        } else if (isChildMatch?.(request.sessionID)) {
+          claimedPermissions.add(request.id)
+        }
+      }
+      for (const form of pendingQuestions) {
+        if (claimedQuestions.has(form.id)) continue
+        if (formToolCallId(form) === content.id) {
+          claimedQuestions.add(form.id)
+        } else if (isChildMatch?.(form.sessionID)) {
+          claimedQuestions.add(form.id)
+        }
+      }
+    }
+  }
+
+  // family 过滤：复合/原始 id 统一按原始 id 比
+  const inFamily = (() => {
+    if (!rootSessionKey) return () => false
+    const familyRaw = new Set(
+      childSessionStore.getSessionAndDescendants(rootSessionKey).map(key => splitSessionKey(key).sessionId),
+    )
+    return (sid: string) => familyRaw.has(splitSessionKey(sid).sessionId)
+  })()
+
+  return {
+    permissions: pendingPermissions.filter(p => !claimedPermissions.has(p.id) && inFamily(p.sessionID)),
+    questions: pendingQuestions.filter(q => !claimedQuestions.has(q.id) && inFamily(q.sessionID)),
+  }
 }

@@ -235,8 +235,10 @@ export function ComposerSeatMenu({
           ...(showAgentRow ? [agentLabel] : []),
         ].join(' · ')}
       >
-        {/* 宽度不设固定上限：空间够就完整显示，不够时由 flex 收缩 + truncate 出省略号。
-            固定上限（曾经是 160/72px）会在有余量时也无谓压缩模型名。 */}
+        {/* 空间分配跟非聚合模式的按钮一致：那两个短值按钮在紧凑布局下是 shrink-0，
+            真正被压缩的只有模型名。所以这里短值（Default / Build）不参与压缩，
+            只让模型名这唯一的长段收缩截断——三段等比例压缩会把短值也压花。
+            宽度不设固定上限：有空间就完整显示，不够时才出省略号。 */}
         <span className="text-[length:var(--fs-sm)] font-medium text-text-200 min-w-0 truncate">
           {/* 有缓存标签就始终显示：后台刷新（provider/model/config 事件触发 refetch）
               期间 isLoading 短暂为 true，若让 '…' 抢占标签会造成可见闪烁 */}
@@ -244,12 +246,12 @@ export function ComposerSeatMenu({
         </span>
         {(showVariantRow || showAgentRow) && <span className="text-text-500 shrink-0">·</span>}
         {showVariantRow && (
-          <span className="text-[length:var(--fs-sm)] text-text-400 min-w-0 truncate">{variantLabel}</span>
+          <span className="text-[length:var(--fs-sm)] text-text-400 shrink-0 truncate">{variantLabel}</span>
         )}
         {showVariantRow && showAgentRow && <span className="text-text-500 shrink-0">·</span>}
         {showAgentRow && (
           <span
-            className="text-[length:var(--fs-sm)] text-text-400 min-w-0 truncate"
+            className="text-[length:var(--fs-sm)] text-text-400 shrink-0 truncate"
             style={currentAgent?.color ? { color: currentAgent.color } : undefined}
           >
             {agentLabel}

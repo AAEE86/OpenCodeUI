@@ -10,12 +10,15 @@ import { isTauri } from '../../../utils/tauri'
 import { apiErrorHandler } from '../../../utils'
 import { applyLocalServiceUrl } from '../../../utils/localServiceUrl'
 import { settingsFieldClass, Toggle, SettingRow, SettingField, SettingsSection } from './SettingsUI'
+import { ServiceConfigPanel } from './ServiceConfigPanel'
 
 interface StartOpencodeServiceResult {
   started: boolean
   startedByUs: boolean
+  /** 是否是注册表可认领的共享后台服务（serve --service；认领来的也算） */
+  managed?: boolean
   url?: string | null
-  /** 连接用密码：服务端随机生成（未显式配置时）或来自 OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD 环境变量 */
+  /** 连接用密码：注册表（管理模式）或服务端随机生成 / OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD 环境变量（私有模式） */
   serverPassword?: string | null
 }
 
@@ -30,6 +33,7 @@ export function ServiceSettings() {
     serveArgs,
     running: serviceRunning,
     startedByUs,
+    managed,
     starting: serviceStarting,
   } = useServiceStore()
   const { servers } = useServerStore()
@@ -135,6 +139,7 @@ export function ServiceSettings() {
       if (operation !== serviceOperationRef.current) return
       applyLocalServiceUrl(result.url, result.serverPassword)
       serviceStore.setStartedByUs(result.startedByUs)
+      serviceStore.setManaged(result.managed ?? false)
       serviceStore.setRunning(true)
     } catch (e) {
       if (operation !== serviceOperationRef.current) return
@@ -152,9 +157,10 @@ export function ServiceSettings() {
     setStoppingService(true)
     try {
       const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('stop_opencode_service')
+      await invoke('stop_opencode_service', { binaryPath: serviceStore.effectiveBinaryPath })
       if (operation !== serviceOperationRef.current) return
       serviceStore.setStartedByUs(false)
+      serviceStore.setManaged(false)
       serviceStore.setRunning(false)
     } catch (e) {
       if (operation !== serviceOperationRef.current) return
@@ -180,8 +186,13 @@ export function ServiceSettings() {
         const byUs = await invoke<boolean>('get_service_started_by_us')
         if (operation !== serviceOperationRef.current) return
         serviceStore.setStartedByUs(byUs)
+        // 认领来的后台服务不是本会话 spawn 的，但同样可管理（停止/配置）
+        const isManaged = await invoke<boolean>('get_service_managed').catch(() => false)
+        if (operation !== serviceOperationRef.current) return
+        serviceStore.setManaged(isManaged)
       } else {
         serviceStore.setStartedByUs(false)
+        serviceStore.setManaged(false)
       }
     } catch (e) {
       if (operation !== serviceOperationRef.current) return
@@ -266,7 +277,7 @@ export function ServiceSettings() {
               {t('common:start')}
             </Button>
           )}
-          {!serviceStarting && serviceRunning && startedByUs && (
+          {!serviceStarting && serviceRunning && (startedByUs || managed) && (
             <Button size="sm" variant="ghost" onClick={handleStopService} disabled={checkingService || stoppingService}>
               <StopIcon size={12} className="mr-1" />
               {t('common:stop')}
@@ -390,6 +401,8 @@ export function ServiceSettings() {
           {serviceError}
         </div>
       )}
+
+      <ServiceConfigPanel />
     </SettingsSection>
   )
 }

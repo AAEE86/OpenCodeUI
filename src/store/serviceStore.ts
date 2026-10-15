@@ -52,6 +52,8 @@ interface ServiceStoreSnapshot {
   running: boolean
   /** 是否由我们启动（用于关闭时判断） */
   startedByUs: boolean
+  /** 是否是可管理的后台服务（注册表可认领的 serve --service；含认领来的） */
+  managed: boolean
   /** 当前是否正在启动中 */
   starting: boolean
 }
@@ -64,6 +66,7 @@ class ServiceStore {
   private _detectedBinaryPath: string | null = null
   private _running = false
   private _startedByUs = false
+  private _managed = false
   private _starting = false
   private _listeners: Set<() => void> = new Set()
   private _snapshot: ServiceStoreSnapshot
@@ -123,6 +126,9 @@ class ServiceStore {
   }
   get startedByUs() {
     return this._startedByUs
+  }
+  get managed() {
+    return this._managed
   }
   get starting() {
     return this._starting
@@ -209,6 +215,11 @@ class ServiceStore {
     this._notify()
   }
 
+  setManaged(v: boolean) {
+    this._managed = v
+    this._notify()
+  }
+
   setStarting(v: boolean) {
     this._starting = v
     this._notify()
@@ -236,6 +247,7 @@ class ServiceStore {
       detectedBinaryPath: this._detectedBinaryPath,
       running: this._running,
       startedByUs: this._startedByUs,
+      managed: this._managed,
       starting: this._starting,
     }
   }

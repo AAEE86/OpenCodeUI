@@ -145,6 +145,8 @@ export const SETTINGS_SEARCH_DEFINITIONS: SettingsSearchDefinition[] = [
     'service.autoStart',
     'service.serviceStatus',
     'service.envVars',
+    'service.remoteAccess',
+    'service.configTitle',
   ]),
   ...definitions('config', ['config.sourceTitle']),
   ...definitions('keybindings', ['keybindings.title']),

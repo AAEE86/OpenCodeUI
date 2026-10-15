@@ -477,6 +477,10 @@ pub fn run() {
             commands::opencode::stop_opencode_service,
             commands::opencode::get_service_started_by_us,
             commands::opencode::confirm_close_app,
+            commands::service::get_service_managed,
+            commands::service::opencode_service_config,
+            commands::service::opencode_service_set,
+            commands::service::opencode_service_unset,
             // Windows: WSL 发行版管理命令（对齐官方 ipc.ts 的命令面：
             // getState / probeRuntime / refreshDistros / installWsl / installDistro /
             // probeAddable / installOpencode / openTerminal / add / remove / start）。

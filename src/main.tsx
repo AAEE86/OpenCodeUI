@@ -95,8 +95,10 @@ const isNativeTauriMobile = isNativeTauri && isTauriMobile()
 interface StartOpencodeServiceResult {
   started: boolean
   startedByUs: boolean
+  /** 是否是注册表可认领的共享后台服务（serve --service；认领来的也算） */
+  managed?: boolean
   url?: string | null
-  /** 连接用密码：服务端随机生成（未显式配置时）或来自 OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD 环境变量 */
+  /** 连接用密码：注册表（管理模式）或服务端随机生成 / OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD 环境变量（私有模式） */
   serverPassword?: string | null
 }
 
@@ -145,9 +147,12 @@ async function initializeNativeDesktopService() {
 
     applyLocalServiceUrl(result.url, result.serverPassword)
     serviceStore.setStartedByUs(result.startedByUs)
+    serviceStore.setManaged(result.managed ?? false)
     serviceStore.setRunning(true)
     if (result.started) {
-      console.info('[Service] opencode serve started by app')
+      console.info('[Service] opencode background service started by app')
+    } else if (result.managed) {
+      console.info('[Service] adopted running background service')
     } else {
       console.info('[Service] opencode serve already running')
     }

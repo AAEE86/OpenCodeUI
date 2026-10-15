@@ -23,12 +23,14 @@ use tauri::State;
 pub struct StartOpencodeServiceResult {
     started: bool,
     started_by_us: bool,
+    /// 是否是官方共享后台服务模型（serve --service，注册表可认领）。
+    /// false = 用户自己跑的前台私有 serve，ocui 不参与其生命周期。
+    managed: bool,
     url: Option<String>,
-    /// 连接用的服务密码。两个来源：
-    /// 1. v2 服务端生成的随机密码（无显式密码时 serve 自动生成并打印
-    ///    `server password <pwd>` 到 stdout——官方 cli/server-process.ts 契约）；
-    /// 2. 用户显式配置的 env 密码（OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD，
-    ///    此时服务端不打印随机密码，由我们把 env 值回传）。
+    /// 连接用的服务密码。来源按场景：
+    /// 1. 管理模式：注册表 service.json 里的密码（服务进程自己写入）；
+    /// 2. 私有模式：v2 服务端生成的随机密码（stdout `server password <pwd>`）
+    ///    或用户显式配置的 env 密码（OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD）。
     /// 前端必须把它写回本机条目 auth，否则后续所有 API/SSE 请求 401。
     /// 仅当密码来自「探测实际命中/服务端实际使用」的来源时才返回，
     /// 不会用存疑的 env 值覆盖条目上已可用的凭据。
@@ -430,7 +432,7 @@ fn format_recent_output(recent_output: &VecDeque<String>) -> String {
     )
 }
 
-fn build_opencode_command(binary_path: &str, args: &[String]) -> Command {
+pub(crate) fn build_opencode_command(binary_path: &str, args: &[String]) -> Command {
     #[cfg(target_os = "windows")]
     {
         let path = Path::new(binary_path);
@@ -546,7 +548,15 @@ pub async fn check_opencode_service(url: String, auth: Option<(String, String)>)
     Ok(is_service_running_with_auth(&url, health_auth).await)
 }
 
-/// 启动 opencode serve
+/// 启动/认领 opencode 服务。
+///
+/// 优先级（对齐官方客户端的共享后台服务模型）：
+/// 1. 本次会话已 spawn 的服务还活着 → 直接复用；
+/// 2. 注册表（~/.local/state/opencode/service.json）指向的服务活着 → 认领
+///    （上次 ocui/CLI/TUI 启动后保留的后台服务，同一进程同一批会话）；
+/// 3. 条目 URL 上有人手动跑了私有 serve → 连接但不管理其生命周期；
+/// 4. spawn `opencode serve --service`（注册表轮询就绪，密码从注册表读）；
+/// 5. 老版本二进制不认识 --service → 回退私有 serve（stdout 解析）兜底。
 #[tauri::command]
 pub async fn start_opencode_service(
     state: State<'_, ServiceState>,
@@ -592,6 +602,7 @@ pub async fn start_opencode_service(
                 return Ok(StartOpencodeServiceResult {
                     started: false,
                     started_by_us: true,
+                    managed: true,
                     url: Some(current_url),
                     server_password: probe_report[winner].clone(),
                 });
@@ -599,18 +610,157 @@ pub async fn start_opencode_service(
         }
     }
 
+    // 认领：注册表指向的后台服务还活着就直接收养——这就是「上次关了 ocui
+    // 但服务留着」的回来路径。claimed 服务的密码以注册表为准（比条目/env 都新）。
+    if let Some(registration) = super::service::read_registration() {
+        if super::service::probe_registration(&registration).await {
+            log::info!(
+                "Adopting background service at {} (pid {:?})",
+                registration.url,
+                registration.pid
+            );
+            *state.service_url.lock().map_err(|e| e.to_string())? = Some(registration.url.clone());
+            return Ok(StartOpencodeServiceResult {
+                started: false,
+                started_by_us: false,
+                managed: true,
+                url: Some(registration.url),
+                server_password: registration.password,
+            });
+        }
+        log::info!("Stale service registration (process gone), will start a new one");
+    }
+
+    // 条目 URL 上跑着用户自己启动的私有 serve（不走注册表）——连上但不认领
     if let Some(winner) = probe_service_with_auths(&url, &probe_auths).await {
         log::info!("opencode service already running at {}", url);
         return Ok(StartOpencodeServiceResult {
             started: false,
             started_by_us: false,
+            managed: false,
             url: Some(url),
             server_password: probe_report[winner].clone(),
         });
     }
 
-    let serve_args = serve_args_from_url(&url, extra_args.as_deref().unwrap_or(&[]));
-    let mut spawned = spawn_opencode_serve(&binary_path, &env_vars, &serve_args)?;
+    match start_managed_service(&state, &binary_path, &env_vars, extra_args.as_deref().unwrap_or(&[])).await {
+        Ok(result) => Ok(result),
+        Err(reason) => {
+            // 老版本 opencode 不认识 --service（或其它服务模式启动失败）：
+            // 回退私有 serve 保住可用性，行为与 P4 之前一致
+            log::warn!("Background service mode failed ({reason}), falling back to private serve");
+            start_private_serve(
+                &state,
+                &url,
+                &binary_path,
+                &env_vars,
+                entry_auth,
+                configured_password.as_deref(),
+                extra_args.as_deref().unwrap_or(&[]),
+            )
+            .await
+        }
+    }
+}
+
+/// 管理模式：spawn `opencode serve --service`，轮询注册表就绪。
+/// 绑定地址/端口由 service.json 配置接管（用户 extra_args 仍可覆盖），
+/// 不从条目 URL 派生 --hostname/--port——条目 URL 会被注册表的实际地址回写。
+async fn start_managed_service(
+    state: &State<'_, ServiceState>,
+    binary_path: &str,
+    env_vars: &std::collections::HashMap<String, String>,
+    extra_args: &[String],
+) -> Result<StartOpencodeServiceResult, String> {
+    let mut serve_args = vec!["serve".to_string(), "--service".to_string()];
+    serve_args.extend(extra_args.iter().cloned());
+    let mut spawned = spawn_opencode_serve(binary_path, env_vars, &serve_args)?;
+    let pid = spawned.child.id();
+    log::info!("Started opencode background service, PID: {}", pid);
+
+    state.child_pid.store(pid, Ordering::SeqCst);
+    state.we_started.store(true, Ordering::SeqCst);
+    *state.service_url.lock().map_err(|e| e.to_string())? = None;
+
+    let mut recent_output = VecDeque::new();
+
+    // 服务模式的就绪信号是注册表（服务进程 bind 后立即写入 url+password，
+    // tunnel 是异步 fork 的不阻塞注册），不再解析 stdout
+    for _ in 0..120 {
+        while let Ok(line) = spawned.output.try_recv() {
+            remember_recent_output(&mut recent_output, line);
+        }
+
+        if let Some(status) = spawned.child.try_wait().map_err(|e| e.to_string())? {
+            // 已有在位者时新竞争者会主动退出（官方 ensure 的 singleton 语义）：
+            // 退出 ≠ 失败，最后再认一次注册表
+            if let Some(registration) = super::service::read_registration() {
+                if super::service::probe_registration(&registration).await {
+                    state.child_pid.store(0, Ordering::SeqCst);
+                    state.we_started.store(false, Ordering::SeqCst);
+                    *state.service_url.lock().map_err(|e| e.to_string())? =
+                        Some(registration.url.clone());
+                    return Ok(StartOpencodeServiceResult {
+                        started: false,
+                        started_by_us: false,
+                        managed: true,
+                        url: Some(registration.url),
+                        server_password: registration.password,
+                    });
+                }
+            }
+            state.child_pid.store(0, Ordering::SeqCst);
+            state.we_started.store(false, Ordering::SeqCst);
+            return Err(format!(
+                "opencode serve --service exited during startup with status {}.{}",
+                status,
+                format_recent_output(&recent_output)
+            ));
+        }
+
+        if let Some(registration) = super::service::read_registration() {
+            // 旧注册表（pid 已死）探测本来就过不了，无需额外的「新鲜度」判断
+            if super::service::probe_registration(&registration).await {
+                log::info!("opencode background service is ready at {}", registration.url);
+                *state.service_url.lock().map_err(|e| e.to_string())? =
+                    Some(registration.url.clone());
+                return Ok(StartOpencodeServiceResult {
+                    started: true,
+                    started_by_us: true,
+                    managed: true,
+                    url: Some(registration.url),
+                    server_password: registration.password,
+                });
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+
+    log::warn!("opencode background service started but registration not ready yet");
+    let registration = super::service::read_registration();
+    Ok(StartOpencodeServiceResult {
+        started: true,
+        started_by_us: true,
+        managed: true,
+        url: registration.as_ref().map(|r| r.url.clone()),
+        server_password: registration.and_then(|r| r.password),
+    })
+}
+
+/// 私有模式（兜底/老版本二进制）：裸 `opencode serve`，stdout 解析 URL 与
+/// 随机密码，行为与接入后台服务模型之前一致。
+async fn start_private_serve(
+    state: &State<'_, ServiceState>,
+    url: &str,
+    binary_path: &str,
+    env_vars: &std::collections::HashMap<String, String>,
+    entry_auth: Option<(&str, &str)>,
+    configured_password: Option<&str>,
+    extra_args: &[String],
+) -> Result<StartOpencodeServiceResult, String> {
+    let serve_args = serve_args_from_url(url, extra_args);
+    let mut spawned = spawn_opencode_serve(binary_path, env_vars, &serve_args)?;
     let pid = spawned.child.id();
     log::info!("Started opencode serve, PID: {}", pid);
 
@@ -649,7 +799,7 @@ pub async fn start_opencode_service(
             ));
         }
 
-        let health_url = detected_url.as_deref().unwrap_or(&url);
+        let health_url = detected_url.as_deref().unwrap_or(url);
         // 就绪检查的凭据来源（按优先级）：
         // 1. 服务端刚打印的随机密码（未显式配置时强制生成）
         // 2. 显式配置的 env 密码（OPENCODE_PASSWORD / OPENCODE_SERVER_PASSWORD，
@@ -658,7 +808,7 @@ pub async fn start_opencode_service(
         let ready_auth = detected_password
             .as_deref()
             .map(|password| ("opencode", password))
-            .or(configured_password.as_deref().map(|password| ("opencode", password)))
+            .or(configured_password.map(|password| ("opencode", password)))
             .or(entry_auth);
         if is_service_running_with_auth(health_url, ready_auth).await {
             log::info!("opencode service is ready at {}", health_url);
@@ -666,8 +816,9 @@ pub async fn start_opencode_service(
             return Ok(StartOpencodeServiceResult {
                 started: true,
                 started_by_us: true,
+                managed: false,
                 url: Some(health_url.to_string()),
-                server_password: detected_password.or_else(|| configured_password.clone()),
+                server_password: detected_password.or_else(|| configured_password.map(String::from)),
             });
         }
 
@@ -678,14 +829,22 @@ pub async fn start_opencode_service(
     Ok(StartOpencodeServiceResult {
         started: true,
         started_by_us: true,
+        managed: false,
         url: detected_url,
-        server_password: detected_password.or(configured_password),
+        server_password: detected_password.or_else(|| configured_password.map(String::from)),
     })
 }
 
-/// 停止 opencode serve
+/// 停止 opencode 服务。
+/// - 本次会话 spawn 的：按子进程 pid 杀；
+/// - 认领来的后台服务：优先 `opencode service stop`（官方语义，干净清理
+///   注册表与 persistent terminal），CLI 不可用/失败时按注册表 pid 强杀；
+/// - 两种情况都兜底清掉残留注册表，避免下次启动误探测。
 #[tauri::command]
-pub async fn stop_opencode_service(state: State<'_, ServiceState>) -> Result<(), String> {
+pub async fn stop_opencode_service(
+    state: State<'_, ServiceState>,
+    binary_path: Option<String>,
+) -> Result<(), String> {
     let pid = state.child_pid.swap(0, Ordering::SeqCst);
     state.we_started.store(false, Ordering::SeqCst);
     *state.service_url.lock().map_err(|e| e.to_string())? = None;
@@ -693,6 +852,34 @@ pub async fn stop_opencode_service(state: State<'_, ServiceState>) -> Result<(),
     if pid > 0 {
         log::info!("Stopping opencode serve, PID: {}", pid);
         kill_process_by_pid(pid);
+        if let Some(path) = super::service::registration_path() {
+            let _ = std::fs::remove_file(path);
+        }
+        return Ok(());
+    }
+
+    if let Some(registration) = super::service::read_registration() {
+        let mut stopped = false;
+        if let Some(binary) = binary_path.as_deref().filter(|path| !path.is_empty()) {
+            stopped = super::service::run_cli(
+                binary,
+                &["service", "stop"],
+                &std::collections::HashMap::new(),
+                Duration::from_secs(30),
+            )
+            .await
+            .map_err(|e| log::warn!("opencode service stop failed: {e}"))
+            .is_ok();
+        }
+        if !stopped {
+            if let Some(registration_pid) = registration.pid {
+                log::info!("Killing adopted background service, PID: {}", registration_pid);
+                kill_process_by_pid(registration_pid);
+            }
+        }
+        if let Some(path) = super::service::registration_path() {
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     Ok(())
@@ -727,7 +914,12 @@ pub async fn confirm_close_app(
         }
         state.we_started.store(false, Ordering::SeqCst);
         *state.service_url.lock().map_err(|e| e.to_string())? = None;
+        // 我们 spawn 的服务模式进程被强杀后注册表残留，清掉避免下次误认领
+        if let Some(path) = super::service::registration_path() {
+            let _ = std::fs::remove_file(path);
+        }
     } else {
+        // 保留后台：注册表留着，下次启动从它认领回同一个服务进程
         log::info!("Closing app, keeping opencode serve running");
     }
 

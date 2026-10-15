@@ -71,10 +71,30 @@ fn config_path() -> Option<PathBuf> {
     Some(config_dir()?.join("opencode").join("service.json"))
 }
 
+/// 把「监听所有接口」的绑定地址归一化成可连接的地址。
+///
+/// `0.0.0.0` / `[::]` 是 bind 地址，不是可用的连接目标：Chromium（WebView2/WKWebView）
+/// 会拒绝发往 `0.0.0.0` 的请求（非路由地址），这里统一改写成回环——
+/// 绑 0.0.0.0 时回环必然可达。后台服务注册表里的 URL 来自 `opencode serve
+/// --hostname 0.0.0.0`，必须经过这一步，否则整个桌面端都在用不可连接的地址
+/// （issue #181：本地服务的终端建不起来）。
+pub fn connectable_url(url: &str) -> String {
+    let normalized = url
+        .replace("http://0.0.0.0:", "http://127.0.0.1:")
+        .replace("https://0.0.0.0:", "https://127.0.0.1:")
+        .replace("http://[::]:", "http://[::1]:")
+        .replace("https://[::]:", "https://[::1]:");
+    normalized.trim_end_matches('/').to_string()
+}
+
 pub fn read_registration() -> Option<ServiceRegistration> {
     let path = registration_path()?;
     let text = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&text).ok()
+    let mut registration: ServiceRegistration = serde_json::from_str(&text).ok()?;
+    // 注册表里的 url 可能是 0.0.0.0（服务以 --hostname 0.0.0.0 启动），
+    // 在这里一次性归一化，所有消费者（前端、探测、状态查询）都拿到可连接地址
+    registration.url = connectable_url(&registration.url);
+    Some(registration)
 }
 
 /// 探测注册表指向的服务是否就是注册的那个进程：/api/info 带 Basic 凭据，
@@ -297,8 +317,21 @@ pub async fn get_service_managed() -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{config_dir_from, state_dir_from, ServiceRegistration};
+    use super::{config_dir_from, connectable_url, state_dir_from, ServiceRegistration};
     use std::path::PathBuf;
+
+    #[test]
+    fn connectable_url_rewrites_unspecified_bind_address() {
+        // 绑 0.0.0.0 的服务注册表 URL 必须改写成回环，否则前端拿着不可连接的地址
+        assert_eq!(connectable_url("http://0.0.0.0:49374"), "http://127.0.0.1:49374");
+        assert_eq!(connectable_url("https://[::]:4096/"), "https://[::1]:4096");
+        // 已经是可连接地址的保持不变（含去掉尾斜杠）
+        assert_eq!(connectable_url("http://127.0.0.1:49374/"), "http://127.0.0.1:49374");
+        assert_eq!(
+            connectable_url("http://192.168.1.5:4096"),
+            "http://192.168.1.5:4096"
+        );
+    }
 
     #[test]
     fn parses_full_registration() {

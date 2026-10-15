@@ -70,8 +70,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
-function normalizeConnectionError(err: unknown): string {
-  if (err instanceof DOMException && err.name === 'AbortError') return 'Connection timed out'
+/**
+ * 把「监听所有接口」的绑定地址归一化成可连接的地址。
+ *
+ * `0.0.0.0` / `[::]` 是 bind 地址而非连接目标：Chromium（WebView2 / WKWebView）
+ * 会拒绝对它的请求。后台服务以 `--hostname 0.0.0.0` 启动时，注册表里就是这种地址，
+ * 直接拿来用会让整个本地连接（含终端 WebSocket）失败——统一改写成回环
+ * （绑 0.0.0.0 时回环必然可达）。Rust 侧 `connectable_url` 同款规则，
+ * 这里再兜一层，防止旧版本后端 / 残留注册表把不可连接地址带进界面。
+ */
+export function normalizeConnectableUrl(url: string): string {
+  return url
+    .replace(/^http:\/\/0\.0\.0\.0:/i, 'http://127.0.0.1:')
+    .replace(/^https:\/\/0\.0\.0\.0:/i, 'https://127.0.0.1:')
+    .replace(/^http:\/\/\[::\]:/i, 'http://[::1]:')
+    .replace(/^https:\/\/\[::\]:/i, 'https://[::1]:')
+}
+
+function normalizeConnectionError(err: unknown): string {  if (err instanceof DOMException && err.name === 'AbortError') return 'Connection timed out'
   if (!(err instanceof Error)) return 'Connection failed'
 
   const message = err.message || 'Connection failed'
@@ -539,7 +555,7 @@ class ServerStore {
   setLocalServerRuntimeUrl(url: string): boolean {
     if (!this.servers.some(s => s.id === this.DEFAULT_SERVER_ID)) return false
 
-    const normalizedUrl = url.replace(/\/+$/, '')
+    const normalizedUrl = normalizeConnectableUrl(url).replace(/\/+$/, '')
     if (this.localServerUrlOverride === normalizedUrl) return false
 
     this.localServerUrlOverride = normalizedUrl

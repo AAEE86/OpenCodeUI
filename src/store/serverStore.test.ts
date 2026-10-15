@@ -109,6 +109,17 @@ describe('serverStore local runtime URL', () => {
     expect(serverStore.getStoredServers().find(server => server.id === 'local')?.url).toBe('http://127.0.0.1:4096')
   })
 
+  it('rewrites the background service bind address (0.0.0.0) to loopback', async () => {
+    // 后台服务以 --hostname 0.0.0.0 启动时，注册表里给的是 bind 地址；
+    // Chromium 拒绝对 0.0.0.0 的请求，本地连接（含终端 WS）会整体失败 —— issue #181
+    const { serverStore } = await import('./serverStore')
+
+    expect(serverStore.setLocalServerRuntimeUrl('http://0.0.0.0:49374')).toBe(true)
+
+    expect(serverStore.getActiveBaseUrl()).toBe('http://127.0.0.1:49374')
+    expect(serverStore.getLocalServerUrl()).toBe('http://127.0.0.1:49374')
+  })
+
   it('notifies listeners when the active local runtime URL changes', async () => {
     const { serverStore } = await import('./serverStore')
     const listener = vi.fn()

@@ -154,12 +154,8 @@ fn parse_listening_url(line: &str) -> Option<String> {
         .next()?
         .trim_end_matches(|c| matches!(c, ',' | ';' | ')'));
     // 未指定地址（0.0.0.0 / [::]）是「监听所有接口」的绑定地址，不可用于连接，
-    // 归一化成回环：绑 0.0.0.0/[::] 时回环必然可达
-    let normalized = raw_url
-        .replace("http://0.0.0.0:", "http://127.0.0.1:")
-        .replace("https://0.0.0.0:", "https://127.0.0.1:")
-        .replace("http://[::]:", "http://[::1]:")
-        .replace("https://[::]:", "https://[::1]:");
+    // 归一化成回环：绑 0.0.0.0/[::] 时回环必然可达（与后台服务注册表同一套规则）
+    let normalized = super::service::connectable_url(raw_url);
     let parsed = reqwest::Url::parse(&normalized).ok()?;
 
     Some(parsed.to_string().trim_end_matches('/').to_string())

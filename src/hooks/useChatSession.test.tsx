@@ -23,6 +23,7 @@ const {
   claimAutoReplyMock,
   releaseAutoReplyMock,
   useSessionFamilyMock,
+  childBelongsToSessionMock,
   pendingPermissionRequestsMock,
   handlePermissionReplyMock,
   refreshPendingRequestsMock,
@@ -50,6 +51,7 @@ const {
   claimAutoReplyMock: vi.fn((_requestId: string) => true),
   releaseAutoReplyMock: vi.fn((_requestId: string) => undefined),
   useSessionFamilyMock: vi.fn((_sessionId: string | null) => [] as string[]),
+  childBelongsToSessionMock: vi.fn((_sessionId: string, _rootSessionId: string) => false),
   pendingPermissionRequestsMock: [] as Array<{ id: string; sessionID: string; permission: string; patterns?: string[] }>,
   handlePermissionReplyMock: vi.fn(
     (_requestId: string, _reply: string, _directory?: string, _sessionId?: string) => Promise.resolve(true),
@@ -104,6 +106,9 @@ vi.mock('../store', () => ({
     getChildSessionIds: vi.fn(() => []),
     registerChildSession: vi.fn(),
     getSessionAndDescendants: vi.fn(() => []),
+    // 系统通知去重要用：请求所属 session 是否在当前 pane 的会话 family 内
+    belongsToSession: (sessionId: string, rootSessionId: string) =>
+      childBelongsToSessionMock(sessionId, rootSessionId),
   },
   useActiveSessionStore: () => ({ statusMap: activeSessionStatusMap }),
 }))
@@ -222,6 +227,8 @@ describe('useChatSession handleCommand', () => {
     claimAutoReplyMock.mockReset()
     releaseAutoReplyMock.mockReset()
     useSessionFamilyMock.mockReset()
+    childBelongsToSessionMock.mockReset()
+    childBelongsToSessionMock.mockReturnValue(false)
     handlePermissionReplyMock.mockReset()
     refreshPendingRequestsMock.mockReset()
     useSessionStateMock.mockReset()
@@ -525,6 +532,73 @@ describe('useChatSession handleCommand', () => {
       expect(sendNotificationMock).not.toHaveBeenCalled()
     },
   )
+
+  it('子会话（父链上是当前会话）的权限不发系统通知——它就挂在你眼前的界面上', () => {
+    let callbacks: Record<string, ((payload: unknown) => void) | undefined> | undefined
+    registerSessionConsumerMock.mockImplementation((_paneId, _sessionId, consumerCallbacks) => {
+      callbacks = consumerCallbacks as typeof callbacks
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+    // 父子关系从子会话创建起就存在（与 session 列表同源）
+    childBelongsToSessionMock.mockImplementation((sessionId: string) => sessionId.includes('child-session'))
+
+    renderHook(() =>
+      useChatSession({
+        paneId: 'pane-1',
+        chatAreaRef: { current: null },
+        currentModel: { id: 'model-1', providerID: 'provider-1', variants: [] } as never,
+        refetchModels: vi.fn(async () => {}),
+        sessionId: 'session-1',
+        navigateToSession: vi.fn(),
+        navigateHome: vi.fn(),
+      }),
+    )
+
+    act(() => {
+      callbacks?.onPermissionAsked?.({
+        id: 'perm-child',
+        sessionID: 'local::child-session',
+        action: 'bash',
+        resources: ['npm test'],
+      })
+    })
+
+    expect(sendNotificationMock).not.toHaveBeenCalled()
+  })
+
+  it('别的会话（父链上不是当前会话）的权限仍然通知', () => {
+    let callbacks: Record<string, ((payload: unknown) => void) | undefined> | undefined
+    registerSessionConsumerMock.mockImplementation((_paneId, _sessionId, consumerCallbacks) => {
+      callbacks = consumerCallbacks as typeof callbacks
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+    childBelongsToSessionMock.mockReturnValue(false)
+
+    renderHook(() =>
+      useChatSession({
+        paneId: 'pane-1',
+        chatAreaRef: { current: null },
+        currentModel: { id: 'model-1', providerID: 'provider-1', variants: [] } as never,
+        refetchModels: vi.fn(async () => {}),
+        sessionId: 'session-1',
+        navigateToSession: vi.fn(),
+        navigateHome: vi.fn(),
+      }),
+    )
+
+    act(() => {
+      callbacks?.onPermissionAsked?.({
+        id: 'perm-other',
+        sessionID: 'local::other-session',
+        action: 'bash',
+        resources: ['npm test'],
+      })
+    })
+
+    expect(sendNotificationMock).toHaveBeenCalled()
+  })
 })
 
 describe('useChatSession busy UI signal', () => {
@@ -545,6 +619,8 @@ describe('useChatSession busy UI signal', () => {
     claimAutoReplyMock.mockReset()
     releaseAutoReplyMock.mockReset()
     useSessionFamilyMock.mockReset()
+    childBelongsToSessionMock.mockReset()
+    childBelongsToSessionMock.mockReturnValue(false)
     handlePermissionReplyMock.mockReset()
     refreshPendingRequestsMock.mockReset()
     useSessionStateMock.mockReset()

@@ -1164,7 +1164,8 @@ export function useGlobalEvents(directories?: string[]) {
             ensureSessionRelation(scopedId, meta?.directory)
           }
 
-          // 提醒语义不变：不属于当前 session family 的才弹 toast，属于的走进度音
+          // 提醒语义：请求所属 session 的父链上不是当前正在看的会话才提醒
+          //（主会话里的子会话权限就挂在你眼前的卡片上，不需要再通知一次）
           if (!belongsToCurrentSession(scopedId)) {
             notificationStore.push('permission', `${sessionLabel} — Permission`, desc, scopedId, meta?.directory, facts?.id)
           } else if (

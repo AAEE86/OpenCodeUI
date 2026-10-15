@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.7.13] - 2026-10-15
+
+- fix(chat): refresh stale session state after an SSE reconnect (09163a20)
+- fix(chat): keep auto-scroll pinned to the bottom during streaming (a9011c54)
+
 ## [v0.7.12] - 2026-10-14
 
 - fix(mobile): scope the keyboard-session reveal to iOS - Android Chrome was already correct (f00d8952)

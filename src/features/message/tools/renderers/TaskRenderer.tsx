@@ -16,11 +16,13 @@ import { MessageExpandPanel, useMessageExpandRender } from '../../messageExpand'
 import type { AssistantTool, SessionMessageInfo } from '../../../../types/api/message'
 import { contentEntries, type ContentEntry } from '../../../../types/api/message'
 import {
+  currentToolChildSessionId,
   currentToolError,
   currentToolFailed,
   currentToolInput,
   currentToolMetadata,
   currentToolOutput,
+  currentToolSubagentName,
 } from '../../../../types/api/toolState'
 
 /** 子会话消息就是 v2 原生消息（store 已迁移为 SessionMessageInfo[]） */
@@ -49,17 +51,17 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
   const effectiveExpanded = expanded || isContentFullscreen
   const shouldRenderBody = useMessageExpandRender(effectiveExpanded)
 
-  // 从 input 中提取任务信息
+  // 从 input 中提取任务信息（v2 参数名是 agent，v1 是 subagent_type——helper 两个都认）
   const input = currentToolInput(part)
   const description = (input.description as string) || t('task.subtask')
   const prompt = (input.prompt as string) || ''
-  const agentType = (input.subagent_type as string) || 'general'
+  const agentType = currentToolSubagentName(part) || 'general'
 
-  // 获取子 session ID —— 只信任 metadata.sessionId，它是后端为这个 tool call 精确设置的
+  // 获取子 session ID —— 只信任 metadata 里的 sessionID/sessionId（v2/v1 键名，
+  // 见 currentToolChildSessionId），它是后端为这个 tool call 精确设置的
   // 不再用 useChildSessions fallback 取"最新子 session"，因为同一父 session 下多个 task
   // 同时运行时，fallback 会导致所有 task 都渲染最新的那个子 session
-  const metadata = currentToolMetadata(part)
-  const targetSessionId = metadata.sessionId as string | undefined
+  const targetSessionId = currentToolChildSessionId(part)
 
   const isRunning = state.status === 'running'
   const isCompleted = state.status === 'completed'
@@ -83,7 +85,7 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
       e.stopPropagation()
       if (!targetSessionId) return
       // 子 session 属于当前消息所属 session（父 session）的服务器；
-      // metadata.sessionId 是原始 id，childSessionStore 存复合 key
+      // metadata 里的是原始 id，childSessionStore 存复合 key
       const serverId = currentSessionId ? splitSessionKey(currentSessionId).serverId : undefined
       const childScoped = targetSessionId.includes('::')
         ? targetSessionId

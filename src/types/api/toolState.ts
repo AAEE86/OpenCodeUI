@@ -66,6 +66,37 @@ export function currentToolMetadata(tool: AssistantTool): Record<string, unknown
 }
 
 /**
+ * task/subagent 工具派生的子 session id。
+ *
+ * v1 的 task 工具写 `metadata.sessionId`；v2 改名为 `subagent` 工具，
+ * 写 `metadata.sessionID`（core/src/tool/plugin/subagent.ts:264，
+ * 官方 session-ui 也按这个键读取）。运行中由 tool.progress 事件送入，
+ * 完成后由 tool.success 的 metadata 送入。两个键都认，避免连旧服务端
+ * 或读迁移数据时丢关联。
+ */
+export function currentToolChildSessionId(tool: AssistantTool): string | undefined {
+  const name = tool.name.toLowerCase()
+  if (name !== 'task' && name !== 'subagent') return undefined
+  const metadata = currentToolMetadata(tool)
+  const id = metadata.sessionID ?? metadata.sessionId
+  return typeof id === 'string' && id ? id : undefined
+}
+
+/**
+ * task/subagent 工具的子 agent 名。
+ *
+ * v2 参数名是 `agent`，v1 是 `subagent_type`（官方 v1 迁移说明同款：
+ * "takes `agent` instead of `subagent_type`"）。
+ */
+export function currentToolSubagentName(tool: AssistantTool): string | undefined {
+  const name = tool.name.toLowerCase()
+  if (name !== 'task' && name !== 'subagent') return undefined
+  const input = currentToolInput(tool)
+  const agent = input.agent ?? input.subagent_type
+  return typeof agent === 'string' && agent ? agent : undefined
+}
+
+/**
  * 工具产出文本。
  *
  * running 时官方从 `metadata.output` 取（shell 类工具边跑边出）；

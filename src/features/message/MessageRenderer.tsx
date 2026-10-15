@@ -35,7 +35,7 @@ import { MessageExpandPanel, useMessageExpandRender } from './messageExpand'
 import type { AssistantContent, AssistantMessage, SessionMessageInfo, UserMessage } from '../../types/api/message'
 import type { JsonValue } from '@opencode/client/promise'
 import { contentEntries, hasVisibleText, userMessageText, type ContentEntry } from '../../types/api/message'
-import { currentToolFailed, currentToolMetadata } from '../../types/api/toolState'
+import { currentToolChildSessionId, currentToolFailed } from '../../types/api/toolState'
 import { expandCodeModeSubCalls } from './parts/executeSubCallSummary'
 import {
   ENTRY_GROW_DURATION_MS,
@@ -1413,13 +1413,12 @@ function toToolRenderPart(tool: Extract<AssistantContent, { type: 'tool' }>, mes
   return { ...tool, messageID }
 }
 
-/** task 工具派出的子 session：metadata 里是原始 id，服务器以 pane 绑定的 serverId 为权威 */
+/** task/subagent 工具派出的子 session：metadata 里是原始 id，服务器以 pane 绑定的 serverId 为权威 */
 function getTaskChildSessionRef(
   tool: Extract<AssistantContent, { type: 'tool' }>,
   serverId: string,
 ): TaskChildSessionRef | undefined {
-  if (tool.name.toLowerCase() !== 'task') return undefined
-  const sessionId = currentToolMetadata(tool).sessionId as string | undefined
+  const sessionId = currentToolChildSessionId(tool)
   return sessionId ? { sessionKey: sessionId, serverId } : undefined
 }
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.7.15] - 2026-10-15
+
+- fix(composer): compress only the model name in the seat trigger (7ad42a0c)
+- fix(composer): let the seat trigger use the room it has (10035271)
+- fix(composer): keep the aggregated seat trigger from colliding with the actions (4d74f6a0)
+- docs(terminal): state both gates of the connect-ticket endpoint in the hint (94b7fc1c)
+- fix(service): rewrite the registered bind address (0.0.0.0) to loopback (a50d925b)
+- fix(terminal): explain why the PTY connection failed instead of only retrying (b6287c95)
+
 ## [v0.7.14] - 2026-10-15
 
 - fix(chat): decide the permission notification after the session chain is known (09c8d8a9)

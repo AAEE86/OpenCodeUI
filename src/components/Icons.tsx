@@ -46,6 +46,7 @@ import {
   Share,
   Link,
   Globe,
+  QrCode,
   MessageSquare,
   ArrowUp,
   ArrowDown,
@@ -154,6 +155,8 @@ export const MaximizeIcon = wrap(Maximize)
 export const MinimizeIcon = wrap(Minimize)
 export const ShareIcon = wrap(Share)
 export const LinkIcon = wrap(Link)
+
+export const QrCodeIcon = wrap(QrCode)
 export const ExternalLinkIcon = wrap(ExternalLink)
 export const GlobeIcon = wrap(Globe)
 export const MessageSquareIcon = wrap(MessageSquare)

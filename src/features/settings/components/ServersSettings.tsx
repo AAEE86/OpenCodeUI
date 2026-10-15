@@ -4,15 +4,17 @@ import { Button } from '../../../components/ui/Button'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { DropdownMenu } from '../../../components/ui/DropdownMenu'
 import { MenuItem } from '../../../components/ui/MenuItem'
-import { TrashIcon, KeyIcon, PencilIcon, RetryIcon, PlugIcon, CircleIcon } from '../../../components/Icons'
+import { TrashIcon, KeyIcon, PencilIcon, RetryIcon, PlugIcon, CircleIcon, QrCodeIcon } from '../../../components/Icons'
 import { useServerStore, useRouter } from '../../../hooks'
 import { messageStore } from '../../../store'
 import { useMultiServerStore, multiServerStore } from '../../../store/multiServerStore'
 import { useWslStore } from '../../../store/wslStore'
 import { settingsFieldClass, SettingsSection, SettingRow, Toggle } from './SettingsUI'
 import { ServerHealthButton } from './ServerHealthButton'
+import { PairServerDialog } from './PairServerDialog'
 import type { ServerConfig, ServerHealth } from '../../../store/serverStore'
 import { isTauri, getDesktopPlatform } from '../../../utils/tauri'
+import { isLegacyPairingLink, isMixedContent, parsePairingLink, redeemPairingLink } from '../../../utils/pairing'
 import { wslApi } from '../../../api/wsl'
 import { DialogAddWslServer } from '../../wsl/components/DialogAddWslServer'
 import { WslServerRow } from '../../wsl/components/WslServerRow'
@@ -46,6 +48,7 @@ function ServerItem({
   onDelete,
   onEdit,
   onCheckHealth,
+  onPair,
   onToggleSubscribe,
 }: {
   server: ServerConfig
@@ -57,6 +60,7 @@ function ServerItem({
   onDelete: () => void
   onEdit: (updates: { name: string; url: string; username?: string; password?: string }) => void
   onCheckHealth: () => void
+  onPair: () => void
   onToggleSubscribe: () => void
 }) {
   const { t } = useTranslation(['settings', 'common'])
@@ -134,6 +138,18 @@ function ServerItem({
             {subscribed ? <PlugIcon size={13} /> : <CircleIcon size={11} className="opacity-50" />}
           </button>
           <ServerHealthButton health={health} onCheck={onCheckHealth} />
+          <button
+            type="button"
+            className="p-1.5 rounded-md text-text-400 hover:text-accent-main-100 hover:bg-accent-main-100/10 transition-colors"
+            onClick={e => {
+              e.stopPropagation()
+              onPair()
+            }}
+            title={t('servers.pairServer')}
+            aria-label={t('servers.pairServer')}
+          >
+            <QrCodeIcon size={13} />
+          </button>
           {!server.isDefault && (
             <>
               <button
@@ -342,6 +358,93 @@ function AddServerForm({
   const [password, setPassword] = useState('')
   const [showAuth, setShowAuth] = useState(false)
   const [error, setError] = useState('')
+  const [pairLink, setPairLink] = useState('')
+  const [pairState, setPairState] = useState<
+    | { kind: 'idle' }
+    | { kind: 'redeeming' }
+    | { kind: 'paired'; url: string }
+    | { kind: 'expired' }
+    | { kind: 'unreachable' }
+    | { kind: 'mixedContent' }
+    | { kind: 'legacy' }
+  >({ kind: 'idle' })
+  // 兑换过的 token 留在表单里：code 是一次性的，连接失败重试必须复用上次的
+  // token（官方 useRedeemPairing 的 last 缓存同款）
+  const redeemedRef = useRef<{ code: string; url: string; token: string } | null>(null)
+  const pairSeqRef = useRef(0)
+  const pairTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const applyPairing = useCallback((pairedUrl: string, token: string) => {
+    setUrl(pairedUrl)
+    setUsername('opencode')
+    setPassword(token)
+    setShowAuth(true)
+    setName(previous => {
+      if (previous.trim()) return previous
+      try {
+        return new URL(pairedUrl).hostname
+      } catch {
+        return previous
+      }
+    })
+    setError('')
+  }, [])
+
+  // 粘贴 pair 链接 / QR 载荷 → 防抖兑换 → 回填地址与凭据（全部在事件处理器里驱动）
+  const handlePairLinkChange = (value: string) => {
+    setPairLink(value)
+    setError('')
+    if (pairTimerRef.current) {
+      clearTimeout(pairTimerRef.current)
+      pairTimerRef.current = null
+    }
+    const seq = ++pairSeqRef.current
+    const trimmed = value.trim()
+    if (!trimmed) {
+      setPairState({ kind: 'idle' })
+      return
+    }
+    if (isLegacyPairingLink(trimmed)) {
+      setPairState({ kind: 'legacy' })
+      return
+    }
+    const link = parsePairingLink(trimmed)
+    if (!link) {
+      setPairState({ kind: 'idle' })
+      return
+    }
+    const cached = redeemedRef.current
+    if (cached && cached.code === link.code) {
+      applyPairing(link.urls.includes(cached.url) ? cached.url : link.urls[0], cached.token)
+      setPairState({ kind: 'paired', url: cached.url })
+      return
+    }
+    // 在线版（HTTPS）页面注定够不到 http 非 loopback 地址：不做无谓请求，直接说明
+    if (link.urls.every(address => isMixedContent(window.location.href, address))) {
+      setPairState({ kind: 'mixedContent' })
+      return
+    }
+    pairTimerRef.current = setTimeout(() => {
+      pairTimerRef.current = null
+      setPairState({ kind: 'redeeming' })
+      void redeemPairingLink(link).then(result => {
+        if (seq !== pairSeqRef.current) return
+        if (result.type === 'paired') {
+          redeemedRef.current = { code: link.code, url: result.url, token: result.token }
+          applyPairing(result.url, result.token)
+        }
+        setPairState(result.type === 'paired' ? { kind: 'paired', url: result.url } : { kind: result.type })
+      })
+    }, 400)
+  }
+
+  // 卸载时取消在途防抖与作废响应
+  useEffect(() => {
+    return () => {
+      pairSeqRef.current += 1
+      if (pairTimerRef.current) clearTimeout(pairTimerRef.current)
+    }
+  }, [])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -385,6 +488,36 @@ function AddServerForm({
   return (
     <form onSubmit={handleSubmit} className="p-3 rounded-lg border border-border-200 bg-bg-100 space-y-2.5">
       <div>
+        <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">
+          {t('servers.pairLink')}
+        </label>
+        <input
+          type="text"
+          value={pairLink}
+          onChange={e => handlePairLinkChange(e.target.value)}
+          placeholder={t('servers.pairLinkPlaceholder')}
+          className={`${inputCls} font-mono`}
+        />
+        {pairState.kind !== 'idle' && (
+          <p
+            className={`mt-1 text-[length:var(--fs-xs)] leading-relaxed ${
+              pairState.kind === 'paired'
+                ? 'text-success-100'
+                : pairState.kind === 'redeeming'
+                  ? 'text-text-400'
+                  : 'text-danger-100'
+            }`}
+          >
+            {pairState.kind === 'redeeming' && t('servers.pairRedeeming')}
+            {pairState.kind === 'paired' && t('servers.pairPaired')}
+            {pairState.kind === 'expired' && t('servers.pairExpired')}
+            {pairState.kind === 'unreachable' && t('servers.pairUnreachable')}
+            {pairState.kind === 'mixedContent' && t('servers.pairMixedContent')}
+            {pairState.kind === 'legacy' && t('servers.pairLegacy')}
+          </p>
+        )}
+      </div>
+      <div>
         <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.name')}</label>
         <input
           type="text"
@@ -405,7 +538,13 @@ function AddServerForm({
           type="text"
           value={url}
           onChange={e => {
-            setUrl(e.target.value)
+            const value = e.target.value
+            // 粘贴到 URL 框的 pair 链接转到配对流程（官方连接对话框同款识别）
+            if (parsePairingLink(value) || isLegacyPairingLink(value)) {
+              handlePairLinkChange(value)
+              return
+            }
+            setUrl(value)
             setError('')
           }}
           placeholder={t('servers.urlPlaceholder')}
@@ -496,6 +635,7 @@ export function ServersSettings() {
   const { t } = useTranslation(['settings', 'common'])
   const [addingServer, setAddingServer] = useState(false)
   const [addingWslServer, setAddingWslServer] = useState(false)
+  const [pairingServer, setPairingServer] = useState<ServerConfig | null>(null)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const addMenuRef = useRef<HTMLButtonElement>(null)
   // portal 到 body 的菜单内容不在 addMenuRef 内，外部点击判定必须同时覆盖它，
@@ -699,6 +839,7 @@ export function ServersSettings() {
                   void checkHealth(s.id)
                 }}
                 onCheckHealth={() => void checkHealth(s.id)}
+                onPair={() => setPairingServer(s)}
                 onToggleSubscribe={() => multiServerStore.setSubscribed(s.id, !multiServerStore.isSubscribed(s.id))}
               />
             )
@@ -741,6 +882,8 @@ export function ServersSettings() {
         onClose={() => setAddingWslServer(false)}
         onAdded={() => void checkAllHealth()}
       />
+
+      <PairServerDialog server={pairingServer} onClose={() => setPairingServer(null)} />
     </>
   )
 }

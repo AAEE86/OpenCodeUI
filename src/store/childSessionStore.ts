@@ -51,9 +51,13 @@ class ChildSessionStore {
   // Subscription
   // ============================================
 
-  subscribe(fn: Subscriber): () => void {
+  // 箭头属性而非原型方法：useSyncExternalStore(childSessionStore.subscribe, ...) 会
+  // 以未绑定方式调用，原型方法会丢 this（渲染期 TypeError → 白屏），与 themeStore 同款约定
+  subscribe = (fn: Subscriber): (() => void) => {
     this.subscribers.add(fn)
-    return () => this.subscribers.delete(fn)
+    return () => {
+      this.subscribers.delete(fn)
+    }
   }
 
   private notify() {

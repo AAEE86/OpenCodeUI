@@ -580,6 +580,8 @@ export function useChatSession({
           loadSession(routeSessionId, { force: true })
           // 重连后刷新待处理的权限请求和问题，避免用户错过后台产生的请求
           refreshPendingRequests(sessionFamily, effectiveDirectory)
+          // 断连期间的 inbox 增删事件已丢失，补拉队列快照（官方 pending.sync 同款）
+          void syncInboxSnapshotRef.current(routeSessionId)
         }
         refetchModels().catch(() => {})
         // 重新获取 agents 列表（切换后端时 currentDirectory 可能没变，useEffect 不会触发）
@@ -1028,26 +1030,36 @@ export function useChatSession({
     resetPendingRequests()
   }, [routeSessionId, paneId, resetPermissions, resetPendingRequests])
 
-  // inbox 快照打底（官方 pending.sync）：进入会话时拉一次，之后靠 SSE 增量维护。
+  // inbox 快照打底（官方 pending.sync）：进入会话与 SSE 重连时各拉一次，之后靠 SSE 增量维护。
   // 快照里的排队条目也要物化进转写（官方 data.ts:1427-1430）——服务端转写里
   // 投递前并没有这些行，不物化的话刷新后它们只在队列气泡里、投递时无处可落。
   // 快照合并（官方 pendingUpdates + inflight 同款）：拉取期间到达的事件先记账
   // 再合并；本地已 admit、回声未确认（outbox 在途）的条目必须保留——快照可能
   // 早于 admit 发出，直接整体替换会把它们抹掉（气泡消失 + 回滚失效）。
+  // 重连复刷（官方 session-resolution「queued inputs ride along」同款）：
+  // 断连期间的 inbox 增删事件已丢失，不补拉就会一直显示断连前的队列。
+  const syncInboxSnapshot = useCallback(
+    (sessionId: string) => {
+      inboxStore.beginSnapshot(sessionId)
+      return getSessionInbox(sessionId, paneServerId)
+        .then(items => {
+          inboxStore.setItems(sessionId, items, { keepIf: id => outboxHas(id) })
+          for (const item of inboxStore.getItems(sessionId)) messageStore.materializeInboxMessage(sessionId, item)
+        })
+        .catch(() => {
+          // 拉取失败不影响主流程，SSE 事件仍会增量维护
+          inboxStore.endSnapshot(sessionId)
+        })
+    },
+    [paneServerId],
+  )
+  const syncInboxSnapshotRef = useRef(syncInboxSnapshot)
+  syncInboxSnapshotRef.current = syncInboxSnapshot
+
   useEffect(() => {
     if (!routeSessionId) return
-    const sessionId = routeSessionId
-    inboxStore.beginSnapshot(sessionId)
-    getSessionInbox(sessionId, paneServerId)
-      .then(items => {
-        inboxStore.setItems(sessionId, items, { keepIf: id => outboxHas(id) })
-        for (const item of inboxStore.getItems(sessionId)) messageStore.materializeInboxMessage(sessionId, item)
-      })
-      .catch(() => {
-        // 拉取失败不影响主流程，SSE 事件仍会增量维护
-        inboxStore.endSnapshot(sessionId)
-      })
-  }, [routeSessionId, paneServerId])
+    void syncInboxSnapshot(routeSessionId)
+  }, [routeSessionId, syncInboxSnapshot])
 
   // 取消排队条目（官方 queue.remove：回声会把转写里的用户消息一并撤下）
   const handleCancelQueuedPrompt = useCallback(

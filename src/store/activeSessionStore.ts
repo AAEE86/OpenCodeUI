@@ -172,14 +172,57 @@ class ActiveSessionStore {
   }
 
   // ============================================
-  // 范围刷新：返回值不是全量状态，只更新这次明确返回的 session
+  // 状态快照（session.active()：只列「运行中」会话）
+  //
+  // 快照对发起 server 是**绝对**的（官方 client/solid/data.ts 的
+  // server.connected → session.active() 全量替换语义）：
+  // 快照没有、本地却 busy/retry 的同 server 会话 = 拉取开始前已结束 →
+  // 不进新 map（即 idle）。keepOtherServers 只跨 server 保留条目，
+  // 不跨时间保留——否则断连期间结束的会话会永远卡在 busy（断流恢复后
+  // 「信息流状态不刷新」的根因）。
+  //
+  // 拉取窗口内到达的 status 事件（beginStatusSnapshot 缓冲，官方
+  // activeUpdates 同款）覆盖快照，防止旧快照盖掉新事件。
   // ============================================
 
-  mergeStatusRefresh(statusMap: SessionStatusMap) {
-    this.state = {
-      statusMap: this.applyStatusSnapshot(statusMap, this.state.statusMap),
-      initialized: true,
+  /** serverId → 拉取窗口（depth 支持同 server 并发 fetch；updates 为窗口内事件） */
+  private statusSnapshotFlights = new Map<string, { depth: number; updates: Map<string, SessionStatus> }>()
+
+  beginStatusSnapshot(serverId: string) {
+    const flight = this.statusSnapshotFlights.get(serverId)
+    if (flight) {
+      flight.depth += 1
+      return
     }
+    this.statusSnapshotFlights.set(serverId, { depth: 1, updates: new Map() })
+  }
+
+  endStatusSnapshot(serverId: string) {
+    const flight = this.statusSnapshotFlights.get(serverId)
+    if (!flight) return
+    flight.depth -= 1
+    if (flight.depth <= 0) this.statusSnapshotFlights.delete(serverId)
+  }
+
+  applyServerStatusSnapshot(serverId: string, statusMap: SessionStatusMap, options?: { keepOtherServers?: boolean }) {
+    const prefix = `${serverId}::`
+    const nextMap: SessionStatusMap = {}
+    if (options?.keepOtherServers) {
+      for (const [sid, status] of Object.entries(this.state.statusMap)) {
+        if (!sid.startsWith(prefix)) nextMap[sid] = status
+      }
+    }
+    // 本 server 的绝对状态 = 快照 ∪ 拉取窗口内迟到事件（事件更晚，覆盖快照）
+    const merged = new Map<string, SessionStatus>(Object.entries(statusMap))
+    const flight = this.statusSnapshotFlights.get(serverId)
+    if (flight) {
+      for (const [sid, status] of flight.updates) merged.set(sid, status)
+    }
+    for (const [sid, status] of merged) {
+      if (status.type === 'idle') continue
+      nextMap[sid] = status.type === 'retry' ? { ...status } : { type: 'busy' }
+    }
+    this.state = { ...this.state, statusMap: nextMap, initialized: true }
     this.notify()
   }
 
@@ -309,6 +352,14 @@ class ActiveSessionStore {
     } else {
       this.deferredIdleSessions.delete(sessionId)
       newMap[sessionId] = { type: 'busy' }
+    }
+
+    // 快照拉取窗口内的事件先记账（官方 activeUpdates 同款）：
+    // applyServerStatusSnapshot 用它们覆盖旧快照
+    const sep = sessionId.indexOf('::')
+    if (sep > 0) {
+      const flight = this.statusSnapshotFlights.get(sessionId.slice(0, sep))
+      if (flight) flight.updates.set(sessionId, status)
     }
 
     this.state = { ...this.state, statusMap: newMap }

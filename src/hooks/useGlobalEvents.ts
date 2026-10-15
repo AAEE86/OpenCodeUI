@@ -409,14 +409,20 @@ export function useGlobalEvents(directories?: string[]) {
       const currentVersion = (fetchVersions.get(serverId) ?? 0) + 1
       fetchVersions.set(serverId, currentVersion)
       activeFetchVersions.set(serverId, currentVersion)
+      // 官方 server.connected 同款：快照对本 server 是绝对的；拉取窗口内的
+      // status 事件先记账，apply 时覆盖旧快照（防止旧快照盖掉新事件）
+      activeSessionStore.beginStatusSnapshot(serverId)
       void fetchActiveScopeData(directoriesRef.current, serverId)
         .then(({ statusMap, permissions, questions }) => {
           if (disposed || currentVersion !== fetchVersions.get(serverId)) return
+          // merge 只跨 server 保留条目，不跨时间保留——本 server 快照里
+          // 没有的 busy/retry 一律视为已结束（官方 active() 全量替换语义）
+          activeSessionStore.applyServerStatusSnapshot(serverId, statusMap, {
+            keepOtherServers: effectiveStrategy === 'merge',
+          })
           if (effectiveStrategy === 'merge') {
-            activeSessionStore.mergeStatusRefresh(statusMap)
             activeSessionStore.mergePendingRequests(permissions, questions)
           } else {
-            activeSessionStore.initialize(statusMap)
             activeSessionStore.initializePendingRequests(permissions, questions)
           }
           const currentDirectories = directoriesRef.current
@@ -440,6 +446,7 @@ export function useGlobalEvents(directories?: string[]) {
           // best effort: 下次目录切换或 SSE 重连会再拉一次
         })
         .finally(() => {
+          activeSessionStore.endStatusSnapshot(serverId)
           if (currentVersion === fetchVersions.get(serverId)) {
             activeFetchVersions.set(serverId, 0)
           }

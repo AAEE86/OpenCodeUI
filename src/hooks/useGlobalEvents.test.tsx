@@ -92,7 +92,9 @@ const {
     activeSessionStoreMock: {
       initialize: vi.fn(),
       initializePendingRequests: vi.fn(),
-      mergeStatusRefresh: vi.fn(),
+      applyServerStatusSnapshot: vi.fn(),
+      beginStatusSnapshot: vi.fn(),
+      endStatusSnapshot: vi.fn(),
       mergePendingRequests: vi.fn(),
       setSessionMetaBulk: vi.fn(),
       setSessionMeta: vi.fn(),
@@ -378,11 +380,15 @@ describe('useGlobalEvents', () => {
 
     renderHook(() => useGlobalEvents(['/dir-a', '/dir-b']))
 
-    // 等待初始化完成（单服务器首次拉取走 initialize；两个 scope 的全局结果合并后写入）
+    // 等待初始化完成（单服务器首次拉取走 applyServerStatusSnapshot；两个 scope 的全局结果合并后写入）
     await waitFor(() => {
-      expect(activeSessionStoreMock.initialize).toHaveBeenCalledWith({
-        'local::ses-active': { type: 'busy' },
-      })
+      expect(activeSessionStoreMock.applyServerStatusSnapshot).toHaveBeenCalledWith(
+        'local',
+        {
+          'local::ses-active': { type: 'busy' },
+        },
+        { keepOtherServers: false },
+      )
     })
 
     // 不允许任何「按 scope 目录贴标签」的批量 meta 写入
@@ -417,18 +423,25 @@ describe('useGlobalEvents', () => {
     statusDeferreds.get('/two')?.resolve({ 'new-session': { type: 'busy' } })
 
     await waitFor(() => {
-      expect(activeSessionStoreMock.mergeStatusRefresh).toHaveBeenCalledTimes(1)
-      expect(activeSessionStoreMock.mergeStatusRefresh).toHaveBeenCalledWith({ 'local::new-session': { type: 'busy' } })
+      expect(activeSessionStoreMock.applyServerStatusSnapshot).toHaveBeenCalledTimes(1)
+      // 目录变化触发的范围刷新走 merge：跨 server 保留，但本 server 快照仍是绝对的
+      expect(activeSessionStoreMock.applyServerStatusSnapshot).toHaveBeenCalledWith(
+        'local',
+        { 'local::new-session': { type: 'busy' } },
+        { keepOtherServers: true },
+      )
     })
 
     statusDeferreds.get('/one')?.resolve({ 'old-session': { type: 'idle' } })
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(activeSessionStoreMock.mergeStatusRefresh).toHaveBeenCalledTimes(1)
-    expect(activeSessionStoreMock.mergeStatusRefresh).not.toHaveBeenCalledWith({
-      'local::old-session': { type: 'idle' },
-    })
+    expect(activeSessionStoreMock.applyServerStatusSnapshot).toHaveBeenCalledTimes(1)
+    expect(activeSessionStoreMock.applyServerStatusSnapshot).not.toHaveBeenCalledWith(
+      'local',
+      { 'local::old-session': { type: 'idle' } },
+      expect.anything(),
+    )
   })
 
   it('replays pending requests that arrive while initialization is in flight', async () => {

@@ -3,6 +3,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 扫码配对二维码（RustWebChromeClient.onPermissionRequest 会在 getUserMedia
+         触发时拉起运行时授权弹窗；这里只做清单声明） -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- 摄像头不设为硬性要求：无摄像头设备（模拟器 / AndroidTV）仍可安装使用 -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

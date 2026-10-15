@@ -4,7 +4,7 @@ import { Button } from '../../../components/ui/Button'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { DropdownMenu } from '../../../components/ui/DropdownMenu'
 import { MenuItem } from '../../../components/ui/MenuItem'
-import { TrashIcon, KeyIcon, PencilIcon, RetryIcon, PlugIcon, CircleIcon, QrCodeIcon, ScanLineIcon } from '../../../components/Icons'
+import { TrashIcon, KeyIcon, PencilIcon, RetryIcon, PlugIcon, CircleIcon, QrCodeIcon } from '../../../components/Icons'
 import { useServerStore, useRouter } from '../../../hooks'
 import { messageStore } from '../../../store'
 import { useMultiServerStore, multiServerStore } from '../../../store/multiServerStore'
@@ -13,9 +13,11 @@ import { settingsFieldClass, SettingsSection, SettingRow, Toggle } from './Setti
 import { ServerHealthButton } from './ServerHealthButton'
 import { PairServerDialog } from './PairServerDialog'
 import { PairScanDialog } from './PairScanDialog'
+import { PairLinkField } from './PairLinkField'
+import { usePairLinkRedeem } from './usePairLinkRedeem'
 import type { ServerConfig, ServerHealth } from '../../../store/serverStore'
 import { isTauri, getDesktopPlatform } from '../../../utils/tauri'
-import { isLegacyPairingLink, isMixedContent, parsePairingLink, redeemPairingLink } from '../../../utils/pairing'
+import { isLegacyPairingLink, parsePairingLink } from '../../../utils/pairing'
 import { wslApi } from '../../../api/wsl'
 import { DialogAddWslServer } from '../../wsl/components/DialogAddWslServer'
 import { WslServerRow } from '../../wsl/components/WslServerRow'
@@ -221,6 +223,28 @@ function EditServerForm({
   const [error, setError] = useState('')
   const showHttpsIpWarning = isHttpsIpUrl(url)
 
+  // 与添加表单同一条配对链：重新扫码 / 粘贴 pair 链接兑换后回填地址与凭据，
+  // 保存时才落库——适合换了端口 / 重装了服务端后原地更新连接配置
+  const applyPairing = useCallback((pairedUrl: string, token: string) => {
+    setUrl(pairedUrl)
+    setUsername('opencode')
+    setPassword(token)
+    setShowAuth(true)
+    setName(previous => {
+      if (previous.trim()) return previous
+      try {
+        return new URL(pairedUrl).hostname
+      } catch {
+        return previous
+      }
+    })
+    setError('')
+  }, [])
+  const { pairLink, pairState, pairScanOpen, setPairScanOpen, handlePairLinkChange } = usePairLinkRedeem({
+    onPaired: applyPairing,
+    onInput: () => setError(''),
+  })
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     const trimmedName = name.trim().slice(0, SERVER_NAME_MAX_LENGTH)
@@ -253,6 +277,12 @@ function EditServerForm({
       onSubmit={handleSubmit}
       className="p-3 rounded-lg border border-accent-main-100/30 bg-accent-main-100/[0.02] space-y-2.5"
     >
+      <PairLinkField
+        value={pairLink}
+        state={pairState}
+        onChange={handlePairLinkChange}
+        onScan={() => setPairScanOpen(true)}
+      />
       <div>
         <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.name')}</label>
         <input
@@ -274,7 +304,13 @@ function EditServerForm({
           type="text"
           value={url}
           onChange={e => {
-            setUrl(e.target.value)
+            const value = e.target.value
+            // 粘贴到 URL 框的 pair 链接转到配对流程（官方连接对话框同款识别）
+            if (parsePairingLink(value) || isLegacyPairingLink(value)) {
+              handlePairLinkChange(value)
+              return
+            }
+            setUrl(value)
             setError('')
           }}
           placeholder={t('servers.urlPlaceholder')}
@@ -337,6 +373,16 @@ function EditServerForm({
           {t('common:save')}
         </Button>
       </div>
+
+      {/* 扫到码直接喂给 pair 链接的兑换链，和粘贴链接走同一条路径 */}
+      <PairScanDialog
+        isOpen={pairScanOpen}
+        onClose={() => setPairScanOpen(false)}
+        onScan={data => {
+          setPairScanOpen(false)
+          handlePairLinkChange(data)
+        }}
+      />
     </form>
   )
 }
@@ -359,22 +405,6 @@ function AddServerForm({
   const [password, setPassword] = useState('')
   const [showAuth, setShowAuth] = useState(false)
   const [error, setError] = useState('')
-  const [pairLink, setPairLink] = useState('')
-  const [pairScanOpen, setPairScanOpen] = useState(false)
-  const [pairState, setPairState] = useState<
-    | { kind: 'idle' }
-    | { kind: 'redeeming' }
-    | { kind: 'paired'; url: string }
-    | { kind: 'expired' }
-    | { kind: 'unreachable' }
-    | { kind: 'mixedContent' }
-    | { kind: 'legacy' }
-  >({ kind: 'idle' })
-  // 兑换过的 token 留在表单里：code 是一次性的，连接失败重试必须复用上次的
-  // token（官方 useRedeemPairing 的 last 缓存同款）
-  const redeemedRef = useRef<{ code: string; url: string; token: string } | null>(null)
-  const pairSeqRef = useRef(0)
-  const pairTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const applyPairing = useCallback((pairedUrl: string, token: string) => {
     setUrl(pairedUrl)
@@ -392,68 +422,11 @@ function AddServerForm({
     setError('')
   }, [])
 
-  // 粘贴 pair 链接 / QR 载荷 → 防抖兑换 → 回填地址与凭据（全部在事件处理器里驱动）
-  const handlePairLinkChange = (value: string) => {
-    setPairLink(value)
-    setError('')
-    if (pairTimerRef.current) {
-      clearTimeout(pairTimerRef.current)
-      pairTimerRef.current = null
-    }
-    const seq = ++pairSeqRef.current
-    const trimmed = value.trim()
-    if (!trimmed) {
-      setPairState({ kind: 'idle' })
-      return
-    }
-    if (isLegacyPairingLink(trimmed)) {
-      setPairState({ kind: 'legacy' })
-      return
-    }
-    const link = parsePairingLink(trimmed)
-    if (!link) {
-      setPairState({ kind: 'idle' })
-      return
-    }
-    const cached = redeemedRef.current
-    if (cached && cached.code === link.code) {
-      applyPairing(link.urls.includes(cached.url) ? cached.url : link.urls[0], cached.token)
-      setPairState({ kind: 'paired', url: cached.url })
-      return
-    }
-    // 不做混合内容前置拦截：Chrome 142+ 的 Local Network Access 权限允许
-    // HTTPS 页面访问 http 局域网地址，先发请求（触发授权弹窗），失败后再诊断
-    pairTimerRef.current = setTimeout(() => {
-      pairTimerRef.current = null
-      setPairState({ kind: 'redeeming' })
-      void redeemPairingLink(link).then(result => {
-        if (seq !== pairSeqRef.current) return
-        if (result.type === 'paired') {
-          redeemedRef.current = { code: link.code, url: result.url, token: result.token }
-          applyPairing(result.url, result.token)
-          setPairState({ kind: 'paired', url: result.url })
-          return
-        }
-        // 不可达且所有地址都是「HTTPS 页面够 http 目标」时，给出更准确的混合内容提示
-        if (
-          result.type === 'unreachable' &&
-          link.urls.every(address => isMixedContent(window.location.href, address))
-        ) {
-          setPairState({ kind: 'mixedContent' })
-          return
-        }
-        setPairState({ kind: result.type })
-      })
-    }, 400)
-  }
-
-  // 卸载时取消在途防抖与作废响应
-  useEffect(() => {
-    return () => {
-      pairSeqRef.current += 1
-      if (pairTimerRef.current) clearTimeout(pairTimerRef.current)
-    }
-  }, [])
+  // 粘贴 pair 链接 / QR 载荷 → 防抖兑换 → 回填地址与凭据
+  const { pairLink, pairState, pairScanOpen, setPairScanOpen, handlePairLinkChange } = usePairLinkRedeem({
+    onPaired: applyPairing,
+    onInput: () => setError(''),
+  })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -496,50 +469,12 @@ function AddServerForm({
 
   return (
     <form onSubmit={handleSubmit} className="p-3 rounded-lg border border-border-200 bg-bg-100 space-y-2.5">
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <label className="block text-[length:var(--fs-xs)] font-medium text-text-300">
-            {t('servers.pairLink')}
-          </label>
-          {/* 非安全上下文（http 自部署）没有摄像头 API，直接不显示入口 */}
-          {typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && (
-            <button
-              type="button"
-              onClick={() => setPairScanOpen(true)}
-              title={t('servers.scanQr')}
-              aria-label={t('servers.scanQr')}
-              className="p-1 rounded-md text-text-400 hover:text-accent-main-100 hover:bg-accent-main-100/10 transition-colors"
-            >
-              <ScanLineIcon size={13} />
-            </button>
-          )}
-        </div>
-        <input
-          type="text"
-          value={pairLink}
-          onChange={e => handlePairLinkChange(e.target.value)}
-          placeholder={t('servers.pairLinkPlaceholder')}
-          className={`${inputCls} font-mono`}
-        />
-        {pairState.kind !== 'idle' && (
-          <p
-            className={`mt-1 text-[length:var(--fs-xs)] leading-relaxed ${
-              pairState.kind === 'paired'
-                ? 'text-success-100'
-                : pairState.kind === 'redeeming'
-                  ? 'text-text-400'
-                  : 'text-danger-100'
-            }`}
-          >
-            {pairState.kind === 'redeeming' && t('servers.pairRedeeming')}
-            {pairState.kind === 'paired' && t('servers.pairPaired')}
-            {pairState.kind === 'expired' && t('servers.pairExpired')}
-            {pairState.kind === 'unreachable' && t('servers.pairUnreachable')}
-            {pairState.kind === 'mixedContent' && t('servers.pairMixedContent')}
-            {pairState.kind === 'legacy' && t('servers.pairLegacy')}
-          </p>
-        )}
-      </div>
+      <PairLinkField
+        value={pairLink}
+        state={pairState}
+        onChange={handlePairLinkChange}
+        onScan={() => setPairScanOpen(true)}
+      />
       <div>
         <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.name')}</label>
         <input

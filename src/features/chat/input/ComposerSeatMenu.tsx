@@ -30,11 +30,6 @@ interface ComposerSeatMenuProps {
   onAgentChange?: (agentName: string) => void
 
   disabled?: boolean
-  /**
-   * 紧凑（移动端）布局：三段标签的宽度上限收紧，
-   * 否则「模型 · Default · Build」会把触发器撑到与右侧附件/发送按钮重叠
-   */
-  compact?: boolean
   /** 约束菜单边界的容器 ref（输入框容器） */
   constrainToRef?: React.RefObject<HTMLDivElement | null>
   /** 打开完整模型选择菜单（隐藏锚点 ModelSelector） */
@@ -57,7 +52,6 @@ export function ComposerSeatMenu({
   selectedAgent,
   onAgentChange,
   disabled = false,
-  compact = false,
   constrainToRef,
   onOpenModelMenu,
   focusComposer,
@@ -241,27 +235,21 @@ export function ComposerSeatMenu({
           ...(showAgentRow ? [agentLabel] : []),
         ].join(' · ')}
       >
-        <span
-          className={`text-[length:var(--fs-sm)] font-medium text-text-200 truncate ${
-            compact ? 'max-w-[104px]' : 'max-w-[160px]'
-          }`}
-        >
+        {/* 宽度不设固定上限：空间够就完整显示，不够时由 flex 收缩 + truncate 出省略号。
+            固定上限（曾经是 160/72px）会在有余量时也无谓压缩模型名。 */}
+        <span className="text-[length:var(--fs-sm)] font-medium text-text-200 min-w-0 truncate">
           {/* 有缓存标签就始终显示：后台刷新（provider/model/config 事件触发 refetch）
               期间 isLoading 短暂为 true，若让 '…' 抢占标签会造成可见闪烁 */}
           {modelLabel || (modelsLoading ? '…' : t('inputToolbar.seatSelectModel'))}
         </span>
         {(showVariantRow || showAgentRow) && <span className="text-text-500 shrink-0">·</span>}
         {showVariantRow && (
-          <span
-            className={`text-[length:var(--fs-sm)] text-text-400 truncate ${compact ? 'max-w-[52px]' : 'max-w-[72px]'}`}
-          >
-            {variantLabel}
-          </span>
+          <span className="text-[length:var(--fs-sm)] text-text-400 min-w-0 truncate">{variantLabel}</span>
         )}
         {showVariantRow && showAgentRow && <span className="text-text-500 shrink-0">·</span>}
         {showAgentRow && (
           <span
-            className={`text-[length:var(--fs-sm)] text-text-400 truncate ${compact ? 'max-w-[52px]' : 'max-w-[72px]'}`}
+            className="text-[length:var(--fs-sm)] text-text-400 min-w-0 truncate"
             style={currentAgent?.color ? { color: currentAgent.color } : undefined}
           >
             {agentLabel}

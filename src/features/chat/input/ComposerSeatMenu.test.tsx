@@ -34,18 +34,17 @@ describe('ComposerSeatMenu', () => {
     expect(trigger).toHaveTextContent('Build')
   })
 
-  it('compact mode tightens the trigger so it cannot overlap the action buttons', () => {
-    renderMenu({ compact: true })
+  it('trigger keeps its natural width but can shrink, so it never overlaps the action buttons', () => {
+    renderMenu()
     const trigger = screen.getByRole('button', { name: 'Model / effort / agent menu' })
-    // 触发器自身可收缩、内容裁切
+    // 可收缩（min-w-0 + max-w-full + overflow-hidden）——空间不足时才截断
     expect(trigger.className).toContain('min-w-0')
     expect(trigger.className).toContain('max-w-full')
     expect(trigger.className).toContain('overflow-hidden')
-    // 三段标签在紧凑模式下的上限都比常规模式窄（160/72 → 104/52）
+    // 三段标签都不设固定宽度上限：有空间就完整显示模型名（曾经 160/72px 会无谓压缩）
     const labels = Array.from(trigger.querySelectorAll('span'))
-    expect(labels.some(span => span.className.includes('max-w-[104px]'))).toBe(true)
-    expect(labels.filter(span => span.className.includes('max-w-[52px]')).length).toBe(2)
-    expect(labels.some(span => span.className.includes('max-w-[160px]'))).toBe(false)
+    expect(labels.some(span => /max-w-\[\d+px\]/.test(span.className))).toBe(false)
+    expect(labels.filter(span => span.className.includes('truncate')).length).toBe(3)
   })
 
   it('opens root pane with model / effort / agent rows', () => {    renderMenu()

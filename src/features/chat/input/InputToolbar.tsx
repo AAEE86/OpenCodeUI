@@ -345,7 +345,6 @@ export function InputToolbar({
               selectedAgent={selectedAgent}
               onAgentChange={onAgentChange}
               disabled={controlsDisabled}
-              compact={isCompact}
               constrainToRef={inputContainerRef}
               onOpenModelMenu={() => modelSelectorRef?.current?.openMenu()}
               focusComposer={focusComposerInput}

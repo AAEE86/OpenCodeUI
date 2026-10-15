@@ -643,27 +643,42 @@ export function useGlobalEvents(directories?: string[]) {
       const scope = (sid: string) => makeSessionKey(serverId, sid)
 
       /**
-       * 「关系未知」自愈：某个 session 的请求没有任何 pane 能接收时，按 id 拉一次
-       * 它的元信息；带 parentID 就地补建父子关系再补投。
+       * 把某个 session 的父子关系问清楚。
        *
-       * 为什么需要：父子关系平时来自 session.created，但重连窗口里该事件可能丢，
-       * 于是子会话的权限一直挂不上、只剩一条 toast，直到手动刷新页面走 REST 才恢复
-       * （真实事故）。每个 session 只探一次，失败允许重试。
+       * 请求到达时关系可能还没建立（子会话刚创建、session.created 在重连窗口里丢了），
+       * 此时 `belongsToCurrentSession` 会误判成「不属于当前会话」。所以先按 id 拉一次
+       * session 元信息（与 session 列表同源的 REST 数据），带 parentID 就地补建关系并
+       * 补投缓存里的请求。每个 session 只探一次（并发调用共享同一个 promise）。
        */
-      const relationProbes = new Set<string>()
-      const ensureSessionRelation = (scopedId: string, directory?: string) => {
+      const relationProbes = new Map<string, Promise<void>>()
+      const ensureSessionRelation = (scopedId: string, directory?: string): Promise<void> => {
         const raw = splitSessionKey(scopedId).sessionId
-        if (relationProbes.has(raw)) return
-        relationProbes.add(raw)
-        void getSession(scopedId, directory, serverId)
+        const existing = relationProbes.get(raw)
+        if (existing) return existing
+        const probe = getSession(scopedId, directory, serverId)
           .then(session => {
             if (disposed || !session?.parentID) return
             childSessionStore.registerChildSession(session, serverId)
             flushPendingRequests()
           })
           .catch(() => {
+            // 拉取失败允许下次重试
             relationProbes.delete(raw)
           })
+        relationProbes.set(raw, probe)
+        return probe
+      }
+
+      /**
+       * 通知判定：请求所属 session 的父链上是不是当前正在看的会话。
+       *
+       * 关系已知时立刻得到答案；未知时先问清楚再判定——权限卡片会挂在这个 pane 的
+       * 界面上，此时再发通知就是重复打扰（用户反馈的「主会话里的子会话还要什么通知」）。
+       * 判定不出归属（真的没有 parentID）才按「不在当前会话」处理。
+       */
+      const resolveBelongsToCurrent = (scopedId: string, directory?: string): Promise<boolean> => {
+        if (belongsToCurrentSession(scopedId)) return Promise.resolve(true)
+        return ensureSessionRelation(scopedId, directory).then(() => belongsToCurrentSession(scopedId))
       }
 
       return {
@@ -1158,23 +1173,25 @@ export function useGlobalEvents(directories?: string[]) {
           const delivered = dispatchToConsumers(scopedId, cb =>
             cb.onPermissionAsked?.({ ...request, sessionID: scopedId }),
           )
-          if (!delivered) {
-            addPending(pendingPermissions, scopedId, { ...request, sessionID: scopedId })
-            // 没人能接收：可能是父子关系还没建立——就地拉一次元信息补建，再补投
-            ensureSessionRelation(scopedId, meta?.directory)
-          }
+          if (!delivered) addPending(pendingPermissions, scopedId, { ...request, sessionID: scopedId })
 
-          // 提醒语义：请求所属 session 的父链上不是当前正在看的会话才提醒
-          //（主会话里的子会话权限就挂在你眼前的卡片上，不需要再通知一次）
-          if (!belongsToCurrentSession(scopedId)) {
+          // 提醒判定：先问清「这个 session 的父链上是不是当前正在看的会话」——
+          // 是（主会话里的子会话）就说明权限卡片会挂在这个 pane 的界面上，不通知。
+          // 关系未知时先补建再判定，避免误判成「别的会话」而多发一条通知。
+          void resolveBelongsToCurrent(scopedId, meta?.directory).then(belongs => {
+            if (disposed) return
+            if (belongs) {
+              if (
+                shouldPlayPermissionSound(scopedId) &&
+                isSessionDirectlyOpen(scopedId) &&
+                soundStore.getSnapshot().currentSessionEnabled
+              ) {
+                playNotificationSoundDeduped('permission')
+              }
+              return
+            }
             notificationStore.push('permission', `${sessionLabel} — Permission`, desc, scopedId, meta?.directory, facts?.id)
-          } else if (
-            shouldPlayPermissionSound(scopedId) &&
-            isSessionDirectlyOpen(scopedId) &&
-            soundStore.getSnapshot().currentSessionEnabled
-          ) {
-            playNotificationSoundDeduped('permission')
-          }
+          })
         },
 
         onPermissionReplied: data => {
@@ -1209,16 +1226,19 @@ export function useGlobalEvents(directories?: string[]) {
           flushPendingRequests()
 
           const delivered = dispatchToConsumers(scopedId, cb => cb.onFormCreated?.({ ...form, sessionID: scopedId }))
-          if (!delivered) {
-            addPending(pendingQuestions, scopedId, { ...form, sessionID: scopedId })
-            ensureSessionRelation(scopedId, meta?.directory)
-          }
+          if (!delivered) addPending(pendingQuestions, scopedId, { ...form, sessionID: scopedId })
 
-          if (!belongsToCurrentSession(scopedId)) {
+          // 与权限同款：先查清归属再决定是否通知
+          void resolveBelongsToCurrent(scopedId, meta?.directory).then(belongs => {
+            if (disposed) return
+            if (belongs) {
+              if (isSessionDirectlyOpen(scopedId) && soundStore.getSnapshot().currentSessionEnabled) {
+                playNotificationSoundDeduped('question')
+              }
+              return
+            }
             notificationStore.push('question', `${sessionLabel} — Question`, desc, scopedId, meta?.directory, facts?.id)
-          } else if (isSessionDirectlyOpen(scopedId) && soundStore.getSnapshot().currentSessionEnabled) {
-            playNotificationSoundDeduped('question')
-          }
+          })
         },
 
         onFormReplied: data => {

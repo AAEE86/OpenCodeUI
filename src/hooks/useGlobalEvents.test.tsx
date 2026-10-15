@@ -640,6 +640,8 @@ describe('useGlobalEvents', () => {
 
       // 关系未知 → 挂不上任何 pane（这是事故现象：只有 toast 通知）
       expect(consumerAskedMock).not.toHaveBeenCalled()
+      // 归属判定要先查清关系，放行微任务后仍判为「不在当前会话」才通知
+      await vi.advanceTimersByTimeAsync(0)
       expect(notificationPushMock).toHaveBeenCalled()
 
       // 远超旧实现的 5s TTL：旧实现此后会在 cleanupExpired 里静默丢弃
@@ -891,6 +893,8 @@ describe('useGlobalEvents', () => {
       resources: [],
     })
 
+    // 归属判定是异步的（关系未知时先查清再决定），断言前先放行微任务
+    await act(async () => {})
     expect(notificationPushMock).not.toHaveBeenCalled()
     expect(playNotificationSoundDedupedMock).toHaveBeenCalledWith('permission')
   })
@@ -915,6 +919,7 @@ describe('useGlobalEvents', () => {
       resources: [],
     })
 
+    await act(async () => {})
     expect(notificationPushMock).not.toHaveBeenCalled()
     expect(playNotificationSoundDedupedMock).toHaveBeenCalledWith('permission')
   })
@@ -998,6 +1003,7 @@ describe('useGlobalEvents', () => {
       resources: [],
     })
 
+    await act(async () => {})
     expect(notificationPushMock).not.toHaveBeenCalled()
     expect(playNotificationSoundDedupedMock).toHaveBeenCalledWith('permission')
 
@@ -1055,6 +1061,8 @@ describe('useGlobalEvents', () => {
 
       callbacks![trigger as keyof typeof callbacks]?.(payload as never)
 
+      // 归属判定异步（关系未知时先查清再决定）
+      await act(async () => {})
       expect(notificationPushMock).toHaveBeenCalledTimes(1)
       expect(playNotificationSoundDedupedMock).not.toHaveBeenCalled()
     },

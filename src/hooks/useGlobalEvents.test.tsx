@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { registerSessionConsumer, useGlobalEvents } from './useGlobalEvents'
+import { flushPendingRequests, registerSessionConsumer, useGlobalEvents } from './useGlobalEvents'
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void
@@ -15,6 +15,7 @@ const {
   getSessionStatusMock,
   getPendingPermissionsMock,
   getPendingFormsMock,
+  getSessionMock,
   replyPermissionMock,
   childBelongsToSessionMock,
   getFocusedSessionIdMock,
@@ -60,6 +61,8 @@ const {
       Promise.resolve([] as Array<{ id: string; sessionID: string; action: string; resources?: string[] }>),
     ),
     getPendingFormsMock: vi.fn(() => Promise.resolve([])),
+    // 「关系未知」自愈会按 id 拉一次 session 元信息（取 parentID）
+    getSessionMock: vi.fn(() => Promise.resolve(undefined)),
     replyPermissionMock: vi.fn(() => Promise.resolve()),
     childBelongsToSessionMock: vi.fn<(sessionId: string, rootSessionId: string) => boolean>(() => false),
     getFocusedSessionIdMock: vi.fn<() => string | null>(() => null),
@@ -123,6 +126,7 @@ vi.mock('../api', () => ({
   getSessionStatus: getSessionStatusMock,
   getPendingPermissions: getPendingPermissionsMock,
   getPendingForms: getPendingFormsMock,
+  getSession: getSessionMock,
 }))
 
 vi.mock('../store/multiServerStore', () => ({
@@ -569,6 +573,142 @@ describe('useGlobalEvents', () => {
 
     expect(notificationPushMock).not.toHaveBeenCalled()
     expect(playNotificationSoundDedupedMock).not.toHaveBeenCalled()
+  })
+
+  it('属于当前会话的子会话权限立即挂进 pane，不降级成 toast（实时链路）', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getFocusedSessionIdMock.mockReturnValue('local::parent-session')
+    childBelongsToSessionMock.mockImplementation(
+      (sessionId: string, rootSessionId: string) =>
+        sessionId === 'local::child-session' && rootSessionId === 'local::parent-session',
+    )
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    const consumerAskedMock = vi.fn()
+    const unregister = registerSessionConsumer('pane-live-child', 'local::parent-session', {
+      onPermissionAsked: consumerAskedMock,
+    })
+
+    callbacks!.onPermissionAsked?.({
+      id: 'perm-live',
+      sessionID: 'child-session',
+      action: 'bash',
+      resources: ['npm test'],
+    } as never)
+
+    // 判定标准是「有没有 pane 接收」，不是 family 关系查询的结果
+    expect(consumerAskedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'perm-live', sessionID: 'local::child-session' }),
+    )
+    expect(notificationPushMock).not.toHaveBeenCalled()
+
+    unregister()
+  })
+
+  it('关系未知时缓存的权限不因时间流逝被丢弃：关系建立后补投（原来只剩 toast，要刷新才挂上）', async () => {
+    vi.useFakeTimers()
+    try {
+      let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+      subscribeToEventsMock.mockImplementation(cb => {
+        callbacks = cb
+        return vi.fn()
+      })
+      getFocusedSessionIdMock.mockReturnValue(null)
+      // 此刻 app 还不知道 child-session 属于父会话（session.created 没到/重连丢了）
+      childBelongsToSessionMock.mockReturnValue(false)
+
+      renderHook(() => useGlobalEvents())
+      expect(callbacks).toBeDefined()
+
+      const consumerAskedMock = vi.fn()
+      const unregister = registerSessionConsumer('pane-late-child', 'local::parent-session', {
+        onPermissionAsked: consumerAskedMock,
+      })
+
+      callbacks!.onPermissionAsked?.({
+        id: 'perm-late',
+        sessionID: 'child-session',
+        action: 'bash',
+        resources: ['npm test'],
+      } as never)
+
+      // 关系未知 → 挂不上任何 pane（这是事故现象：只有 toast 通知）
+      expect(consumerAskedMock).not.toHaveBeenCalled()
+      expect(notificationPushMock).toHaveBeenCalled()
+
+      // 远超旧实现的 5s TTL：旧实现此后会在 cleanupExpired 里静默丢弃
+      await vi.advanceTimersByTimeAsync(30_000)
+
+      // 关系建立（REST children 恢复 / 重连），补投
+      childBelongsToSessionMock.mockImplementation(
+        (sessionId: string, rootSessionId: string) =>
+          sessionId === 'local::child-session' && rootSessionId === 'local::parent-session',
+      )
+      flushPendingRequests()
+
+      expect(consumerAskedMock).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'perm-late', sessionID: 'local::child-session' }),
+      )
+
+      unregister()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('关系未知时自愈：拉一次 session 元信息补建父子关系并补投权限（不靠 session.created）', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getFocusedSessionIdMock.mockReturnValue(null)
+    childBelongsToSessionMock.mockReturnValue(false)
+    getSessionMock.mockResolvedValue({
+      id: 'child-session',
+      parentID: 'parent-session',
+      title: 'Child',
+      time: { created: 1 },
+    } as never)
+
+    renderHook(() => useGlobalEvents())
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    const consumerAskedMock = vi.fn()
+    const unregister = registerSessionConsumer('pane-self-heal', 'local::parent-session', {
+      onPermissionAsked: consumerAskedMock,
+    })
+
+    callbacks!.onPermissionAsked?.({
+      id: 'perm-heal',
+      sessionID: 'child-session',
+      action: 'bash',
+      resources: ['npm test'],
+    } as never)
+
+    // 首次挂不上：关系未知 → 入缓存 + 探测元信息
+    expect(consumerAskedMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(getSessionMock).toHaveBeenCalledWith('local::child-session', '/workspace', 'local'))
+
+    // 元信息带回 parentID → 关系补建 → 补投（relation 判定此时已知）
+    childBelongsToSessionMock.mockImplementation(
+      (sessionId: string, rootSessionId: string) =>
+        sessionId === 'local::child-session' && rootSessionId === 'local::parent-session',
+    )
+    flushPendingRequests()
+
+    // 缓存里的请求仍在（没被丢弃），补投后进 pane
+    expect(consumerAskedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'perm-heal', sessionID: 'local::child-session' }),
+    )
+
+    unregister()
   })
 
   it('keeps later pending question requests for the same session after one reply arrives', async () => {

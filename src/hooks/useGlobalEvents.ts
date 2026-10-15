@@ -18,7 +18,7 @@ import { notificationStore } from '../store/notificationStore'
 import { soundStore } from '../store/soundStore'
 import { playNotificationSoundDeduped } from '../utils/notificationSoundBridge'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
-import { makeSessionKey, sessionKeyToServerId } from '../utils/sessionKey'
+import { makeSessionKey, sessionKeyToServerId, splitSessionKey } from '../utils/sessionKey'
 import {
   subscribeToServerEvents,
   reconnectServerSSE,
@@ -27,6 +27,7 @@ import {
   getPendingForms,
   getSessionMessages,
   getSessionMessage,
+  getSession,
 } from '../api'
 import { createSessionPlaceholder } from '../utils/sessionPlaceholder'
 import { sweepTaskChildBindings } from '../utils/taskChildBinding'
@@ -84,6 +85,8 @@ export function registerSessionConsumer(
   callbacks: SessionEventCallbacks,
 ): () => void {
   sessionConsumers.set(consumerId, { sessionId, callbacks })
+  // pane 挂载/切换会话后，此前因「没人能接收」而缓存的请求可能已经有归属
+  flushPendingRequests()
   return () => {
     sessionConsumers.delete(consumerId)
   }
@@ -92,7 +95,11 @@ export function registerSessionConsumer(
 /** 更新已注册消费者的 sessionId（pane 切换 session 时，无需重新注册） */
 export function updateConsumerSessionId(consumerId: string, sessionId: string | null) {
   const c = sessionConsumers.get(consumerId)
-  if (c) c.sessionId = sessionId
+  if (!c) return
+  if (c.sessionId === sessionId) return
+  c.sessionId = sessionId
+  // 切到（或切回）某个会话时补投缓存请求——父子关系可能是在别处建立的
+  flushPendingRequests()
 }
 
 /** 按 sessionId 找到所有匹配的消费者回调（包括子 session 冒泡） */
@@ -144,8 +151,17 @@ export function hasOtherConsumerForSession(sessionId: string, consumerId: string
 }
 
 // ============================================
-// 待处理请求缓存 - 处理 permission/question 事件先于 session.created 到达的时序问题
-// 同一 session 可能有多个 pending 请求，所以用数组
+// 未路由出去的待处理请求缓存
+//
+// 场景：请求先到、而「该请求属于哪个 pane」的关系还没建立——
+//   - session.created（子会话→父会话关系）还没到 / 该事件在重连窗口里丢了
+//   - 对应 pane 还没挂载或还没切到这个会话
+// 此时先缓存，等关系建立（子会话注册、pane 注册/切换、重连重放）后由
+// flushPendingRequests() 补投。
+//
+// 刻意**不用时间过期**：权限在服务端可能几分钟都还是 pending，按时间丢掉
+// 会让它只剩一条 toast，直到用户手动刷新页面才重新挂上（真实事故）。
+// 内存边界改用条数上限，配合 permission.replied / form.replied 的精确移除。
 // ============================================
 interface PendingRequest<T> {
   request: T
@@ -155,32 +171,70 @@ interface PendingRequest<T> {
 const pendingPermissions = new Map<string, PendingRequest<ApiPermissionRequest>[]>()
 const pendingQuestions = new Map<string, PendingRequest<ApiFormInfo>[]>()
 
-// 5秒后过期，防止内存泄漏
-const PENDING_TIMEOUT = 5000
-
-function cleanupExpired<T>(map: Map<string, PendingRequest<T>[]>) {
-  const now = Date.now()
-  for (const [key, arr] of map) {
-    const filtered = arr.filter(item => now - item.timestamp <= PENDING_TIMEOUT)
-    if (filtered.length === 0) {
-      map.delete(key)
-    } else if (filtered.length !== arr.length) {
-      map.set(key, filtered)
-    }
-  }
-}
+/** 单个 session 的缓存上限（正常路径下缓存条目在秒级内就被 flush 掉） */
+const MAX_PENDING_PER_SESSION = 50
+/** 两个缓存表合计的条目上限，超出丢最旧的，防止长期无人消费时泄漏 */
+const MAX_PENDING_TOTAL = 500
 
 function addPending<T>(map: Map<string, PendingRequest<T>[]>, sessionID: string, request: T) {
   const arr = map.get(sessionID) || []
   arr.push({ request, timestamp: Date.now() })
+  while (arr.length > MAX_PENDING_PER_SESSION) arr.shift()
   map.set(sessionID, arr)
+  enforcePendingBudget()
 }
 
-function drainPending<T>(map: Map<string, PendingRequest<T>[]>, sessionID: string): T[] {
-  const arr = map.get(sessionID)
-  if (!arr || arr.length === 0) return []
-  map.delete(sessionID)
-  return arr.map(item => item.request)
+/** 超出总量上限时丢最旧的条目（按入队时间） */
+function enforcePendingBudget() {
+  const total = () =>
+    [...pendingPermissions.values()].reduce((sum, arr) => sum + arr.length, 0) +
+    [...pendingQuestions.values()].reduce((sum, arr) => sum + arr.length, 0)
+  if (total() <= MAX_PENDING_TOTAL) return
+  const all: Array<{ map: Map<string, PendingRequest<unknown>[]>; sessionID: string; timestamp: number }> = []
+  for (const [sessionID, arr] of pendingPermissions) {
+    for (const item of arr) all.push({ map: pendingPermissions, sessionID, timestamp: item.timestamp })
+  }
+  for (const [sessionID, arr] of pendingQuestions) {
+    for (const item of arr) all.push({ map: pendingQuestions, sessionID, timestamp: item.timestamp })
+  }
+  all.sort((a, b) => a.timestamp - b.timestamp)
+  for (const entry of all.slice(0, total() - MAX_PENDING_TOTAL)) {
+    const arr = entry.map.get(entry.sessionID)
+    if (!arr) continue
+    const index = arr.findIndex(item => item.timestamp === entry.timestamp)
+    if (index >= 0) arr.splice(index, 1)
+    if (arr.length === 0) entry.map.delete(entry.sessionID)
+  }
+}
+
+/**
+ * 把缓存里现在能投递出去的请求补投给对应 pane。
+ *
+ * 在「关系可能刚刚建立」的时机调用：pane 注册 / 切换会话、子会话注册
+ * （SSE session.created 或 REST children 恢复）、重连重放、以及新请求到来前。
+ * 没人接收的条目留在缓存里等下一次机会——绝不因为等待超时就丢弃。
+ */
+export function flushPendingRequests(): number {
+  let delivered = 0
+  for (const [sessionID, arr] of [...pendingPermissions]) {
+    const remaining: PendingRequest<ApiPermissionRequest>[] = []
+    for (const item of arr) {
+      if (dispatchToConsumers(sessionID, cb => cb.onPermissionAsked?.(item.request))) delivered += 1
+      else remaining.push(item)
+    }
+    if (remaining.length === 0) pendingPermissions.delete(sessionID)
+    else pendingPermissions.set(sessionID, remaining)
+  }
+  for (const [sessionID, arr] of [...pendingQuestions]) {
+    const remaining: PendingRequest<ApiFormInfo>[] = []
+    for (const item of arr) {
+      if (dispatchToConsumers(sessionID, cb => cb.onFormCreated?.(item.request))) delivered += 1
+      else remaining.push(item)
+    }
+    if (remaining.length === 0) pendingQuestions.delete(sessionID)
+    else pendingQuestions.set(sessionID, remaining)
+  }
+  return delivered
 }
 
 function getScopeKey(directories?: string[]) {
@@ -588,6 +642,30 @@ export function useGlobalEvents(directories?: string[]) {
     const buildServerCallbacks = (serverId: string): EventCallbacks => {
       const scope = (sid: string) => makeSessionKey(serverId, sid)
 
+      /**
+       * 「关系未知」自愈：某个 session 的请求没有任何 pane 能接收时，按 id 拉一次
+       * 它的元信息；带 parentID 就地补建父子关系再补投。
+       *
+       * 为什么需要：父子关系平时来自 session.created，但重连窗口里该事件可能丢，
+       * 于是子会话的权限一直挂不上、只剩一条 toast，直到手动刷新页面走 REST 才恢复
+       * （真实事故）。每个 session 只探一次，失败允许重试。
+       */
+      const relationProbes = new Set<string>()
+      const ensureSessionRelation = (scopedId: string, directory?: string) => {
+        const raw = splitSessionKey(scopedId).sessionId
+        if (relationProbes.has(raw)) return
+        relationProbes.add(raw)
+        void getSession(scopedId, directory, serverId)
+          .then(session => {
+            if (disposed || !session?.parentID) return
+            childSessionStore.registerChildSession(session, serverId)
+            flushPendingRequests()
+          })
+          .catch(() => {
+            relationProbes.delete(raw)
+          })
+      }
+
       return {
         // ============================================
         // 流式文本 / 推理 / 工具 → messageStore
@@ -970,20 +1048,12 @@ export function useGlobalEvents(directories?: string[]) {
             // （title=description / agent 名配对）——metadata.sessionID 走 ephemeral
             // progress 不落库，这个绑定是刷新/重连后权限挂载与子会话内联的底座
             sweepTaskChildBindings(serverId, scope(data.parentID))
-
-            // 处理因时序问题缓存的权限/表单请求
-            if (belongsToCurrentSession(scopedId)) {
-              for (const req of drainPending(pendingPermissions, scopedId)) {
-                dispatchToConsumers(req.sessionID, cb => cb.onPermissionAsked?.(req))
-              }
-              for (const req of drainPending(pendingQuestions, scopedId)) {
-                dispatchToConsumers(req.sessionID, cb => cb.onFormCreated?.(req))
-              }
-            }
           }
 
-          cleanupExpired(pendingPermissions)
-          cleanupExpired(pendingQuestions)
+          // 关系刚建立（或本来就在）：补投此前缓存、当时还无法路由的权限/表单。
+          // 放在 parentID 判断之外——否则没有 parentID 的创建事件会让缓存条目
+          // 一直等到超时被丢弃
+          flushPendingRequests()
         },
 
         onSessionIdle: data => {
@@ -1078,7 +1148,23 @@ export function useGlobalEvents(directories?: string[]) {
             })
           }
 
-          // Toast 通知 — 不属于当前 session family 的才弹
+          // 先补投此前缓存下来的请求：此刻可能已经有 pane 能接收了
+          flushPendingRequests()
+
+          // 投递判定用「有没有 pane 真正接收」，而不是 family 关系是否已知——
+          // 关系可能还没建立（子会话刚创建 / 重连丢了 session.created）。
+          // 接收不到的先缓存，等关系建立后由 flushPendingRequests 补投，
+          // 绝不丢弃（否则界面上永远挂不上，只有刷新走 REST 才恢复）。
+          const delivered = dispatchToConsumers(scopedId, cb =>
+            cb.onPermissionAsked?.({ ...request, sessionID: scopedId }),
+          )
+          if (!delivered) {
+            addPending(pendingPermissions, scopedId, { ...request, sessionID: scopedId })
+            // 没人能接收：可能是父子关系还没建立——就地拉一次元信息补建，再补投
+            ensureSessionRelation(scopedId, meta?.directory)
+          }
+
+          // 提醒语义不变：不属于当前 session family 的才弹 toast，属于的走进度音
           if (!belongsToCurrentSession(scopedId)) {
             notificationStore.push('permission', `${sessionLabel} — Permission`, desc, scopedId, meta?.directory, facts?.id)
           } else if (
@@ -1087,12 +1173,6 @@ export function useGlobalEvents(directories?: string[]) {
             soundStore.getSnapshot().currentSessionEnabled
           ) {
             playNotificationSoundDeduped('permission')
-          }
-
-          if (belongsToCurrentSession(scopedId)) {
-            dispatchToConsumers(scopedId, cb => cb.onPermissionAsked?.({ ...request, sessionID: scopedId }))
-          } else {
-            addPending(pendingPermissions, scopedId, { ...request, sessionID: scopedId })
           }
         },
 
@@ -1124,16 +1204,19 @@ export function useGlobalEvents(directories?: string[]) {
             })
           }
 
+          // 与权限同款：投递失败只入缓存，提醒语义保持原样
+          flushPendingRequests()
+
+          const delivered = dispatchToConsumers(scopedId, cb => cb.onFormCreated?.({ ...form, sessionID: scopedId }))
+          if (!delivered) {
+            addPending(pendingQuestions, scopedId, { ...form, sessionID: scopedId })
+            ensureSessionRelation(scopedId, meta?.directory)
+          }
+
           if (!belongsToCurrentSession(scopedId)) {
             notificationStore.push('question', `${sessionLabel} — Question`, desc, scopedId, meta?.directory, facts?.id)
           } else if (isSessionDirectlyOpen(scopedId) && soundStore.getSnapshot().currentSessionEnabled) {
             playNotificationSoundDeduped('question')
-          }
-
-          if (belongsToCurrentSession(scopedId)) {
-            dispatchToConsumers(scopedId, cb => cb.onFormCreated?.({ ...form, sessionID: scopedId }))
-          } else {
-            addPending(pendingQuestions, scopedId, { ...form, sessionID: scopedId })
           }
         },
 
@@ -1203,6 +1286,9 @@ export function useGlobalEvents(directories?: string[]) {
           refreshServerHealth(serverId)
           // 重连后重新拉取全量状态 + pending requests
           fetchAndInitialize(serverId)
+          // 重连期间可能丢了 session.created（父子关系没重建），缓存里的请求
+          // 在这里再补投一次；仍投不出去的留着等关系建立
+          flushPendingRequests()
           // 通知所有 pub/sub 消费者
           for (const consumer of sessionConsumers.values()) {
             consumer.callbacks.onReconnected?.(reason)

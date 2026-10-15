@@ -11,7 +11,12 @@ export { usePermissionHandler } from './usePermissionHandler'
 export { useMessageAnimation } from './useMessageAnimation'
 export { useSessionManager } from './useSessionManager'
 export { useGlobalEvents } from './useGlobalEvents'
-export { registerSessionConsumer, updateConsumerSessionId, hasOtherConsumerForSession } from './useGlobalEvents'
+export {
+  registerSessionConsumer,
+  updateConsumerSessionId,
+  hasOtherConsumerForSession,
+  flushPendingRequests,
+} from './useGlobalEvents'
 export type { SessionEventCallbacks } from './useGlobalEvents'
 export { useDelayedRender } from './useDelayedRender'
 export { useDisclosureScrollLock } from './useDisclosureScrollLock'

@@ -17,6 +17,7 @@ import {
   registerSessionConsumer,
   updateConsumerSessionId,
   hasOtherConsumerForSession,
+  flushPendingRequests,
 } from '../hooks'
 import { usePermissions, usePermissionHandler, useMessageAnimation, useDirectory, useSessionContext, useAgents } from '../hooks'
 import { useNotification } from './useNotification'
@@ -698,6 +699,9 @@ export function useChatSession({
           for (const child of children) {
             childSessionStore.registerChildSession(child, paneServerId)
           }
+          // 父子关系刚由 REST 建立：此前因「不知道子会话归属」而只弹了 toast、
+          // 被缓存下来的权限/表单请求，现在补投进 pane（否则要刷新页面才挂上）
+          flushPendingRequests()
         } catch {
           // 获取子 session 失败不影响主流程
         }

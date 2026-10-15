@@ -53,6 +53,7 @@
     "mermaid": "^11.13.0",
     "morphdom": "^2.7.8",
     "motion": "^12.38.0",
+    "qr-scanner": "^1.4.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-i18next": "^17.0.1",

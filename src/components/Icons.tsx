@@ -92,6 +92,7 @@ import {
   AppWindow,
   ZoomIn,
   ZoomOut,
+  ScanLine,
 } from 'lucide-react'
 
 export interface IconProps extends SVGProps<SVGSVGElement> {
@@ -224,3 +225,4 @@ export const SplitHorizontalIcon = wrap(Columns2)
 export const SplitVerticalIcon = wrap(Rows2)
 export const GripVerticalIcon = wrap(GripVertical)
 export const AppWindowIcon = wrap(AppWindow)
+export const ScanLineIcon = wrap(ScanLine)

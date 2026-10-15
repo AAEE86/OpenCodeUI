@@ -4,7 +4,7 @@ import { Button } from '../../../components/ui/Button'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { DropdownMenu } from '../../../components/ui/DropdownMenu'
 import { MenuItem } from '../../../components/ui/MenuItem'
-import { TrashIcon, KeyIcon, PencilIcon, RetryIcon, PlugIcon, CircleIcon, QrCodeIcon } from '../../../components/Icons'
+import { TrashIcon, KeyIcon, PencilIcon, RetryIcon, PlugIcon, CircleIcon, QrCodeIcon, ScanLineIcon } from '../../../components/Icons'
 import { useServerStore, useRouter } from '../../../hooks'
 import { messageStore } from '../../../store'
 import { useMultiServerStore, multiServerStore } from '../../../store/multiServerStore'
@@ -12,6 +12,7 @@ import { useWslStore } from '../../../store/wslStore'
 import { settingsFieldClass, SettingsSection, SettingRow, Toggle } from './SettingsUI'
 import { ServerHealthButton } from './ServerHealthButton'
 import { PairServerDialog } from './PairServerDialog'
+import { PairScanDialog } from './PairScanDialog'
 import type { ServerConfig, ServerHealth } from '../../../store/serverStore'
 import { isTauri, getDesktopPlatform } from '../../../utils/tauri'
 import { isLegacyPairingLink, isMixedContent, parsePairingLink, redeemPairingLink } from '../../../utils/pairing'
@@ -359,6 +360,7 @@ function AddServerForm({
   const [showAuth, setShowAuth] = useState(false)
   const [error, setError] = useState('')
   const [pairLink, setPairLink] = useState('')
+  const [pairScanOpen, setPairScanOpen] = useState(false)
   const [pairState, setPairState] = useState<
     | { kind: 'idle' }
     | { kind: 'redeeming' }
@@ -495,9 +497,23 @@ function AddServerForm({
   return (
     <form onSubmit={handleSubmit} className="p-3 rounded-lg border border-border-200 bg-bg-100 space-y-2.5">
       <div>
-        <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">
-          {t('servers.pairLink')}
-        </label>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-[length:var(--fs-xs)] font-medium text-text-300">
+            {t('servers.pairLink')}
+          </label>
+          {/* 非安全上下文（http 自部署）没有摄像头 API，直接不显示入口 */}
+          {typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && (
+            <button
+              type="button"
+              onClick={() => setPairScanOpen(true)}
+              title={t('servers.scanQr')}
+              aria-label={t('servers.scanQr')}
+              className="p-1 rounded-md text-text-400 hover:text-accent-main-100 hover:bg-accent-main-100/10 transition-colors"
+            >
+              <ScanLineIcon size={13} />
+            </button>
+          )}
+        </div>
         <input
           type="text"
           value={pairLink}
@@ -630,6 +646,16 @@ function AddServerForm({
           {t('common:add')}
         </Button>
       </div>
+
+      {/* 扫到码直接喂给 pair 链接的兑换链，和粘贴链接走同一条路径 */}
+      <PairScanDialog
+        isOpen={pairScanOpen}
+        onClose={() => setPairScanOpen(false)}
+        onScan={data => {
+          setPairScanOpen(false)
+          handlePairLinkChange(data)
+        }}
+      />
     </form>
   )
 }

@@ -486,6 +486,12 @@ export const ChatArea = memo(
       const autoSetContentRef = auto.setContentRef
       const autoHandleScroll = auto.handleScroll
       const autoHandleWheel = auto.handleWheel
+      const autoHandleTouchStart = auto.handleTouchStart
+      const autoHandleTouchMove = auto.handleTouchMove
+      const autoHandleTouchEnd = auto.handleTouchEnd
+      const autoHandleKeyDown = auto.handleKeyDown
+      const autoHandlePointerDown = auto.handlePointerDown
+      const autoHandlePointerEnd = auto.handlePointerEnd
       const autoHandleInteraction = auto.handleInteraction
       const autoForceScroll = auto.forceScrollToBottom
       const autoScrollBottom = auto.scrollToBottom
@@ -611,28 +617,32 @@ export const ChatArea = memo(
               })
             })
           }
-          // 核心修复：用户已上滚（userScrolledRef）时，临时关掉 anchorTo:'end'，
-          // 阻止 virtual-core resizeItem 内部的 wasAtEnd 路径（applyScrollAdjustment 拉回）。
-          // wasAtEnd 用 getVirtualDistanceFromEnd()（基于内部 scrollOffset），
-          // 但 React commit 阶段 ref 回调触发 measureElement 时 scroll 事件还没 fire，
-          // scrollOffset 是陈旧的（仍指向底部），wasAtEnd 误判为 true → 拉回。
-          // userScrolledRef 由 handleWheel 上滚设 true，只由 handleWheel 下滚回底设 false，
-          // handleScroll 不清它（避免流式增长推回时误清）。
-          if (userScrolledRef.current) {
+          // 抑制 virtual-core resizeItem 内部 wasAtEnd 路径（applyScrollAdjustment
+          // 的相对 delta 调整），两种状态都不让它生效：
+          // - 用户已离底（userScrolledRef）：React commit 阶段 ref 回调触发
+          //   measureElement 时 scroll 事件还没 fire，scrollOffset 是陈旧的
+          //   （仍指向底部），wasAtEnd 误判为 true → 拉回底部。
+          // - 跟随中：内容收缩时浏览器 clamp 若先于 RO 入账（scroll 事件经任务
+          //   队列抢在同一帧 RO 投递前派发），getScrollOffset() 已是钳后值，
+          //   wasAtEnd 的相对 delta 会二次叠加，把 scrollTop 拽到底部上方
+          //   （概率性失贴的根源之一）。
+          // 跟随贴底统一走下方 queueMicrotask 的**绝对**写底（幂等、clamp 安全）；
+          // 离底时的阅读位置由 shouldAdjustScrollPositionOnItemSizeChange
+          // （上方条目补偿）+ prepend 锚点负责。
+          {
             const opts = (virtualizer as any).options
             const origAnchor = opts.anchorTo
             opts.anchorTo = 'start'
             origResize(index, size)
             opts.anchorTo = origAnchor
-          } else {
-            origResize(index, size)
           }
-          if (root && shouldAnchorBottom() && !resizeAnchorScheduled.current && (virtualizer as any).isAtEnd?.(80)) {
+          // 跟随中的贴底：绝对写底，不做 isAtEnd 门槛——shouldAnchorBottom()
+          // 已经表达了跟随意图，>80px 的单帧突增（图片/代码块渲染）也必须追回。
+          if (root && shouldAnchorBottom() && !resizeAnchorScheduled.current) {
             resizeAnchorScheduled.current = true
             queueMicrotask(() => {
               resizeAnchorScheduled.current = false
               if (!shouldAnchorBottom()) return
-              if (!(virtualizer as any).isAtEnd?.(80)) return
               const el = scrollRef.current
               if (!el) return
               autoMarkAuto(el)
@@ -797,9 +807,45 @@ export const ChatArea = memo(
         [autoHandleWheel, clearPrepend],
       )
 
-      const onTouchStart = useCallback(() => {
-        if (!prependLoading.current) clearPrepend()
-      }, [clearPrepend])
+      const onTouchStart = useCallback(
+        (e: React.TouchEvent<HTMLDivElement>) => {
+          if (!prependLoading.current) clearPrepend()
+          autoHandleTouchStart(e.nativeEvent)
+        },
+        [autoHandleTouchStart, clearPrepend],
+      )
+
+      const onTouchMove = useCallback(
+        (e: React.TouchEvent<HTMLDivElement>) => {
+          autoHandleTouchMove(e.nativeEvent)
+        },
+        [autoHandleTouchMove],
+      )
+
+      const onTouchEnd = useCallback(() => {
+        autoHandleTouchEnd()
+      }, [autoHandleTouchEnd])
+
+      const onKeyDown = useCallback(
+        (e: React.KeyboardEvent<HTMLDivElement>) => {
+          autoHandleKeyDown(e.nativeEvent)
+        },
+        [autoHandleKeyDown],
+      )
+
+      const onPointerDown = useCallback(
+        (e: React.PointerEvent<HTMLDivElement>) => {
+          autoHandlePointerDown(e.nativeEvent)
+        },
+        [autoHandlePointerDown],
+      )
+
+      const onPointerEnd = useCallback(
+        (e: React.PointerEvent<HTMLDivElement>) => {
+          autoHandlePointerEnd(e.nativeEvent)
+        },
+        [autoHandlePointerEnd],
+      )
 
       // ── Effects（parent key remount 后，这里只处理本实例生命周期） ──
 
@@ -977,7 +1023,12 @@ export const ChatArea = memo(
       )
 
       return (
-        <div className="h-full overflow-hidden contain-strict relative">
+        <div
+          className="h-full overflow-hidden contain-strict relative"
+          onPointerDownCapture={onPointerDown}
+          onPointerUpCapture={onPointerEnd}
+          onPointerCancelCapture={onPointerEnd}
+        >
           {loadState === 'loading' && visibleMessages.length === 0 && (
             <div className="absolute inset-0 z-10 flex items-center justify-center">
               <div className="flex flex-col items-center gap-3 text-text-400 session-loading-indicator">
@@ -995,8 +1046,12 @@ export const ChatArea = memo(
               overflowAnchor: 'none',
               paddingTop: 'calc(5rem + var(--app-safe-top, 0px))',
             }}
-            onWheel={onWheel}
-            onTouchStart={onTouchStart}
+            onWheelCapture={onWheel}
+            onTouchStartCapture={onTouchStart}
+            onTouchMoveCapture={onTouchMove}
+            onTouchEndCapture={onTouchEnd}
+            onTouchCancelCapture={onTouchEnd}
+            onKeyDownCapture={onKeyDown}
             onScroll={onScroll}
             onClick={autoHandleInteraction}
           >

@@ -3,29 +3,28 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAutoScroll } from './useAutoScroll'
 
 /**
- * jsdom 没有布局，用可写的 mock 滚动元素模拟：
+ * jsdom 没有布局，用真实 DOM 元素 + 覆写几何属性模拟滚动容器：
  * scrollHeight/clientHeight/scrollTop 手动驱动。
  */
 function makeScroller(clientHeight = 500) {
+  const el = document.createElement('div')
   let scrollTop = 0
   let scrollHeight = clientHeight
-  const el = {
-    style: {},
-    get scrollTop() {
-      return scrollTop
+  Object.defineProperties(el, {
+    scrollTop: {
+      get: () => scrollTop,
+      set: (v: number) => {
+        scrollTop = Math.max(0, Math.min(v, scrollHeight - clientHeight))
+      },
     },
-    set scrollTop(v: number) {
-      scrollTop = Math.max(0, Math.min(v, scrollHeight - clientHeight))
-    },
-    get scrollHeight() {
-      return scrollHeight
-    },
-    get clientHeight() {
-      return clientHeight
-    },
-  } as unknown as HTMLElement
+    scrollHeight: { get: () => scrollHeight },
+    clientHeight: { get: () => clientHeight },
+  })
+  const wrapper = document.createElement('div')
+  wrapper.appendChild(el)
   return {
     el,
+    wrapper,
     grow(by: number) {
       scrollHeight += by
     },
@@ -57,6 +56,22 @@ function setup() {
     result.current.setScrollRef(scroller.el)
   })
   return { auto: result, scroller }
+}
+
+/** 自绘滚动条 thumb 的 pointerdown（capture 阶段登记 unknown 意图） */
+function makeThumb(scroller: ReturnType<typeof makeScroller>) {
+  const thumb = document.createElement('div')
+  thumb.classList.add('os-thumb')
+  scroller.wrapper.appendChild(thumb)
+  return thumb
+}
+
+function pointerDownOn(thumb: HTMLElement, pointerId = 1) {
+  return { target: thumb, pointerId, button: 0 } as unknown as PointerEvent
+}
+
+function wheelUp(target: EventTarget | null = null) {
+  return { deltaY: -100, deltaMode: 0, ctrlKey: false, target } as unknown as WheelEvent
 }
 
 describe('useAutoScroll 贴底跟随归因', () => {
@@ -104,18 +119,62 @@ describe('useAutoScroll 贴底跟随归因', () => {
     expect(auto.current.userScrolled).toBe(false)
   })
 
-  it('真实读者手势（位置偏离确认点）仍然解除跟随', () => {
+  it('无输入的「收缩→回长」跨帧竞帧：贴底意图保留并自愈（概率性失贴根因修复）', () => {
     const { auto, scroller } = setup()
     scroller.grow(1000)
     act(() => {
       auto.current.scrollToBottom()
     })
-    // 滚动条拖拽 / 键盘 PgUp：没有 wheel 事件，scrollTop 明显偏离
+    // 过程壳折叠（收缩 300，clamp 到 700）与下一段流式回长（+400）落在同一
+    // 渲染窗口：scroll 事件到达时 scrollTop 既不在底部、也偏离确认点、还对不上
+    // 任何 auto 标记——旧几何归因会误判为读者离底，永久失贴。
     act(() => {
+      scroller.shrink(300)
+      scroller.grow(400)
+      auto.current.handleScroll()
+    })
+    expect(auto.current.userScrolled).toBe(false)
+    // 自愈：重新贴回底部
+    expect(scroller.top).toBe(scroller.floor)
+  })
+
+  it('无输入且布局守卫过期的未分类上移仍解除跟随（辅助技术兼容）', () => {
+    vi.useFakeTimers()
+    try {
+      const { auto, scroller } = setup()
+      scroller.grow(1000)
+      act(() => {
+        auto.current.scrollToBottom()
+      })
+      act(() => {
+        vi.advanceTimersByTime(1600)
+        scroller.shrink(300)
+        scroller.grow(400)
+        auto.current.handleScroll()
+      })
+      expect(auto.current.userScrolled).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('真实读者手势（自绘滚动条拖拽上移）解除跟随', () => {
+    const { auto, scroller } = setup()
+    scroller.grow(1000)
+    act(() => {
+      auto.current.scrollToBottom()
+    })
+    // thumb pointerdown 登记 unknown 意图（挂在容器父元素上，容器收不到该事件）
+    const thumb = makeThumb(scroller)
+    act(() => {
+      auto.current.handlePointerDown(pointerDownOn(thumb))
       scroller.scrollTo(scroller.floor - 300)
       auto.current.handleScroll()
     })
     expect(auto.current.userScrolled).toBe(true)
+    act(() => {
+      auto.current.handlePointerEnd({ pointerId: 1 } as PointerEvent)
+    })
   })
 
   it('读者滚回底部阈值内恢复跟随', () => {
@@ -124,7 +183,9 @@ describe('useAutoScroll 贴底跟随归因', () => {
     act(() => {
       auto.current.scrollToBottom()
     })
+    const thumb = makeThumb(scroller)
     act(() => {
+      auto.current.handlePointerDown(pointerDownOn(thumb))
       scroller.scrollTo(scroller.floor - 300)
       auto.current.handleScroll()
     })
@@ -132,8 +193,83 @@ describe('useAutoScroll 贴底跟随归因', () => {
     act(() => {
       scroller.scrollTo(scroller.floor)
       auto.current.handleScroll()
+      auto.current.handlePointerEnd({ pointerId: 1 } as PointerEvent)
     })
     expect(auto.current.userScrolled).toBe(false)
+  })
+
+  it('wheel 上滚立即解除跟随（不等 scroll 事件）', () => {
+    const { auto, scroller } = setup()
+    scroller.grow(1000)
+    act(() => {
+      auto.current.scrollToBottom()
+    })
+    act(() => {
+      auto.current.handleWheel(wheelUp())
+    })
+    expect(auto.current.userScrolled).toBe(true)
+  })
+
+  it('wheel 上滚发生在嵌套滚动容器内：不立即解除跟随', () => {
+    const { auto, scroller } = setup()
+    scroller.grow(1000)
+    act(() => {
+      auto.current.scrollToBottom()
+    })
+    const nested = document.createElement('div')
+    nested.setAttribute('data-scrollable', '')
+    const inner = document.createElement('div')
+    nested.appendChild(inner)
+    act(() => {
+      auto.current.handleWheel(wheelUp(inner))
+    })
+    // 嵌套消费掉的 wheel 不影响主容器贴底
+    expect(auto.current.userScrolled).toBe(false)
+  })
+
+  it('触控板捏合缩放（ctrl+wheel）不影响贴底', () => {
+    const { auto, scroller } = setup()
+    scroller.grow(1000)
+    act(() => {
+      auto.current.scrollToBottom()
+    })
+    act(() => {
+      auto.current.handleWheel({
+        deltaY: -100,
+        deltaMode: 0,
+        ctrlKey: true,
+        target: null,
+      } as unknown as WheelEvent)
+    })
+    expect(auto.current.userScrolled).toBe(false)
+  })
+
+  it('键盘 PageUp 解除跟随', () => {
+    const { auto, scroller } = setup()
+    scroller.grow(1000)
+    act(() => {
+      auto.current.scrollToBottom()
+    })
+    act(() => {
+      auto.current.handleKeyDown({ key: 'PageUp', target: null, shiftKey: false } as unknown as KeyboardEvent)
+    })
+    expect(auto.current.userScrolled).toBe(true)
+  })
+
+  it('触摸上拖（手指下移）解除跟随', () => {
+    const { auto, scroller } = setup()
+    scroller.grow(1000)
+    act(() => {
+      auto.current.scrollToBottom()
+    })
+    act(() => {
+      auto.current.handleTouchStart({ touches: [{ clientY: 500 }] } as unknown as TouchEvent)
+      auto.current.handleTouchMove({ touches: [{ clientY: 520 }], target: null } as unknown as TouchEvent)
+    })
+    expect(auto.current.userScrolled).toBe(true)
+    act(() => {
+      auto.current.handleTouchEnd()
+    })
   })
 
   it('生长动画竞帧：程序跟随的中间帧位置不解除跟随', () => {

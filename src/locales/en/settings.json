@@ -134,7 +134,7 @@
     "pairPaired": "Paired — address and credentials filled in",
     "pairExpired": "Pairing code expired or already used — run opencode pair again for a new one",
     "pairUnreachable": "Server unreachable — check the address and network",
-    "pairMixedContent": "The hosted web app (HTTPS) cannot reach this HTTP address. Use the desktop app, or enable HTTPS on the server (e.g. the OpenTunnel address from opencode service set remote true)",
+    "pairMixedContent": "The browser blocked the request to this local HTTP address. On Chrome 142+, allow Local Network Access in the site settings and retry; or use the desktop app, or enable HTTPS on the server (e.g. the OpenTunnel address from opencode service set remote true)",
     "pairLegacy": "Legacy pairing link — upgrade the server and generate a new one with opencode pair",
     "pairServer": "Pair",
     "pairDialogTitle": "Pair with {{name}}",

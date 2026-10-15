@@ -134,7 +134,7 @@
     "pairPaired": "配对成功，已自动填入地址和凭据",
     "pairExpired": "配对码已过期或已被使用，请重新运行 opencode pair 生成",
     "pairUnreachable": "无法连接该服务器，请检查地址与网络",
-    "pairMixedContent": "在线版（HTTPS）无法连接该 HTTP 地址。请改用桌面版，或为服务器启用 HTTPS（如 opencode service set remote true 的 OpenTunnel 地址）",
+    "pairMixedContent": "浏览器拦截了对局域网 HTTP 地址的请求。Chrome 142+ 可在地址栏站点设置中允许「本地网络访问」后重试；也可改用桌面版，或为服务器启用 HTTPS（如 opencode service set remote true 的 OpenTunnel 地址）",
     "pairLegacy": "这是旧版配对链接，请升级服务端后用 opencode pair 重新生成",
     "pairServer": "配对",
     "pairDialogTitle": "配对到「{{name}}」",

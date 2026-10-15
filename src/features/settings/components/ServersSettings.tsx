@@ -419,11 +419,8 @@ function AddServerForm({
       setPairState({ kind: 'paired', url: cached.url })
       return
     }
-    // 在线版（HTTPS）页面注定够不到 http 非 loopback 地址：不做无谓请求，直接说明
-    if (link.urls.every(address => isMixedContent(window.location.href, address))) {
-      setPairState({ kind: 'mixedContent' })
-      return
-    }
+    // 不做混合内容前置拦截：Chrome 142+ 的 Local Network Access 权限允许
+    // HTTPS 页面访问 http 局域网地址，先发请求（触发授权弹窗），失败后再诊断
     pairTimerRef.current = setTimeout(() => {
       pairTimerRef.current = null
       setPairState({ kind: 'redeeming' })
@@ -432,8 +429,18 @@ function AddServerForm({
         if (result.type === 'paired') {
           redeemedRef.current = { code: link.code, url: result.url, token: result.token }
           applyPairing(result.url, result.token)
+          setPairState({ kind: 'paired', url: result.url })
+          return
         }
-        setPairState(result.type === 'paired' ? { kind: 'paired', url: result.url } : { kind: result.type })
+        // 不可达且所有地址都是「HTTPS 页面够 http 目标」时，给出更准确的混合内容提示
+        if (
+          result.type === 'unreachable' &&
+          link.urls.every(address => isMixedContent(window.location.href, address))
+        ) {
+          setPairState({ kind: 'mixedContent' })
+          return
+        }
+        setPairState({ kind: result.type })
       })
     }, 400)
   }

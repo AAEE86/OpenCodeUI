@@ -32,7 +32,7 @@
     "createTerminal": "创建终端",
     "closeTerminal": "关闭终端",
     "connectFailed": "连接失败：{{message}}",
-    "connectForbiddenHint": "服务端拒绝了终端连接票据。允许的来源只有同源、localhost、tauri 与 *.opencode.ai，当前页面来源（{{origin}}）不在其中。请把该来源加入服务端的 cors 配置，或从服务端自身的地址打开应用。"
+    "connectForbiddenHint": "服务端拒绝了终端连接票据。该接口要求请求带 x-opencode-ticket: 1 头，且页面来源（{{origin}}）需在服务端允许列表内（同源、localhost、tauri、*.opencode.ai，或服务端 --cors 指定的来源）。请在浏览器网络面板确认这条请求是否带了该头：带了通常是中间网关/代理把它丢掉了，没带则是客户端或代理改写。"
   },
   "diffViewer": {
     "noChanges": "无变更",

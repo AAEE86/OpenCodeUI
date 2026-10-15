@@ -32,7 +32,7 @@
     "createTerminal": "Create Terminal",
     "closeTerminal": "Close terminal",
     "connectFailed": "Connect failed: {{message}}",
-    "connectForbiddenHint": "The server refused the terminal connect ticket. Allowed origins are same-origin, localhost, tauri and *.opencode.ai — the current page origin ({{origin}}) is not one of them. Add it to the server's cors option, or open the app from the server's own address."
+    "connectForbiddenHint": "The server refused the terminal connect ticket. That endpoint requires the x-opencode-ticket: 1 header and an allowed page origin ({{origin}}) — same-origin, localhost, tauri, *.opencode.ai, or an origin listed in the server's --cors option. Check the request headers in the network panel: if the header is present it is usually a gateway/proxy stripping it, otherwise the client or a proxy rewrote the request."
   },
   "diffViewer": {
     "noChanges": "No changes",

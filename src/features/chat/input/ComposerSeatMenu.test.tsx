@@ -34,8 +34,21 @@ describe('ComposerSeatMenu', () => {
     expect(trigger).toHaveTextContent('Build')
   })
 
-  it('opens root pane with model / effort / agent rows', () => {
-    renderMenu()
+  it('compact mode tightens the trigger so it cannot overlap the action buttons', () => {
+    renderMenu({ compact: true })
+    const trigger = screen.getByRole('button', { name: 'Model / effort / agent menu' })
+    // 触发器自身可收缩、内容裁切
+    expect(trigger.className).toContain('min-w-0')
+    expect(trigger.className).toContain('max-w-full')
+    expect(trigger.className).toContain('overflow-hidden')
+    // 三段标签在紧凑模式下的上限都比常规模式窄（160/72 → 104/52）
+    const labels = Array.from(trigger.querySelectorAll('span'))
+    expect(labels.some(span => span.className.includes('max-w-[104px]'))).toBe(true)
+    expect(labels.filter(span => span.className.includes('max-w-[52px]')).length).toBe(2)
+    expect(labels.some(span => span.className.includes('max-w-[160px]'))).toBe(false)
+  })
+
+  it('opens root pane with model / effort / agent rows', () => {    renderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'Model / effort / agent menu' }))
     expect(screen.getByRole('menuitem', { name: /Model/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /Reasoning effort/ })).toBeInTheDocument()

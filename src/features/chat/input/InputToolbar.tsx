@@ -329,7 +329,9 @@ export function InputToolbar({
   return (
     <div className="flex items-center justify-between px-3 pb-3 relative">
       {/* Left side: Model (mobile) + Agent + Variant selectors */}
-      <div className={`flex items-center min-w-0 ${isCompact ? 'gap-1' : 'gap-2'}`}>
+      {/* flex-1 min-w-0：左侧可被压缩（标签 truncate），右侧动作按钮 shrink-0 不被挤压，
+          移动端聚合菜单才不会再顶到附件按钮上 */}
+      <div className={`flex items-center flex-1 min-w-0 ${isCompact ? 'gap-1' : 'gap-2'}`}>
         {useSeatSelector ? (
           /* DSH 风格汇总选择器：模型 · 推理 · Agent 单入口（全平台一致） */
           <div className="relative min-w-0">
@@ -343,6 +345,7 @@ export function InputToolbar({
               selectedAgent={selectedAgent}
               onAgentChange={onAgentChange}
               disabled={controlsDisabled}
+              compact={isCompact}
               constrainToRef={inputContainerRef}
               onOpenModelMenu={() => modelSelectorRef?.current?.openMenu()}
               focusComposer={focusComposerInput}
@@ -551,7 +554,7 @@ export function InputToolbar({
       </div>
 
       {/* Action Buttons */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 shrink-0">
         {/* busy 投递方式切换（PiUI InputToolbar steer/follow-up chip 同款） */}
         <AnimatedPresence show={Boolean(isStreaming && onBusyDeliveryChange && deliveryChipVisible)} className="shrink-0">
           <button

@@ -107,6 +107,44 @@ describe('currentToolChildSessionId', () => {
       currentToolChildSessionId(tool({ name: 'subagent', state: { status: 'streaming', input: '{}' } })),
     ).toBeUndefined()
   })
+
+  // 续接已有子会话：模型在工具入参里显式传 sessionID（subagent.ts:40-42），
+  // 服务端不会再下发 progress —— 参数即权威答案
+  it('非 streaming 时从 input.sessionID 取续接的子 session', () => {
+    const t = tool({
+      name: 'subagent',
+      state: { status: 'running', input: { description: 'd', prompt: 'p', sessionID: 'ses_resumed' }, metadata: {} },
+    })
+    expect(currentToolChildSessionId(t)).toBe('ses_resumed')
+  })
+
+  it('metadata.sessionID 优先于续接参数', () => {
+    const t = tool({
+      name: 'subagent',
+      state: {
+        status: 'running',
+        input: { sessionID: 'ses_input' },
+        metadata: { sessionID: 'ses_meta' },
+      },
+    })
+    expect(currentToolChildSessionId(t)).toBe('ses_meta')
+  })
+
+  it('streaming 阶段不采信 input.sessionID（半截 JSON 会截断 id 指向错误会话）', () => {
+    const t = tool({
+      name: 'subagent',
+      state: { status: 'streaming', input: '{"description":"d","sessionID":"ses_resum' },
+    })
+    expect(currentToolChildSessionId(t)).toBeUndefined()
+  })
+
+  it('空的续接参数视同没有', () => {
+    const t = tool({
+      name: 'subagent',
+      state: { status: 'running', input: { sessionID: '' }, metadata: {} },
+    })
+    expect(currentToolChildSessionId(t)).toBeUndefined()
+  })
 })
 
 describe('currentToolSubagentName', () => {

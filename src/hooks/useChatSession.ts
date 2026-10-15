@@ -66,7 +66,7 @@ import { saveData } from '../utils/downloadUtils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { serverStorage } from '../utils/perServerStorage'
 import { sessionKeyToServerId, splitSessionKey } from '../utils/sessionKey'
-import { sweepTaskChildBindings } from '../utils/taskChildBinding'
+import { sweepTaskChildBindings, verifyTaskChildBindings } from '../utils/taskChildBinding'
 import { createMessageId } from '../utils/identifier'
 import { serverStore } from '../store/serverStore'
 import { STORAGE_KEY_SELECTED_AGENT } from '../constants'
@@ -703,9 +703,20 @@ export function useChatSession({
         }
       }
 
-      // 刷新/重进后运行中的 task 卡片 metadata 里没有 sessionID（progress 不落库），
-      // 用「agent/title 配对」把子 session 绑回发起它的卡片
+      // 刷新/重进后运行中的 task 卡片 metadata 里没有 sessionID（progress 不落库）：
+      // 先一对一同步直绑，剩下的用 input.prompt 与子 session 首条用户消息
+      // 逐字比对精确绑定（在线时由 tool.progress 的 metadata.sessionID 精确下发，
+      // 这里是离线恢复通道——绝不用 agent/title 做概率性配对，会挂错会话）
       sweepTaskChildBindings(paneServerId, routeSessionId!)
+      await verifyTaskChildBindings(paneServerId, routeSessionId!, async childKey => {
+        try {
+          const messages = await getSessionMessages(childKey, undefined, undefined, paneServerId)
+          const firstUser = messages.find(m => m.type === 'user')
+          return firstUser?.type === 'user' ? firstUser.text : undefined
+        } catch {
+          return undefined
+        }
+      })
 
       if (cancelled) return
 

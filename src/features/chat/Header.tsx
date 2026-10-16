@@ -8,11 +8,16 @@ import {
   SplitHorizontalIcon,
   MaximizeIcon,
   MinimizeIcon,
+  DownloadIcon,
+  GitWorktreeIcon,
 } from '../../components/Icons'
-import { IconButton } from '../../components/ui'
+import { DropdownMenu, IconButton, MenuItem } from '../../components/ui'
 import { ModelSelector, type ModelSelectorHandle } from './ModelSelector'
-import { SessionMoveMenu } from './SessionMoveMenu'
+import { SessionMoveDialog } from './SessionMoveDialog'
 import { ShareDialog } from './ShareDialog'
+import { useSessionActiveEntry } from '../../store/activeSessionStore'
+import { serverStore } from '../../store/serverStore'
+import { makeSessionKey } from '../../utils/sessionKey'
 import { messageStore, useHeaderSessionMeta } from '../../store'
 import { useLayoutStore, layoutStore } from '../../store/layoutStore'
 import { useSessionContext } from '../../contexts/useSessionContext'
@@ -48,8 +53,15 @@ interface SessionTitleControlProps {
   handleRename: () => void
   handleStartEdit: () => void
   onShare: () => void
+  onMove: () => void
+  /** 会话运行中：菜单里的「移动」置灰（官方 blocked while running） */
+  moveDisabled: boolean
   clickToRenameTitle: string
-  shareTitle: string
+  moreActionsTitle: string
+  exportTitle: string
+  exportDesc: string
+  moveTitle: string
+  moveRunningTitle: string
 }
 
 function SessionTitleControl({
@@ -63,9 +75,44 @@ function SessionTitleControl({
   handleRename,
   handleStartEdit,
   onShare,
+  onMove,
+  moveDisabled,
   clickToRenameTitle,
-  shareTitle,
+  moreActionsTitle,
+  exportTitle,
+  exportDesc,
+  moveTitle,
+  moveRunningTitle,
 }: SessionTitleControlProps) {
+  // 标题右侧的 chevron 是「会话操作」入口：导出 / 移动都收进这个菜单，
+  // 不再单独占一个按钮。
+  const [menuOpen, setMenuOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      setMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setMenuOpen(false)
+      triggerRef.current?.focus()
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen])
+
+  // 注意：进入重命名时菜单会自动收起——点击标题按钮属于「外部点击」，
+  // 上面的 mousedown 监听会先关掉菜单，无需额外 effect。
+
   const inputClass = compact
     ? 'px-2 py-1.5 text-[length:var(--fs-base)] font-medium text-text-100 bg-transparent border-none outline-none w-[160px] h-full'
     : 'px-3 py-1.5 text-[length:var(--fs-base)] font-medium text-text-100 bg-transparent border-none outline-none w-[200px] lg:w-[300px] h-full text-center'
@@ -75,9 +122,14 @@ function SessionTitleControl({
   const dividerClass = compact
     ? 'w-[1.5px] h-3 bg-border-200/50 mx-0.5 shrink-0'
     : 'w-[1.5px] h-3 bg-border-200/50 mx-0.5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(any-pointer:coarse)]:opacity-100 transition-opacity'
-  const shareButtonClass = compact
+  const menuButtonClass = compact
     ? 'p-1 text-text-400 hover:text-text-100 transition-colors rounded-md hover:bg-bg-300/50 shrink-0'
     : 'p-1 text-text-400 hover:text-text-100 transition-colors rounded-md hover:bg-bg-300/50 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(any-pointer:coarse)]:opacity-100 shrink-0'
+
+  const pick = (action: () => void) => {
+    setMenuOpen(false)
+    action()
+  }
 
   return (
     <div
@@ -104,10 +156,42 @@ function SessionTitleControl({
 
       {!isEditingTitle && (
         <>
-          <div className={dividerClass} />
-          <button type="button" className={shareButtonClass} title={shareTitle} aria-label={shareTitle} onClick={onShare}>
+          <div className={`${dividerClass} ${menuOpen ? 'opacity-100' : ''}`} />
+          <button
+            ref={triggerRef}
+            type="button"
+            className={`${menuButtonClass} ${menuOpen ? 'opacity-100' : ''}`}
+            title={moreActionsTitle}
+            aria-label={moreActionsTitle}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen(v => !v)}
+          >
             <ChevronDownIcon size={12} />
           </button>
+          <DropdownMenu
+            triggerRef={triggerRef}
+            isOpen={menuOpen}
+            position="bottom"
+            align="left"
+            minWidth="224px"
+            mobileFullWidth
+          >
+            <div ref={menuRef} role="menu" aria-label={moreActionsTitle} className="p-1">
+              <MenuItem
+                label={exportTitle}
+                description={exportDesc}
+                icon={<DownloadIcon size={14} />}
+                onClick={() => pick(onShare)}
+              />
+              <MenuItem
+                label={moveDisabled ? moveRunningTitle : moveTitle}
+                icon={<GitWorktreeIcon size={14} />}
+                disabled={moveDisabled}
+                onClick={() => pick(onMove)}
+              />
+            </div>
+          </DropdownMenu>
         </>
       )}
     </div>
@@ -137,12 +221,18 @@ export function Header({
   const { composerSelectorStyle } = useTheme()
 
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false)
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [editTitle, setEditTitle] = useState('')
   const titleInputRef = useRef<HTMLInputElement>(null)
 
   const sessionTitle = currentSessionTitle || t('header.newChat')
   const isCompact = presentation.isCompact
+
+  // 会话运行中禁止移动（官方 blocked while running）——用活跃状态判断
+  const activeSessionKey = sessionId ? makeSessionKey(serverStore.getActiveServerId(), sessionId) : ''
+  const activeEntry = useSessionActiveEntry(activeSessionKey)
+  const sessionRunning = activeEntry?.status?.type === 'busy' || activeEntry?.status?.type === 'retry'
 
   useEffect(() => {
     document.title = currentSessionTitle ? `${currentSessionTitle} - OpenCode` : 'OpenCode'
@@ -185,26 +275,26 @@ export function Header({
   }
 
   const titleControl = (
-    <>
-      <SessionTitleControl
-        compact={isCompact}
-        isEditingTitle={isEditingTitle}
-        editTitle={editTitle}
-        sessionTitle={sessionTitle}
-        titleInputRef={titleInputRef}
-        setEditTitle={setEditTitle}
-        setIsEditingTitle={setIsEditingTitle}
-        handleRename={handleRename}
-        handleStartEdit={handleStartEdit}
-        onShare={() => setShareDialogOpen(true)}
-        clickToRenameTitle={t('header.clickToRename')}
-        shareTitle={t('header.shareSession')}
-      />
-      {/* 会话移动到其他目录 / worktree（v2 session.move，官方 session-workspace-menu） */}
-      {sessionId && !isEditingTitle && (
-        <SessionMoveMenu sessionId={sessionId} directory={sessionDirectory || currentDirectory || ''} />
-      )}
-    </>
+    <SessionTitleControl
+      compact={isCompact}
+      isEditingTitle={isEditingTitle}
+      editTitle={editTitle}
+      sessionTitle={sessionTitle}
+      titleInputRef={titleInputRef}
+      setEditTitle={setEditTitle}
+      setIsEditingTitle={setIsEditingTitle}
+      handleRename={handleRename}
+      handleStartEdit={handleStartEdit}
+      onShare={() => setShareDialogOpen(true)}
+      onMove={() => setMoveDialogOpen(true)}
+      moveDisabled={sessionRunning}
+      clickToRenameTitle={t('header.clickToRename')}
+      moreActionsTitle={t('header.moreActions')}
+      exportTitle={t('header.shareSession')}
+      exportDesc={t('header.exportSessionDesc')}
+      moveTitle={t('sessionMove.title')}
+      moveRunningTitle={t('sessionMove.runningTitle')}
+    />
   )
 
   return (
@@ -283,6 +373,15 @@ export function Header({
       </div>
 
       <ShareDialog isOpen={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />
+
+      {sessionId && (
+        <SessionMoveDialog
+          isOpen={moveDialogOpen}
+          onClose={() => setMoveDialogOpen(false)}
+          sessionId={sessionId}
+          directory={sessionDirectory || currentDirectory || ''}
+        />
+      )}
 
       {/* 用纯色块 + mask 渐隐，而不是 bg-gradient：渐变类在 Tailwind v4 里默认走 oklab，
           从 bg-bg-100 插值到 transparent（透明黑）中间会带出灰，和内容叠起来就是分层。

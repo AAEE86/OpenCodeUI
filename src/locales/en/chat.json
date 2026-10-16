@@ -5,6 +5,8 @@
     "openSidebar": "Open sidebar",
     "clickToRename": "Click to rename",
     "shareSession": "Export session",
+    "moreActions": "Session actions",
+    "exportSessionDesc": "Export as JSON, importable on another device",
     "closeBottomPanel": "Close bottom panel",
     "openBottomPanel": "Open bottom panel",
     "closePanel": "Close panel",

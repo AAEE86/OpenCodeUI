@@ -5,6 +5,8 @@
     "openSidebar": "打开侧边栏",
     "clickToRename": "点击重命名",
     "shareSession": "导出会话",
+    "moreActions": "会话操作",
+    "exportSessionDesc": "导出为 JSON，可导入到其他设备",
     "closeBottomPanel": "关闭底部面板",
     "openBottomPanel": "打开底部面板",
     "closePanel": "关闭面板",

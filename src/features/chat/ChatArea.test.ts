@@ -87,6 +87,34 @@ function createTextPart(_id: string, _messageID: string, text: string): Assistan
 }
 
 describe('buildVisibleMessageEntries', () => {
+  it('keeps failed idle markers visible (session-level error must render)', () => {
+    // pre-promotion failure：只有 user + 失败 idle 标记，过滤掉它错误就永远不渲染
+    const failedIdle = {
+      id: 'idle-1',
+      type: 'idle',
+      outcome: 'failed',
+      error: { type: 'provider.no-route', message: 'Model unavailable' },
+      time: { created: 2 },
+    } as SessionMessageInfo
+    const entries = buildVisibleMessageEntries([createUserMessage('user-1', 1, '你好'), failedIdle])
+
+    expect(entries.some(e => e.message.id === 'idle-1')).toBe(true)
+  })
+
+  it('hides succeeded / interrupted idle markers', () => {
+    const okIdle = { id: 'idle-ok', type: 'idle', outcome: 'succeeded', time: { created: 2 } } as SessionMessageInfo
+    const abortedIdle = {
+      id: 'idle-abort',
+      type: 'idle',
+      outcome: 'interrupted',
+      time: { created: 3 },
+    } as SessionMessageInfo
+    const entries = buildVisibleMessageEntries([createUserMessage('user-1', 1, '你好'), okIdle, abortedIdle])
+
+    expect(entries.some(e => e.message.id === 'idle-ok')).toBe(false)
+    expect(entries.some(e => e.message.id === 'idle-abort')).toBe(false)
+  })
+
   it('keeps source ids for merged assistant tool messages', () => {
     const first = createAssistantMessage('assistant-1', [createToolPart('tool-1', 'assistant-1')])
     const second = createAssistantMessage('assistant-2', [createToolPart('tool-2', 'assistant-2')])

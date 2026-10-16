@@ -3,6 +3,7 @@ import {
   contentEntries,
   hasVisibleText,
   isAssistantMessage,
+  isFailedIdleMessage,
   isUserMessage,
   userMessageText,
 } from '../../types/api/message'
@@ -59,6 +60,9 @@ function messageHasContent(message: SessionMessageInfo): boolean {
   if (isAssistantMessage(message) && message.error) {
     return isInterruptedError(message.error) ? hasRenderable : true
   }
+  // 失败 idle 标记（会话级错误，如 pre-promotion failure）始终可见：
+  // 它没有 assistant 消息，错误卡片就是它唯一的内容（官方 isFailedIdle → Error 卡片）
+  if (isFailedIdleMessage(message)) return true
   if (!hasAnyContent(message)) {
     // 任何角色的空消息都不可见：没有内容可展示
     // 内容到达后自动进入可见列表；abort 后永远不会有内容 → 永远不可见

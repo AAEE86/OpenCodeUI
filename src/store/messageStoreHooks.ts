@@ -9,6 +9,8 @@ import { useSyncExternalStore, useRef, useCallback } from 'react'
 import { messageStore } from './messageStore'
 import { paneLayoutStore } from './paneLayoutStore'
 import type { MessageStoreSnapshot, SessionMessageInfo, SessionStateSnapshot } from './messageStoreTypes'
+import { isUserMessage, userMessageText, type UserMessage } from '../types/api/message'
+import type { HistoryAttachment, PromptHistoryEntry } from './promptHistoryStore'
 
 // ============================================
 // Snapshot Cache (避免 useSyncExternalStore 无限循环)
@@ -241,6 +243,65 @@ export function useIsStreaming(): boolean {
 /** 只订阅 messages（原生 v2 消息，按创建时间有序） */
 export function useMessages(): SessionMessageInfo[] {
   return useMessageStoreSelector(selectMessages, sameMessageArray)
+}
+
+// ============================================
+// 会话内输入历史（输入框 ↑↓ 翻阅）
+// ============================================
+//
+// 在某个 session 里时，↑↓ 应该翻阅**这个会话自己的**历史用户输入，
+// 而不是全局「最近输入」。数据直接来自该会话已加载的用户消息，
+// 映射成与全局 promptHistoryStore 相同的条目形态（附件只保留可序列化子集）。
+// ============================================
+
+/** 用户消息 → 历史条目（附件只映射可序列化子集，与全局历史同一形状） */
+function userMessageToHistoryEntry(message: UserMessage): PromptHistoryEntry {
+  const attachments: HistoryAttachment[] = []
+  for (const file of message.files ?? []) {
+    attachments.push({
+      type: 'file',
+      displayName: file.name ?? file.mention?.text ?? 'file',
+      mime: file.mime,
+      ...(file.source.type === 'uri' ? { url: file.source.uri } : {}),
+    })
+  }
+  for (const agent of message.agents ?? []) {
+    attachments.push({ type: 'agent', displayName: agent.name, agentName: agent.name })
+  }
+  for (const skill of message.skills ?? []) {
+    attachments.push({ type: 'skill', displayName: skill.name, skillId: skill.id })
+  }
+  return { text: userMessageText(message), attachments }
+}
+
+/** 当前 focused session 的用户输入历史（最新在前）；无用户消息时为空数组 */
+const selectSessionPromptHistory = (state: MessageStoreSnapshot): PromptHistoryEntry[] => {
+  const entries: PromptHistoryEntry[] = []
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const message = state.messages[i]
+    if (isUserMessage(message)) entries.push(userMessageToHistoryEntry(message))
+  }
+  return entries
+}
+
+function samePromptHistory(a: PromptHistoryEntry[], b: PromptHistoryEntry[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  return a.every((entry, i) => {
+    const other = b[i]
+    return (
+      entry.text === other.text &&
+      entry.attachments.length === other.attachments.length &&
+      entry.attachments.every(
+        (attachment, j) =>
+          attachment.type === other.attachments[j].type && attachment.displayName === other.attachments[j].displayName,
+      )
+    )
+  })
+}
+
+export function useSessionPromptHistory(): PromptHistoryEntry[] {
+  return useMessageStoreSelector(selectSessionPromptHistory, samePromptHistory)
 }
 
 /** 当前 focused session 是否已有消息（length 级，流式加字不触发） */

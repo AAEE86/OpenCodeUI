@@ -20,6 +20,7 @@ import { useMobileCollapse } from './input/useMobileCollapse'
 import { useAttachmentRail } from './input/useAttachmentRail'
 import { useInputHistory } from './input/useInputHistory'
 import { promptHistoryStore } from '../../store/promptHistoryStore'
+import { useCurrentSessionId, useSessionPromptHistory } from '../../store/messageStoreHooks'
 import { usePersistedDraft, draftStorageKey, clearPersistedDraft, readPersistedDraft } from './input/usePersistedDraft'
 import {
   TEXT_STYLE,
@@ -309,16 +310,23 @@ function InputBoxComponent({
 
   // ============================================
   // 历史消息导航（类终端体验，逻辑在 useInputHistory hook 中）
-  // 数据源：全局持久化 prompt 历史（官方 composer/history 同款）
+  // 数据源：当前会话自己的历史用户输入（在该会话里翻这个会话发过的内容），
+  // 新会话/无消息时回退全局持久化 prompt 历史（官方 composer/history 同款）
   // + 当前会话/工作区的持久化草稿（空输入按 ↑ 先召回草稿）
   // ============================================
   const draftKey = useMemo(() => draftStorageKey(sessionId, rootPath), [sessionId, rootPath])
   const draftKeyRef = useRef<string | null>(null)
   draftKeyRef.current = draftKey
+  const focusedSessionId = useCurrentSessionId()
+  const sessionPromptHistory = useSessionPromptHistory()
+  // shell 轨道没有会话内来源（shell 命令是独立消息类型），保持全局轨道
+  const historyEntries =
+    !shellMode && sessionId && sessionId === focusedSessionId ? sessionPromptHistory : null
   const { handleHistoryKeyDown, handleHistoryChange, resetHistoryIndex } = useInputHistory({
     textareaRef,
     mode: shellMode ? 'shell' : 'normal',
     recallDraft: useCallback(() => readPersistedDraft(draftKeyRef.current), []),
+    sessionEntries: historyEntries,
   })
 
   // 草稿持久化（按会话/工作区作用域，官方 composer persistence 的存储维度；

@@ -111,3 +111,71 @@ describe('useInputHistory 草稿召回', () => {
     expect(again?.text).toBe('草稿行')
   })
 })
+
+describe('useInputHistory 会话内历史', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    promptHistoryStore.reset()
+  })
+
+  function setupWithSessionEntries(sessionEntries: { text: string; attachments: [] }[] | null, globalHistory: string[] = []) {
+    localStorage.clear()
+    promptHistoryStore.reset()
+    for (const text of globalHistory) {
+      promptHistoryStore.add(text, [], 'normal')
+    }
+    const textarea = document.createElement('textarea')
+    const textareaRef = { current: textarea }
+    const { result } = renderHook(() =>
+      useInputHistory({
+        textareaRef,
+        mode: 'normal',
+        sessionEntries,
+      }),
+    )
+    return { textarea, result }
+  }
+
+  it('会话内历史非空时 ↑ 翻阅会话自己的输入，而不是全局最近输入', () => {
+    const { textarea, result } = setupWithSessionEntries(
+      [
+        { text: '本会话最新一条', attachments: [] },
+        { text: '本会话更早一条', attachments: [] },
+      ],
+      ['别的会话的最近输入'],
+    )
+    textarea.value = ''
+    textarea.setSelectionRange(0, 0)
+
+    const first = result.current.handleHistoryKeyDown(keyEvent('ArrowUp'), '', [])
+    expect(first?.text).toBe('本会话最新一条')
+
+    textarea.value = first!.text
+    textarea.setSelectionRange(0, 0)
+    const second = result.current.handleHistoryKeyDown(keyEvent('ArrowUp'), first!.text, [])
+    expect(second?.text).toBe('本会话更早一条')
+  })
+
+  it('会话内历史为空数组时回退全局持久化历史（新会话回忆最近输入）', () => {
+    const { textarea, result } = setupWithSessionEntries([], ['全局最近输入'])
+    textarea.value = ''
+    textarea.setSelectionRange(0, 0)
+
+    const recalled = result.current.handleHistoryKeyDown(keyEvent('ArrowUp'), '', [])
+    expect(recalled?.text).toBe('全局最近输入')
+  })
+
+  it('会话内历史 ↓ 越过最新一条回到进入前的输入', () => {
+    const { textarea, result } = setupWithSessionEntries([{ text: '本会话消息', attachments: [] }])
+    textarea.value = ''
+    textarea.setSelectionRange(0, 0)
+
+    const up = result.current.handleHistoryKeyDown(keyEvent('ArrowUp'), '', [])
+    expect(up?.text).toBe('本会话消息')
+
+    textarea.value = up!.text
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    const down = result.current.handleHistoryKeyDown(keyEvent('ArrowDown'), up!.text, [])
+    expect(down).toEqual({ text: '', attachments: [], cursor: 'end' })
+  })
+})

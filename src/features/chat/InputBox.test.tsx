@@ -90,6 +90,8 @@ vi.mock('../../hooks', () => ({
 
 vi.mock('../../store/messageStoreHooks', () => ({
   useMessages: () => messagesMock,
+  useCurrentSessionId: () => null,
+  useSessionPromptHistory: () => [],
 }))
 
 vi.mock('../../store/keybindingStore', () => ({

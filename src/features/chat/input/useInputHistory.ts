@@ -1,13 +1,15 @@
 import { useRef, useCallback, useEffect } from 'react'
-import { usePromptHistory, fromHistoryEntry } from '../../../store/promptHistoryStore'
+import { usePromptHistory, fromHistoryEntry, type PromptHistoryEntry } from '../../../store/promptHistoryStore'
 import type { Attachment } from '../../attachment'
 
 // ============================================
 // useInputHistory
 // 类终端的历史消息导航（↑↓ 翻阅已发送消息）
 //
-// 数据源是**全局持久化**的 prompt 历史（官方 composer/history 同款：
+// 默认数据源是**全局持久化**的 prompt 历史（官方 composer/history 同款：
 // 跨会话跨重启保留，normal/shell 分轨，发送即记账、失败移除）。
+// 传入 sessionEntries（当前会话自己的历史用户输入）时优先使用——
+// 在某个会话里翻的是这个会话发过的内容，而不是其它会话的最近输入。
 // ============================================
 
 interface HistoryEntry {
@@ -25,6 +27,11 @@ interface UseInputHistoryOptions {
    * ↓ 越过最新一条历史时回到草稿。
    */
   recallDraft?: () => HistoryEntry | null
+  /**
+   * 会话内历史（当前会话已发送的用户输入，最新在前）。
+   * 非空时替代全局历史；空数组/不传时回退全局持久化历史。
+   */
+  sessionEntries?: PromptHistoryEntry[] | null
 }
 
 interface UseInputHistoryReturn {
@@ -45,13 +52,15 @@ interface UseInputHistoryReturn {
   resetHistoryIndex: () => void
 }
 
-export function useInputHistory({ textareaRef, mode, recallDraft }: UseInputHistoryOptions): UseInputHistoryReturn {
+export function useInputHistory({ textareaRef, mode, recallDraft, sessionEntries }: UseInputHistoryOptions): UseInputHistoryReturn {
   // store 条目最新在前；导航时下标 0 = 最新一条
   const storeEntries = usePromptHistory(mode)
-  const historyRef = useRef(storeEntries)
+  // 会话内历史优先（该会话发过的输入）；没有时回退全局「最近输入」
+  const effectiveEntries = sessionEntries && sessionEntries.length > 0 ? sessionEntries : storeEntries
+  const historyRef = useRef(effectiveEntries)
   useEffect(() => {
-    historyRef.current = storeEntries
-  }, [storeEntries])
+    historyRef.current = effectiveEntries
+  }, [effectiveEntries])
 
   const recallDraftRef = useRef(recallDraft)
   useEffect(() => {

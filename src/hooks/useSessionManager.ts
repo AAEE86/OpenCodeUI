@@ -10,6 +10,8 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { logger } from '../utils/logger'
 import { messageStore, type RevertState } from '../store'
+import { LOCAL_SERVER_ID } from '../store/serverStore'
+import { useServiceStore } from '../store/serviceStore'
 import { sessionKeyToServerId } from '../utils/sessionKey'
 import { getSessionMessagesPage, getSession, revertMessage, unrevertSession } from '../api'
 import { sessionErrorHandler } from '../utils'
@@ -76,6 +78,10 @@ export function useSessionManager({
   /** 每个 session 的历史翻页 in-flight 守卫（官方 messageLoads 同款，防止并发翻页） */
   const historyLoadsRef = useRef<Map<string, Promise<boolean>>>(new Map())
   const loadSessionRef = useRef<(sid: string, options?: { force?: boolean }) => Promise<void>>(async () => {})
+  // 桌面端本地 serve 的拉起 / registry 地址回写状态（main.tsx 的
+  // initializeNativeDesktopService 期间为 true）。此刻本地地址未就绪，
+  // 向本地服务器发请求必在传输层失败。
+  const { starting: localServiceStarting } = useServiceStore()
 
   /**
    * 用游标翻一页更老的历史并前插（官方 message.loadMore 同款）。
@@ -402,22 +408,30 @@ export function useSessionManager({
   // focused pane / URL 的同步由 App 顶层统一负责，
   // 这里不再写任何“全局当前 session”状态。
   useEffect(() => {
-    if (sessionId) {
-      const cached = messageStore.getSessionState(sessionId)
-      const canUseCached = !!cached && cached.loadState === 'loaded' && !cached.isStale && cached.messages.length > 0
+    if (!sessionId) return
 
-      if (canUseCached) {
-        logger.log('[SessionManager] switch:use-cached', {
-          sessionId,
-          cachedCount: cached.messages.length,
-        })
-        return
-      }
+    const cached = messageStore.getSessionState(sessionId)
+    const canUseCached = !!cached && cached.loadState === 'loaded' && !cached.isStale && cached.messages.length > 0
 
-      logger.log('[SessionManager] switch:fetch-session', { sessionId })
-      void loadSessionRef.current(sessionId)
+    if (canUseCached) {
+      logger.log('[SessionManager] switch:use-cached', {
+        sessionId,
+        cachedCount: cached.messages.length,
+      })
+      return
     }
-  }, [sessionId])
+
+    // 本地 serve 还在拉起 / registry 地址回写：此刻向本地服务器发请求必在
+    // 传输层失败（ClientError: Transport），且失败态没有重试入口会卡住。
+    // 等 starting 翻回 false（地址已就绪）再加载。
+    if (localServiceStarting && sessionKeyToServerId(sessionId) === LOCAL_SERVER_ID) {
+      logger.log('[SessionManager] switch:wait-local-service', { sessionId })
+      return
+    }
+
+    logger.log('[SessionManager] switch:fetch-session', { sessionId })
+    void loadSessionRef.current(sessionId)
+  }, [sessionId, localServiceStarting])
 
   return {
     loadSession,

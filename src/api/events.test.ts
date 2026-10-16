@@ -352,4 +352,33 @@ describe('v2 event dispatch', () => {
 
     unsubscribe()
   })
+
+  /**
+   * 从未连上过（本地 serve 启动竞态：初始拉取在端点就绪前已失败），
+   * 端点变更强制重连后的首个成功连接也必须广播补偿，否则失败态不自愈。
+   */
+  it('broadcasts onReconnected on first connect after reconnectServerSSE when never connected', async () => {
+    const harnesses: Array<ReturnType<typeof createEventStream>> = []
+    subscribeMock.mockImplementation(() => {
+      const harness = createEventStream()
+      harnesses.push(harness)
+      return harness.stream
+    })
+
+    const { subscribeToServerEvents, reconnectServerSSE } = await import('./events')
+    const onReconnected = vi.fn()
+    const unsubscribe = subscribeToServerEvents('test-server', { onReconnected })
+    await Promise.resolve()
+
+    // 首条流不推任何事件 → hasConnectedBefore 保持 false（从未连上）
+    reconnectServerSSE('test-server')
+    await Promise.resolve()
+    expect(harnesses.length).toBe(2)
+
+    harnesses[1].emit(v2Event('session.idle', { sessionID: 's1' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(onReconnected).toHaveBeenCalledWith('server-switch')
+
+    unsubscribe()
+  })
 })

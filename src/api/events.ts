@@ -66,6 +66,15 @@ const connectionListeners = new Map<string, Set<(info: ConnectionInfo) => void>>
 /** 是否因为切换服务器而触发的重连（按 serverId） */
 const serverSwitchFlags = new Map<string, boolean>()
 
+/**
+ * 端点变更（reconnectServerSSE）触发、但此前从未成功连接过的重连（按 serverId）。
+ * 与 serverSwitchFlags 分开：subscribeToEvents 切服务器也用后者，那条链路的
+ * 数据刷新由 server-change 监听器负责，首个连接不能重复广播；而这里针对的是
+ * 「本地 serve 就绪地址回写 / WSL 换端口后，初始拉取已在端点就绪前失败」，
+ * 首个成功连接必须广播让订阅者补偿拉取，否则失败态没有重试入口。
+ */
+const endpointReconnectFlags = new Map<string, boolean>()
+
 let lifecycleListenersRegistered = false
 let isInBackground = false
 let keepaliveTimer: ReturnType<typeof setInterval> | null = null
@@ -563,15 +572,20 @@ async function connectServer(serverId: string): Promise<void> {
 
       if (!conn.hasConnectedBefore) {
         conn.hasConnectedBefore = true
-        // 首次连接不广播 onReconnected：初始加载由各订阅方自己拉取；
-        // 若本次连接是服务器切换后的重连，清掉标记即可（切服务器的
-        // 数据刷新由 server-change 链路负责）
+        // 首次连接一般不广播 onReconnected：初始加载由各订阅方自己拉取。
+        // 但端点变更触发的重连（本地 serve 就绪 / WSL 换端口），此前的初始
+        // 拉取可能已在端点就绪前失败，必须广播让订阅者补偿拉取。
+        const endpointReconnect = endpointReconnectFlags.get(serverId) === true
+        endpointReconnectFlags.delete(serverId)
         serverSwitchFlags.delete(serverId)
         updateConnectionState(serverId, {
           state: 'connected',
           reconnectAttempt: 0,
           error: undefined,
         })
+        if (endpointReconnect) {
+          broadcastReconnected(conn, 'server-switch')
+        }
       } else if (conn.info.state !== 'connected') {
         updateConnectionState(serverId, { state: 'connected', reconnectAttempt: 0, error: undefined })
         // 掉线后的**重连成功**：断线窗口错过的事件协议明确不补发，
@@ -730,6 +744,9 @@ export function reconnectServerSSE(serverId: string): void {
   if (hadConnected) {
     conn.hasConnectedBefore = true
     serverSwitchFlags.set(serverId, true)
+  } else {
+    // 此前从未连上：首个成功连接也要走补偿广播（见 endpointReconnectFlags 注释）
+    endpointReconnectFlags.set(serverId, true)
   }
   if (conn.subscribers.size > 0) {
     connectServer(serverId)

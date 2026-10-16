@@ -67,11 +67,11 @@ export const PluginsPanel = memo(function PluginsPanel({ isResizing: _isResizing
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border-200/40 shrink-0">
-        <div className="flex items-center gap-1.5 text-[length:var(--fs-sm)] text-text-300 font-medium">
+      {/* Header（横线风格与 McpPanel 一致：独立 h-px 细线、两侧内缩） */}
+      <div className="relative flex h-10 items-center justify-between px-3 shrink-0">
+        <div className="flex h-6 min-w-0 items-center gap-1.5 text-text-100 text-[length:var(--fs-xs)] font-medium">
           <PlugIcon size={13} className="text-text-400" />
-          {t('pluginsPanel.title')}
+          <span>{t('pluginsPanel.title')}</span>
         </div>
         <button
           type="button"
@@ -81,10 +81,11 @@ export const PluginsPanel = memo(function PluginsPanel({ isResizing: _isResizing
           }}
           title={t('common:retry')}
           aria-label={t('common:retry')}
-          className="p-1 rounded-md text-text-400 hover:text-text-100 hover:bg-bg-200/50 transition-colors"
+          className="inline-flex h-6 w-6 items-center justify-center hover:bg-bg-200/50 rounded-md text-text-300 hover:text-text-100 transition-colors"
         >
           <RetryIcon size={12} />
         </button>
+        <div className="pointer-events-none absolute inset-x-3 bottom-0 h-px bg-border-200/30" />
       </div>
 
       {/* List */}
@@ -105,14 +106,27 @@ export const PluginsPanel = memo(function PluginsPanel({ isResizing: _isResizing
           </div>
         ) : (
           <div className="space-y-0.5">
-            {plugins.map(plugin => {
-              const label = pluginLabel(plugin)
-              const state = plugin.state
-              const failed = state.status === 'failed'
-              const source = plugin.source
-              const pkg = source.type === 'package' ? source : null
-              const outdated = pkg?.outdated === true
-              const updatingThis = updating !== null && pkg?.target === updating
+             {plugins.map(plugin => {
+               const label = pluginLabel(plugin)
+               const state = plugin.state
+               const failed = state.status === 'failed'
+               const source = plugin.source
+               const pkg = source.type === 'package' ? source : null
+               const outdated = pkg?.outdated === true
+               const updatingThis = updating !== null && pkg?.target === updating
+               // 来源位置：local → 路径；package → target@version；sdk → 类型标签。
+               // 加载失败的插件没有 id，标题本身已回退成路径（即位置），所以失败时副标题留给错误信息；
+               // 正常加载的插件标题是 id（名字），位置要在副标题显示出来。
+               const location =
+                 source.type === 'local'
+                   ? source.path
+                   : pkg
+                     ? pkg.version
+                       ? `${pkg.target}@${pkg.version}`
+                       : pkg.target
+                     : t(`pluginsPanel.source.${source.type}`)
+               // 位置与标题相同（如无 id 的 local 插件）时不重复，退回类型标签
+               const secondary = location === label ? t(`pluginsPanel.source.${source.type}`) : location
               return (
                 <div key={label} className="group flex items-center gap-2.5 px-2 py-2 rounded-md hover:bg-bg-200/50 transition-colors">
                   <div className="w-7 h-7 rounded-md bg-bg-200/60 flex items-center justify-center shrink-0">
@@ -128,8 +142,8 @@ export const PluginsPanel = memo(function PluginsPanel({ isResizing: _isResizing
                           {t('pluginsPanel.failed')}: {state.error}
                         </span>
                       ) : (
-                        <span className="text-text-400/70">
-                          {pkg?.version ? `${pkg.target}@${pkg.version}` : t(`pluginsPanel.source.${source.type}`)}
+                        <span className="text-text-400/70" title={location}>
+                          {secondary}
                         </span>
                       )}
                     </div>

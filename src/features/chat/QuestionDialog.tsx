@@ -73,7 +73,7 @@ export function QuestionDialog({
   return (
     <div ref={animRef} className="absolute bottom-0 left-0 right-0 z-[10]" onKeyDown={handleKeyDown}>
       <div
-        className="mx-auto max-w-3xl pointer-events-auto transition-[max-width] duration-300 ease-in-out pb-2"
+        className="mx-auto max-w-[min(100%,var(--oc-chat-input-width,48rem))] pointer-events-auto transition-[max-width] duration-300 ease-in-out pb-2"
         style={{
           paddingLeft: isCompact ? 6 : 14,
           paddingRight: isCompact ? 6 : 14,

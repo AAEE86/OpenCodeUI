@@ -1415,7 +1415,7 @@ function InputBoxComponent({
   return (
     <div className="w-full">
       <div
-        className={`mx-auto max-w-3xl transition-[max-width] duration-300 ease-in-out ${isCompact ? 'px-2' : 'px-4'} ${
+        className={`mx-auto max-w-[min(100%,var(--oc-chat-input-width,48rem))] transition-[max-width] duration-300 ease-in-out ${isCompact ? 'px-2' : 'px-4'} ${
           isCollapsed ? 'pointer-events-none' : 'pointer-events-auto'
         }`}
         style={{ paddingBottom: bottomDockPadding }}

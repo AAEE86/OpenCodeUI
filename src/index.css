@@ -1258,3 +1258,41 @@ body {
     transition: none;
   }
 }
+
+/* ── 对话列/输入框宽度拖拽把手（样式抄 dsh ConversationWidthControls）──
+   10px 热区条带贴在内容列左缘外 24px 的 gutter；辉光是 2px 短条，
+   跟随指针 Y（16px 实心核、两侧各 28px 渐隐），不是整条竖线；
+   平时 opacity 0 完全隐藏，hover / 拖拽中才显示 */
+.chat-width-handle {
+  position: absolute;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  z-index: 30;
+}
+
+.chat-width-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 4px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to bottom,
+    transparent calc(var(--oc-width-handle-pointer-y, 50%) - 36px),
+    hsl(var(--border-300)) calc(var(--oc-width-handle-pointer-y, 50%) - 8px),
+    hsl(var(--border-300)) calc(var(--oc-width-handle-pointer-y, 50%) + 8px),
+    transparent calc(var(--oc-width-handle-pointer-y, 50%) + 36px)
+  );
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+
+.chat-width-handle:hover::after,
+.chat-width-handle[data-dragging]::after {
+  opacity: 1;
+}

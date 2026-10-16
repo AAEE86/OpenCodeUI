@@ -293,6 +293,18 @@ export function useTheme() {
     isWideMode: state.wideMode,
     toggleWideMode: themeStore.toggleWideMode.bind(themeStore),
 
+    // 对话列自定义宽度（px，左缘拖拽设置；null = 跟随宽屏模式默认）
+    chatContentWidth: state.chatContentWidth,
+    setChatContentWidth: useCallback((width: number | null) => {
+      themeStore.setChatContentWidth(width)
+    }, []),
+
+    // 输入框自定义宽度（px，左缘拖拽设置；null = 默认 3xl=768）
+    chatInputWidth: state.chatInputWidth,
+    setChatInputWidth: useCallback((width: number | null) => {
+      themeStore.setChatInputWidth(width)
+    }, []),
+
     // Diff 行标记风格
     diffStyle: state.diffStyle,
     setDiffStyle,

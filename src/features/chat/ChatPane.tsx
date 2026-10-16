@@ -6,7 +6,7 @@
  * compact viewport wrapper.
  */
 
-import { memo, useRef, useEffect, useState, useCallback, useMemo, useDeferredValue, useSyncExternalStore } from 'react'
+import { memo, useRef, useEffect, useState, useCallback, useMemo, useDeferredValue, useSyncExternalStore, type CSSProperties } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 
 import { ChatArea, Header, InputBox, PermissionDialog, QuestionDialog, type ChatAreaHandle } from '.'
@@ -15,6 +15,13 @@ import { type ModelSelectorHandle } from './ModelSelector'
 import { OutlineIndex } from '../../components/OutlineIndex'
 import { PaneHeader } from './PaneHeader'
 import { PaneDropOverlay, resolveDropZone, type DropZone, type PaneDropOverlayHandle } from './PaneDropOverlay'
+import {
+  ChatWidthHandle,
+  CHAT_COLUMN_WIDTH_VAR,
+  CHAT_INPUT_WIDTH_VAR,
+  MIN_CHAT_CONTENT_WIDTH,
+  DEFAULT_INPUT_WIDTH,
+} from './ChatWidthHandle'
 import { useFolderProjectDrop } from './useFolderProjectDrop'
 import { FolderProjectDropOverlay } from './FolderProjectDropOverlay'
 import { useChatSession, useModels, useModelSelection } from '../../hooks'
@@ -826,7 +833,62 @@ export const ChatPane = memo(function ChatPane({
   const [permissionCollapsed, setPermissionCollapsed] = useState(false)
   const [questionCollapsed, setQuestionCollapsed] = useState(false)
 
-  const { inlineToolRequests, outlineCurrentHighlight } = useTheme()
+  const {
+    inlineToolRequests,
+    outlineCurrentHighlight,
+    isWideMode,
+    chatContentWidth,
+    setChatContentWidth,
+    chatInputWidth,
+    setChatInputWidth,
+  } = useTheme()
+
+  // ── 对话列/输入框宽度（左缘拖拽调宽，两个独立把手）──
+  // 样式与交互抄 dsh ConversationWidthControls，按需求收窄成左缘单把手 × 2：
+  // 把手（调整入口）只在桌面端单 panel / pane 全屏时挂载（分屏空间太碎不给拖），
+  // 但调出来的自定义宽度对所有场景生效，分屏小 panel 也按它渲染
+  // （pane 装不下时由 CSS 的 min(100%,…) 收到 100%）。
+  // 两个宽度走 pane 根上的两个 CSS 变量，ChatArea 消息列、InputBox、
+  // 各级 dock 的 max-width 都引用它们，拖拽期间直接写变量零 React 渲染。
+  // 恢复默认 = 设置里切换宽屏模式（开或关都会清掉两个自定义宽度，themeStore.setWideMode）。
+  const isDesktopSurface = outerViewport ? !outerViewport.presentation.isCompact : false
+  const canAdjustChatWidth = isDesktopSurface && (displayMode === 'single' || isPaneFullscreen)
+  const [paneWidth, setPaneWidth] = useState(0)
+  useEffect(() => {
+    const el = paneRootRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const width = entries[0]?.contentRect.width
+      if (width) setPaneWidth(Math.round(width))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const outerViewportWidth = outerViewport?.layout.viewportWidth ?? 0
+  // 默认宽度对齐原 Tailwind 类：窄 max-w-2xl(672)；宽 max-w-[95%] xl:max-w-6xl
+  // （xl 断点看视口宽而非 pane 宽，≥1280 时才收 72rem=1152 的上限）
+  const defaultChatColumnWidth = isWideMode
+    ? paneWidth > 0
+      ? outerViewportWidth >= 1280
+        ? Math.min(paneWidth * 0.95, 1152)
+        : paneWidth * 0.95
+      : 1152
+    : 672
+  const customChatColumnWidth = chatContentWidth
+  const customChatInputWidth = chatInputWidth
+  // 两侧各留 48px gutter：把手条带贴在内容列外 24px、宽 10px，拖拽到最宽时把手仍不贴边。
+  // 只在可调模式 clamp——分屏等不可调场景保持原行为（CSS 的 min(100%,…) 自然兜住溢出）
+  const maxChatColumnWidth =
+    canAdjustChatWidth && paneWidth > 0 ? Math.max(MIN_CHAT_CONTENT_WIDTH, paneWidth - 96) : Number.MAX_SAFE_INTEGER
+  const chatColumnWidth = Math.min(
+    Math.max(customChatColumnWidth ?? defaultChatColumnWidth, MIN_CHAT_CONTENT_WIDTH),
+    maxChatColumnWidth,
+  )
+  // 输入框宽度独立调整；默认固定 3xl(768)
+  const resolvedChatInputWidth = Math.min(
+    Math.max(customChatInputWidth ?? DEFAULT_INPUT_WIDTH, MIN_CHAT_CONTENT_WIDTH),
+    maxChatColumnWidth,
+  )
 
   // inline 模式下未被任何工具卡片认领的 family 请求仍走底部会话级弹窗——
   // 典型场景：刷新后运行中的子代理要权限（progress 不落库，metadata.sessionID
@@ -1097,6 +1159,19 @@ export const ChatPane = memo(function ChatPane({
               : undefined
           }
         />
+        {/* 输入框左缘拖拽把手（与对话列把手独立，各调各的宽度） */}
+        {canAdjustChatWidth && paneWidth > 0 && (
+          <ChatWidthHandle
+            rootRef={paneRootRef}
+            width={resolvedChatInputWidth}
+            maxWidth={maxChatColumnWidth}
+            onCommit={setChatInputWidth}
+            cssVar={CHAT_INPUT_WIDTH_VAR}
+            title={t('inputWidthDragHint')}
+            className="inset-y-0 pointer-events-auto"
+            style={{ right: `calc(50% + var(${CHAT_INPUT_WIDTH_VAR}) / 2 + 24px)` }}
+          />
+        )}
       </div>
 
       <BtwDialog
@@ -1142,7 +1217,7 @@ export const ChatPane = memo(function ChatPane({
       {/* websearch.provider 表单 → 专用 dock（官方 session-websearch-dock） */}
       {visibleWebsearchRequest && (
         <div className="absolute bottom-0 left-0 right-0 z-[9] pointer-events-none">
-          <div className="mx-auto max-w-3xl px-3.5 pb-2">
+          <div className="mx-auto max-w-[min(100%,var(--oc-chat-input-width,48rem))] px-3.5 pb-2">
             <WebsearchDock
               form={visibleWebsearchRequest}
               directory={effectiveDirectory}
@@ -1159,6 +1234,12 @@ export const ChatPane = memo(function ChatPane({
       <div
         ref={paneRootRef}
         data-chat-pane-root="true"
+        style={
+          {
+            [CHAT_COLUMN_WIDTH_VAR]: `${chatColumnWidth}px`,
+            [CHAT_INPUT_WIDTH_VAR]: `${resolvedChatInputWidth}px`,
+          } as CSSProperties
+        }
         className={
           showCompactShell
             ? `relative h-full flex flex-col overflow-hidden rounded-lg transition-colors duration-200 ${
@@ -1186,6 +1267,18 @@ export const ChatPane = memo(function ChatPane({
           />
         )}
         {chatContent}
+        {canAdjustChatWidth && paneWidth > 0 && (
+          <ChatWidthHandle
+            rootRef={paneRootRef}
+            width={chatColumnWidth}
+            maxWidth={maxChatColumnWidth}
+            onCommit={setChatContentWidth}
+            cssVar={CHAT_COLUMN_WIDTH_VAR}
+            title={t('widthDragHint')}
+            className="top-10 bottom-0"
+            style={{ right: `calc(50% + var(${CHAT_COLUMN_WIDTH_VAR}) / 2 + 24px)` }}
+          />
+        )}
         <PaneDropOverlay ref={overlayRef} />
         <FolderProjectDropOverlay active={isFolderDropActive} />
       </div>

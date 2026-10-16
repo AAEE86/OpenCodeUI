@@ -131,6 +131,8 @@
     "editCancel": "Cancel edit",
     "dragReorder": "Drag to reorder"
   },
+  "widthDragHint": "Drag to adjust chat width (toggle widescreen mode to reset)",
+  "inputWidthDragHint": "Drag to adjust input width (toggle widescreen mode to reset)",
   "permissionDialog": {
     "permission": "Permission: {{permission}}",
     "moreCount": "+{{count}} more",

@@ -200,6 +200,10 @@ export interface ThemeState {
   reasoningDisplayMode: ReasoningDisplayMode
   /** 宽模式 */
   wideMode: boolean
+  /** 对话列自定义宽度（px，左缘拖拽设置；null = 跟随宽屏模式默认） */
+  chatContentWidth: number | null
+  /** 输入框自定义宽度（px，左缘拖拽设置；null = 默认 3xl=768） */
+  chatInputWidth: number | null
   /** Diff 行标记风格 */
   diffStyle: DiffStyle
   /** 是否启用带工具描述的 steps 摘要 */
@@ -265,6 +269,8 @@ const STORAGE_KEY_STEP_FINISH_DISPLAY = 'step-finish-display'
 const STORAGE_KEY_COMPLETED_AT_FORMAT = 'completed-at-format'
 const STORAGE_KEY_REASONING_DISPLAY_MODE = 'reasoning-display-mode'
 const STORAGE_KEY_WIDE_MODE = 'chat-wide-mode'
+const STORAGE_KEY_CHAT_CONTENT_WIDTH = 'chat-content-width'
+const STORAGE_KEY_CHAT_INPUT_WIDTH = 'chat-input-width'
 const STORAGE_KEY_DIFF_STYLE = 'diff-style'
 const STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS = 'descriptive-tool-steps'
 const STORAGE_KEY_INLINE_TOOL_REQUESTS = 'inline-tool-requests'
@@ -363,6 +369,12 @@ class ThemeStore {
       savedCompletedAtFormat === 'dateTime' ? 'dateTime' : DEFAULT_COMPLETED_AT_FORMAT
 
     const savedWideMode = localStorage.getItem(STORAGE_KEY_WIDE_MODE) === 'true'
+    const rawChatContentWidth = Number(localStorage.getItem(STORAGE_KEY_CHAT_CONTENT_WIDTH))
+    const savedChatContentWidth =
+      Number.isFinite(rawChatContentWidth) && rawChatContentWidth > 0 ? rawChatContentWidth : null
+    const rawChatInputWidth = Number(localStorage.getItem(STORAGE_KEY_CHAT_INPUT_WIDTH))
+    const savedChatInputWidth =
+      Number.isFinite(rawChatInputWidth) && rawChatInputWidth > 0 ? rawChatInputWidth : null
     const savedDiffStyle = localStorage.getItem(STORAGE_KEY_DIFF_STYLE) as DiffStyle | null
     const diffStyle: DiffStyle = savedDiffStyle === 'changeBars' ? 'changeBars' : DEFAULT_DIFF_STYLE
 
@@ -477,6 +489,8 @@ class ThemeStore {
       completedAtFormat,
       reasoningDisplayMode,
       wideMode: savedWideMode,
+      chatContentWidth: savedChatContentWidth,
+      chatInputWidth: savedChatInputWidth,
       diffStyle,
       descriptiveToolSteps,
       inlineToolRequests,
@@ -541,6 +555,12 @@ class ThemeStore {
   }
   get wideMode() {
     return this.state.wideMode
+  }
+  get chatContentWidth() {
+    return this.state.chatContentWidth
+  }
+  get chatInputWidth() {
+    return this.state.chatInputWidth
   }
   get diffStyle() {
     return this.state.diffStyle
@@ -806,8 +826,29 @@ class ThemeStore {
 
   setWideMode(enabled: boolean) {
     if (this.state.wideMode === enabled) return
-    this.state = { ...this.state, wideMode: enabled }
+    // 切换宽屏模式（开或关都算）会重置左缘拖拽的自定义宽度（对话列 + 输入框），回到所选模式的默认宽度
+    this.state = { ...this.state, wideMode: enabled, chatContentWidth: null, chatInputWidth: null }
     localStorage.setItem(STORAGE_KEY_WIDE_MODE, String(enabled))
+    localStorage.removeItem(STORAGE_KEY_CHAT_CONTENT_WIDTH)
+    localStorage.removeItem(STORAGE_KEY_CHAT_INPUT_WIDTH)
+    this.emit()
+  }
+
+  setChatContentWidth(width: number | null) {
+    const next = width !== null && Number.isFinite(width) && width > 0 ? Math.round(width) : null
+    if (this.state.chatContentWidth === next) return
+    this.state = { ...this.state, chatContentWidth: next }
+    if (next === null) localStorage.removeItem(STORAGE_KEY_CHAT_CONTENT_WIDTH)
+    else localStorage.setItem(STORAGE_KEY_CHAT_CONTENT_WIDTH, String(next))
+    this.emit()
+  }
+
+  setChatInputWidth(width: number | null) {
+    const next = width !== null && Number.isFinite(width) && width > 0 ? Math.round(width) : null
+    if (this.state.chatInputWidth === next) return
+    this.state = { ...this.state, chatInputWidth: next }
+    if (next === null) localStorage.removeItem(STORAGE_KEY_CHAT_INPUT_WIDTH)
+    else localStorage.setItem(STORAGE_KEY_CHAT_INPUT_WIDTH, String(next))
     this.emit()
   }
 
@@ -1209,6 +1250,12 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
         ? parsed.reasoningDisplayMode
         : DEFAULT_REASONING_DISPLAY_MODE,
     wideMode: parsed?.wideMode === true,
+    chatContentWidth:
+      typeof parsed?.chatContentWidth === 'number' && parsed.chatContentWidth > 0
+        ? parsed.chatContentWidth
+        : null,
+    chatInputWidth:
+      typeof parsed?.chatInputWidth === 'number' && parsed.chatInputWidth > 0 ? parsed.chatInputWidth : null,
     diffStyle: parsed?.diffStyle === 'changeBars' ? 'changeBars' : DEFAULT_DIFF_STYLE,
     descriptiveToolSteps:
       typeof parsed?.descriptiveToolSteps === 'boolean' ? parsed.descriptiveToolSteps : DEFAULT_DESCRIPTIVE_TOOL_STEPS,
@@ -1303,6 +1350,10 @@ export function importThemeBackup(raw: unknown): void {
   localStorage.setItem(STORAGE_KEY_COMPLETED_AT_FORMAT, backup.completedAtFormat)
   localStorage.setItem(STORAGE_KEY_REASONING_DISPLAY_MODE, backup.reasoningDisplayMode)
   localStorage.setItem(STORAGE_KEY_WIDE_MODE, String(backup.wideMode))
+  if (backup.chatContentWidth === null) localStorage.removeItem(STORAGE_KEY_CHAT_CONTENT_WIDTH)
+  else localStorage.setItem(STORAGE_KEY_CHAT_CONTENT_WIDTH, String(backup.chatContentWidth))
+  if (backup.chatInputWidth === null) localStorage.removeItem(STORAGE_KEY_CHAT_INPUT_WIDTH)
+  else localStorage.setItem(STORAGE_KEY_CHAT_INPUT_WIDTH, String(backup.chatInputWidth))
   localStorage.setItem(STORAGE_KEY_DIFF_STYLE, backup.diffStyle)
   localStorage.setItem(STORAGE_KEY_DESCRIPTIVE_TOOL_STEPS, String(backup.descriptiveToolSteps))
   localStorage.setItem(STORAGE_KEY_INLINE_TOOL_REQUESTS, String(backup.inlineToolRequests))

@@ -374,11 +374,13 @@ export const ChatArea = memo(
       ref,
     ) => {
       const { t } = useTranslation('chat')
-      const { isWideMode, processCollapseEnabled } = useTheme()
+      const { processCollapseEnabled } = useTheme()
       const { presentation } = useChatViewport()
       const atBottomThreshold = presentation.isCompact ? 150 : AT_BOTTOM_THRESHOLD_PX
       const paddingClass = presentation.isCompact ? 'px-3' : 'px-5'
-      const maxWidthClass = isWideMode ? 'max-w-[95%] xl:max-w-6xl' : 'max-w-2xl'
+      // 消息列宽统一引用 pane 根上的 CSS 变量（ChatPane 按 窄672/宽95%·6xl/拖拽自定义 解析），
+      // 变量缺席时回落 42rem(=原 max-w-2xl)。字符串恒定，VirtualRow memo 比较不受影响
+      const maxWidthClass = 'max-w-[min(100%,var(--oc-chat-column-width,42rem))]'
 
       // ── 派生数据 ──
       const entries = useMemo(

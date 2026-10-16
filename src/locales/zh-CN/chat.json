@@ -131,6 +131,8 @@
     "editCancel": "取消编辑",
     "dragReorder": "拖拽调整顺序"
   },
+  "widthDragHint": "拖动调整对话宽度（切换宽屏模式可恢复默认）",
+  "inputWidthDragHint": "拖动调整输入框宽度（切换宽屏模式可恢复默认）",
   "permissionDialog": {
     "permission": "权限：{{permission}}",
     "moreCount": "还有 {{count}} 个",

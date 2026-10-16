@@ -15,6 +15,7 @@
     "local": "Local (project root)",
     "empty": "No directories to move to",
     "newWorktree": "Create & move",
+    "newWorktreeSection": "New worktree",
     "newWorktreePlaceholder": "New worktree name",
     "runningTitle": "Session is running, cannot move"
   },

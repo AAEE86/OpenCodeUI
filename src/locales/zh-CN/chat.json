@@ -15,6 +15,7 @@
     "local": "本地（项目根）",
     "empty": "没有可移动的目录",
     "newWorktree": "新建并移入",
+    "newWorktreeSection": "新建 Worktree",
     "newWorktreePlaceholder": "新 Worktree 名称",
     "runningTitle": "会话运行中，暂不能移动"
   },

@@ -5,11 +5,15 @@
 //   - 目标列表 = 项目根（本地）+ 新建 worktree + 现有 worktree
 //   - 会话运行中禁止移动（blocked while running）
 //   - 成功后服务端发 session.moved，各列表据此增删
+//
+// 交互是 Dialog（ui/Dialog）：头部触发按钮不变，
+// 点开是居中的目标选择弹窗，底部是新建 worktree 区。
 // ============================================
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { GitWorktreeIcon, SpinnerIcon } from '../../components/Icons'
+import { FolderIcon, GitWorktreeIcon, SpinnerIcon } from '../../components/Icons'
+import { Button, Dialog } from '../../components/ui'
 import { getCurrentProject, moveSession } from '../../api/client'
 import { listWorktreeEntries, createWorktree } from '../../api/worktree'
 import { useSessionActiveEntry } from '../../store/activeSessionStore'
@@ -35,12 +39,12 @@ export function SessionMoveMenu({ sessionId, directory }: SessionMoveMenuProps) 
   const { t } = useTranslation(['chat', 'common'])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [moving, setMoving] = useState(false)
+  /** 正在移入的目标目录（行内 spinner，同时禁用其它行） */
+  const [movingTo, setMovingTo] = useState<string | null>(null)
   const [targets, setTargets] = useState<MoveTarget[]>([])
   const [projectID, setProjectID] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
-  const boxRef = useRef<HTMLDivElement>(null)
 
   // 官方 blocked()：会话运行中禁止移动
   const activeKey = makeSessionKey(serverStore.getActiveServerId(), sessionId)
@@ -79,19 +83,9 @@ export function SessionMoveMenu({ sessionId, directory }: SessionMoveMenuProps) 
     }
   }, [directory, t])
 
-  // 点击外部关闭
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (e: PointerEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [open])
-
   const handleMove = async (destination: string) => {
-    if (moving) return
-    setMoving(true)
+    if (movingTo) return
+    setMovingTo(destination)
     try {
       await moveSession(sessionId, destination)
       setOpen(false)
@@ -99,7 +93,7 @@ export function SessionMoveMenu({ sessionId, directory }: SessionMoveMenuProps) 
     } catch (e) {
       uiErrorHandler('move session', e)
     } finally {
-      setMoving(false)
+      setMovingTo(null)
     }
   }
 
@@ -119,84 +113,92 @@ export function SessionMoveMenu({ sessionId, directory }: SessionMoveMenuProps) 
   }
 
   return (
-    <div ref={boxRef} className="relative shrink-0">
+    <>
       <button
         type="button"
-        disabled={running || moving}
+        disabled={running || movingTo !== null}
         onClick={e => {
           e.stopPropagation()
-          const next = !open
-          setOpen(next)
-          if (next) void loadTargets()
+          setOpen(true)
+          void loadTargets()
         }}
         title={running ? t('chat:sessionMove.runningTitle') : t('chat:sessionMove.title')}
         aria-label={t('chat:sessionMove.title')}
-        className="p-1 text-text-400 hover:text-text-100 transition-colors rounded-md hover:bg-bg-300/50 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="p-1 text-text-400 hover:text-text-100 transition-colors rounded-md hover:bg-bg-300/50 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
       >
-        {moving ? <SpinnerIcon size={12} className="animate-spin" /> : <GitWorktreeIcon size={12} />}
+        {movingTo !== null ? <SpinnerIcon size={12} className="animate-spin" /> : <GitWorktreeIcon size={12} />}
       </button>
 
-      {open && (
-        <div
-          data-dropdown-open
-          className="absolute z-50 top-full right-0 mt-1 w-56 glass border border-border-200/60 rounded-xl shadow-lg overflow-hidden"
-          onClick={e => e.stopPropagation()}
-        >
-          <div className="px-2.5 py-1.5 text-[length:var(--fs-xs)] text-text-400 border-b border-border-200/40">
-            {t('chat:sessionMove.title')}
-          </div>
-          <div className="max-h-56 overflow-y-auto custom-scrollbar p-1">
+      <Dialog isOpen={open} onClose={() => setOpen(false)} title={t('chat:sessionMove.title')} width={480}>
+        <div className="flex flex-col gap-4">
+          {/* 目标列表：项目根 + 现有 worktree */}
+          <div className="flex flex-col gap-1">
             {loading ? (
-              <div className="flex items-center justify-center gap-2 py-3 text-text-400 text-[length:var(--fs-sm)]">
-                <SpinnerIcon size={12} className="animate-spin" />
+              <div className="flex items-center justify-center gap-2 py-6 text-text-400">
+                <SpinnerIcon size={14} className="animate-spin" />
               </div>
             ) : targets.length === 0 ? (
-              <div className="px-2 py-2 text-[length:var(--fs-sm)] text-text-400">{t('chat:sessionMove.empty')}</div>
+              <div className="py-4 text-center text-[length:var(--fs-base)] text-text-400">
+                {t('chat:sessionMove.empty')}
+              </div>
             ) : (
               targets.map(target => (
                 <button
                   key={target.directory}
                   type="button"
-                  disabled={moving}
+                  disabled={movingTo !== null || creating}
                   onClick={() => void handleMove(target.directory)}
-                  title={target.directory}
-                  className="w-full px-2 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-100/60 hover:text-text-100 rounded-md transition-colors truncate disabled:opacity-50"
+                  className="group flex w-full items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-bg-100/60 transition-colors disabled:opacity-50"
                 >
-                  {target.label}
+                  {target.kind === 'worktree' ? (
+                    <GitWorktreeIcon size={16} className="shrink-0 text-text-400 group-hover:text-text-200" />
+                  ) : (
+                    <FolderIcon size={16} className="shrink-0 text-text-400 group-hover:text-text-200" />
+                  )}
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[length:var(--fs-base)] text-text-100 truncate">{target.label}</span>
+                    <span className="block text-[length:var(--fs-xs)] text-text-400 truncate" title={target.directory}>
+                      {target.directory}
+                    </span>
+                  </span>
+                  {movingTo === target.directory && <SpinnerIcon size={14} className="shrink-0 animate-spin text-text-400" />}
                 </button>
               ))
             )}
           </div>
+
           {/* 新建 worktree 并移入（官方菜单的 "create" 项） */}
           {projectID && (
-            <div className="flex items-center gap-1 px-1.5 py-1.5 border-t border-border-200/40">
-              <input
-                type="text"
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    void handleCreateAndMove()
-                  }
-                }}
-                placeholder={t('chat:sessionMove.newWorktreePlaceholder')}
-                disabled={creating || moving}
-                className="flex-1 min-w-0 bg-bg-000 border border-border-200 rounded-md px-2 py-1 text-[length:var(--fs-xs)] text-text-100 placeholder:text-text-400/60 focus:outline-none focus:border-accent-main-100/50"
-              />
-              <button
-                type="button"
-                onClick={() => void handleCreateAndMove()}
-                disabled={!newName.trim() || creating || moving}
-                className="px-2 py-1 text-[length:var(--fs-xs)] bg-accent-main-100 hover:bg-accent-main-200 text-oncolor-100 rounded-md transition-colors disabled:opacity-50 flex items-center gap-1 shrink-0"
-              >
-                {creating && <SpinnerIcon size={10} className="animate-spin" />}
-                {t('chat:sessionMove.newWorktree')}
-              </button>
+            <div className="border-t border-border-100/50 pt-4">
+              <div className="mb-2 text-[length:var(--fs-sm)] text-text-400">{t('chat:sessionMove.newWorktreeSection')}</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void handleCreateAndMove()
+                    }
+                  }}
+                  placeholder={t('chat:sessionMove.newWorktreePlaceholder')}
+                  disabled={creating || movingTo !== null}
+                  className="flex-1 min-w-0 bg-bg-000 border border-border-200 rounded-lg px-3 py-2 text-[length:var(--fs-base)] text-text-100 placeholder:text-text-400/60 focus:outline-none focus:border-accent-main-100/50"
+                />
+                <Button
+                  onClick={() => void handleCreateAndMove()}
+                  disabled={!newName.trim() || creating || movingTo !== null}
+                  isLoading={creating}
+                  className="shrink-0"
+                >
+                  {t('chat:sessionMove.newWorktree')}
+                </Button>
+              </div>
             </div>
           )}
         </div>
-      )}
-    </div>
+      </Dialog>
+    </>
   )
 }

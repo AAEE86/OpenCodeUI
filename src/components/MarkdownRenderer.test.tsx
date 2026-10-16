@@ -236,6 +236,74 @@ $$
     expect(checkbox).toBeInTheDocument()
   })
 
+  it('renders one checkbox per task list item', () => {
+    const { container } = render(<MarkdownRenderer content={'- [ ] todo\n- [x] done'} />)
+
+    // marked 把 `[x]` 切成独立的 checkbox token，渲染器不能再自己加一个
+    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(2)
+    expect(container.querySelector('li input[type="checkbox"][checked]')).toBeInTheDocument()
+  })
+
+  it('emphasizes CJK runs that close after punctuation right before a CJK character', () => {
+    const content = '**重点：**正文，**第二点。**继续，*斜体：*结尾，**（括号）**收尾'
+    const { container } = render(<MarkdownRenderer content={content} />)
+
+    expect(Array.from(container.querySelectorAll('strong')).map(node => node.textContent)).toEqual([
+      '重点：',
+      '第二点。',
+      '（括号）',
+    ])
+    expect(container.querySelector('em')).toHaveTextContent('斜体：')
+    expect(container.textContent).not.toContain('**')
+    expect(container.textContent).not.toContain('*斜体')
+  })
+
+  it('keeps already-valid emphasis and intraword underscores literal', () => {
+    const { container } = render(<MarkdownRenderer content={'**粗体**，继续 说明：**重点**内容 snake_case_word'} />)
+
+    expect(Array.from(container.querySelectorAll('strong')).map(node => node.textContent)).toEqual(['粗体', '重点'])
+    expect(container.textContent).toContain('snake_case_word')
+  })
+
+  it('keeps currency amounts literal instead of rendering them as math', () => {
+    const content = '价格是 $5 到 $10 之间，花费 $100 和 $200'
+    const { container } = render(<MarkdownRenderer content={content} />)
+
+    expect(container.querySelector('.katex')).not.toBeInTheDocument()
+    expect(container.querySelector('p')).toHaveTextContent(content)
+  })
+
+  it('still renders inline dollar math', () => {
+    const { container } = render(<MarkdownRenderer content={'公式 $a^2+b^2=c^2$ 成立'} />)
+
+    expect(container.querySelector('.katex')).toBeInTheDocument()
+    expect(container.querySelector('p')).toHaveTextContent('公式')
+    expect(container.querySelector('p')).toHaveTextContent('成立')
+  })
+
+  it('renders footnotes when the definition follows the paragraph without a blank line', () => {
+    const { container } = render(<MarkdownRenderer content={'正文[^note]\n[^note]: 没有空行分隔的脚注'} />)
+
+    // 不能退化成链接引用定义：`[^note]` 曾经被渲染成 href 是脚注内容的 <a>
+    expect(container.querySelector('a[href="没有空行分隔的脚注"]')).toBeNull()
+    expect(container.querySelector('#fnref-note')).toHaveTextContent('note')
+    expect(container.querySelector('#fn-note')).toHaveTextContent('没有空行分隔的脚注')
+    expect(container.textContent).toContain('正文')
+  })
+
+  it('keeps the prose that follows footnote definitions', () => {
+    const { container } = render(<MarkdownRenderer content={'[^a]: 甲\n\n后续段落'} />)
+
+    expect(container.querySelector('#fn-a')).toHaveTextContent('甲')
+    expect(container.textContent).toContain('后续段落')
+  })
+
+  it('does not double escape html entities in text', () => {
+    const { container } = render(<MarkdownRenderer content={'a &amp; b'} />)
+
+    expect(container.querySelector('p')?.textContent).toBe('a & b')
+  })
+
   it('renders fenced code blocks via CodeBlock', () => {
     render(<MarkdownRenderer content={'```ts\nconst x = 1\n```'} />)
 

@@ -202,6 +202,8 @@
     "inlineToolRequestsDesc": "Show pending permission and question requests under the related tool call instead of floating dialogs",
     "compactInlinePermission": "Compact Inline Permission",
     "compactInlinePermissionDesc": "When the tool already shows content, only display action buttons for permissions to avoid duplication",
+    "compactionAutoCollapse": "Auto-collapse Compaction",
+    "compactionAutoCollapseDesc": "Automatically collapse the compaction summary once it finishes streaming; turn off to keep it expanded",
     "toolCardStyle": "Tool Output Style",
     "toolCardStyleDesc": "Choose how tool call results are displayed",
     "toolCardClassic": "Classic",

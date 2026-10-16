@@ -1,8 +1,9 @@
-import { memo } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { RetryIcon, ChevronDownIcon, SpinnerIcon } from '../../../components/Icons'
+import { RetryIcon, ChevronDownIcon } from '../../../components/Icons'
 import { MarkdownRenderer } from '../../../components/MarkdownRenderer'
 import { useDisclosureScrollLock } from '../../../hooks'
+import { useTheme } from '../../../hooks/useTheme'
 import type { SessionMessageAssistant, SessionMessageCompaction } from '@opencode/client/promise'
 import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
 import { unwrapErrorMessage } from '../../../utils/errorMessage'
@@ -108,13 +109,14 @@ function compactNumber(value: number, locale: string): string {
 }
 
 /**
- * 压缩消息视图（官方 SessionCompactionMessage 同款）：
- *   --- compaction started ---
- *   [摘要文本（running 时随 delta 流式增长）]
- *   [running：进行中指示] / [--- 结果 · 用量 ---]
+ * 压缩消息视图：单标识 + 可收起。
+ * - 头部是唯一分隔线：running 时显示"开始压缩上下文"，结束后变成"结果 · 用量"，
+ *   不再额外渲染第二条结果分隔线，也不显示流式中的转圈指示。
+ * - 摘要内容可点击头部收起/展开；流式输出结束后默认自动收起（设置里可关）。
  */
 export const CompactionPartView = memo(function CompactionPartView({ message }: CompactionPartViewProps) {
   const { t, i18n } = useTranslation('message')
+  const { compactionAutoCollapse } = useTheme()
   const isRunning = message.status === 'running'
   const isFailed = message.status === 'failed'
   const summary = isFailed ? '' : message.summary
@@ -154,31 +156,64 @@ export const CompactionPartView = memo(function CompactionPartView({ message }: 
     return message.error?.message ?? ''
   })()
 
+  // 唯一标识：running 时是"开始压缩上下文"，结束后变成"结果 · 用量"
+  const headerLabel = isRunning ? t('system.compactionStarted') : outcomeLabel
+  const hasContent = !!(summary.trim() || failureDetail)
+
+  // 收起状态：running 时展开看流式；结束后默认收起（可在设置里关掉自动收起）
+  const stateKey = `message:compaction:${message.id}`
+  const [expanded, setExpanded] = useUiDisclosureState(stateKey, isRunning || !compactionAutoCollapse)
+  const shouldRenderBody = useMessageExpandRender(expanded)
+  const { rootRef, headerRef, withScrollLock } = useDisclosureScrollLock()
+
+  // 流式结束（running → done）自动收起；respectUser 尊重用户手动展开/收起
+  const wasRunningRef = useRef(isRunning)
+  useEffect(() => {
+    const wasRunning = wasRunningRef.current
+    wasRunningRef.current = isRunning
+    if (wasRunning && !isRunning && compactionAutoCollapse) {
+      setExpanded(false, { touched: false, respectUser: true })
+    }
+  }, [isRunning, compactionAutoCollapse, setExpanded])
+
+  // 无内容可收起（如 aborted 空消息）→ 纯分隔线
+  if (!hasContent) {
+    return (
+      <div data-component="session-compaction-message">
+        <Separator label={headerLabel} />
+      </div>
+    )
+  }
+
   return (
-    <div data-component="session-compaction-message">
-      <Separator label={t('system.compactionStarted')} />
+    <div data-component="session-compaction-message" ref={rootRef}>
+      <button
+        type="button"
+        ref={headerRef}
+        onClick={() => withScrollLock(() => setExpanded(!expanded))}
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-2 bg-transparent border-none p-0 text-left"
+      >
+        <span className="flex-1 h-px bg-border-200/70" />
+        <span className="shrink-0 px-3 py-1.5 text-[length:var(--fs-xs)] leading-none text-text-400">{headerLabel}</span>
+        <ChevronDownIcon className={chevronClass(expanded, 'sm')} />
+        <span className="flex-1 h-px bg-border-200/70" />
+      </button>
 
-      {summary.trim() && (
-        <div className="px-3 pb-1 text-text-300">
-          <MarkdownRenderer content={summary} isStreaming={isRunning} />
-        </div>
-      )}
-
-      {isRunning && (
-        <div role="status" className="flex items-center gap-2 px-3 py-1.5 text-[length:var(--fs-sm)] text-text-400">
-          <SpinnerIcon size={13} className="animate-spin" />
-          <span>{t('system.compactionRunning')}</span>
-        </div>
-      )}
-
-      {!isRunning && (
-        <>
-          <Separator label={outcomeLabel} />
-          {failureDetail && (
-            <div className="px-3 pb-1 text-[length:var(--fs-sm)] text-danger-100">{failureDetail}</div>
-          )}
-        </>
-      )}
+      <MessageExpandPanel open={expanded} variant="fade" innerClassName="overflow-hidden">
+        {shouldRenderBody && (
+          <>
+            {summary.trim() && (
+              <div className="px-3 pb-1 text-text-300">
+                <MarkdownRenderer content={summary} isStreaming={isRunning} />
+              </div>
+            )}
+            {failureDetail && (
+              <div className="px-3 pb-1 text-[length:var(--fs-sm)] text-danger-100">{failureDetail}</div>
+            )}
+          </>
+        )}
+      </MessageExpandPanel>
     </div>
   )
 })

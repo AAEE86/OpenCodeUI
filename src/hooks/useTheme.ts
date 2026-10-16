@@ -331,6 +331,12 @@ export function useTheme() {
       themeStore.setCompactInlinePermission(enabled)
     }, []),
 
+    // 压缩结果流式输出结束后自动收起
+    compactionAutoCollapse: state.compactionAutoCollapse,
+    setCompactionAutoCollapse: useCallback((enabled: boolean) => {
+      themeStore.setCompactionAutoCollapse(enabled)
+    }, []),
+
     // 毛玻璃效果
     glassEffect: state.glassEffect,
     setGlassEffect: useCallback((enabled: boolean) => {

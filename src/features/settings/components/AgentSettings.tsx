@@ -16,6 +16,7 @@ export function AgentSettings() {
   const [toolCardStyle, setToolCardStyle] = useState(themeStore.toolCardStyle)
   const [immersiveMode, setImmersiveMode] = useState(themeStore.immersiveMode)
   const [compactInlinePermission, setCompactInlinePermission] = useState(themeStore.compactInlinePermission)
+  const [compactionAutoCollapse, setCompactionAutoCollapse] = useState(themeStore.compactionAutoCollapse)
   const [processCollapseEnabled, setProcessCollapseEnabled] = useState(themeStore.processCollapseEnabled)
 
   const handleAlwaysAllowModeChange = (mode: AlwaysAllowMode) => {
@@ -81,6 +82,12 @@ export function AgentSettings() {
     const next = !compactInlinePermission
     setCompactInlinePermission(next)
     themeStore.setCompactInlinePermission(next)
+  }
+
+  const toggleCompactionAutoCollapse = () => {
+    const next = !compactionAutoCollapse
+    setCompactionAutoCollapse(next)
+    themeStore.setCompactionAutoCollapse(next)
   }
 
   return (
@@ -163,6 +170,14 @@ export function AgentSettings() {
           onClick={toggleCompactInlinePermission}
         >
           <Toggle enabled={compactInlinePermission} onChange={toggleCompactInlinePermission} />
+        </SettingRow>
+
+        <SettingRow
+          label={t('chat.compactionAutoCollapse')}
+          description={t('chat.compactionAutoCollapseDesc')}
+          onClick={toggleCompactionAutoCollapse}
+        >
+          <Toggle enabled={compactionAutoCollapse} onChange={toggleCompactionAutoCollapse} />
         </SettingRow>
 
         <SettingField label={t('chat.toolCardStyle')} description={t('chat.toolCardStyleDesc')}>

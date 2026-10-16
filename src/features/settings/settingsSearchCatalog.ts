@@ -41,6 +41,7 @@ export const SETTINGS_SEARCH_DEFINITIONS: SettingsSearchDefinition[] = [
     'chat.descriptiveToolSteps',
     'chat.processCollapse',
     'chat.compactInlinePermission',
+    'chat.compactionAutoCollapse',
     'chat.toolCardStyle',
   ]),
   ...definitions('chat', [

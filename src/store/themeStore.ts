@@ -159,6 +159,7 @@ export type ToolCardStyle = 'classic' | 'compact'
 const DEFAULT_TOOL_CARD_STYLE: ToolCardStyle = 'compact'
 const DEFAULT_IMMERSIVE_MODE = true
 const DEFAULT_COMPACT_INLINE_PERMISSION = true
+const DEFAULT_COMPACTION_AUTO_COLLAPSE = true
 const DEFAULT_GLASS_EFFECT = true
 const DEFAULT_QUEUE_FOLLOWUP_MESSAGES = false
 /** 输入框 busy 投递 chip（插队/排队）默认显示 */
@@ -216,6 +217,8 @@ export interface ThemeState {
   immersiveMode: boolean
   /** 内嵌权限精简模式：ToolBody 有内容时只显示操作按钮 */
   compactInlinePermission: boolean
+  /** 压缩结果流式输出结束后自动收起（可在设置中关闭） */
+  compactionAutoCollapse: boolean
   /** 毛玻璃效果开关（backdrop-filter blur） */
   glassEffect: boolean
   /** 忙碌时后续消息是否进入队列 */
@@ -268,6 +271,7 @@ const STORAGE_KEY_CODE_FONT_SCALE = 'code-font-scale'
 const STORAGE_KEY_TOOL_CARD_STYLE = 'tool-card-style'
 const STORAGE_KEY_IMMERSIVE_MODE = 'immersive-mode'
 const STORAGE_KEY_COMPACT_INLINE_PERMISSION = 'compact-inline-permission'
+const STORAGE_KEY_COMPACTION_AUTO_COLLAPSE = 'compaction-auto-collapse'
 const STORAGE_KEY_GLASS_EFFECT = 'glass-effect'
 const STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES = 'queue-followup-messages'
 const STORAGE_KEY_QUEUE_DELIVERY_CHIP_VISIBLE = 'queue-delivery-chip-visible'
@@ -391,6 +395,10 @@ class ThemeStore {
         ? DEFAULT_COMPACT_INLINE_PERMISSION
         : savedCompactInlinePermission === 'true'
 
+    const savedCompactionAutoCollapse = localStorage.getItem(STORAGE_KEY_COMPACTION_AUTO_COLLAPSE)
+    const compactionAutoCollapse =
+      savedCompactionAutoCollapse === null ? DEFAULT_COMPACTION_AUTO_COLLAPSE : savedCompactionAutoCollapse === 'true'
+
     const savedGlassEffect = localStorage.getItem(STORAGE_KEY_GLASS_EFFECT)
     const glassEffect = savedGlassEffect === null ? DEFAULT_GLASS_EFFECT : savedGlassEffect === 'true'
 
@@ -470,6 +478,7 @@ class ThemeStore {
       toolCardStyle,
       immersiveMode,
       compactInlinePermission,
+      compactionAutoCollapse,
       glassEffect,
       queueFollowupMessages,
       queueDeliveryChipVisible,
@@ -550,6 +559,9 @@ class ThemeStore {
   }
   get compactInlinePermission() {
     return this.state.compactInlinePermission
+  }
+  get compactionAutoCollapse() {
+    return this.state.compactionAutoCollapse
   }
   get glassEffect() {
     return this.state.glassEffect
@@ -867,6 +879,13 @@ class ThemeStore {
     if (this.state.compactInlinePermission === enabled) return
     this.state = { ...this.state, compactInlinePermission: enabled }
     localStorage.setItem(STORAGE_KEY_COMPACT_INLINE_PERMISSION, String(enabled))
+    this.emit()
+  }
+
+  setCompactionAutoCollapse(enabled: boolean) {
+    if (this.state.compactionAutoCollapse === enabled) return
+    this.state = { ...this.state, compactionAutoCollapse: enabled }
+    localStorage.setItem(STORAGE_KEY_COMPACTION_AUTO_COLLAPSE, String(enabled))
     this.emit()
   }
 
@@ -1190,6 +1209,10 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
       typeof parsed?.compactInlinePermission === 'boolean'
         ? parsed.compactInlinePermission
         : DEFAULT_COMPACT_INLINE_PERMISSION,
+    compactionAutoCollapse:
+      typeof parsed?.compactionAutoCollapse === 'boolean'
+        ? parsed.compactionAutoCollapse
+        : DEFAULT_COMPACTION_AUTO_COLLAPSE,
     glassEffect: typeof parsed?.glassEffect === 'boolean' ? parsed.glassEffect : DEFAULT_GLASS_EFFECT,
     queueFollowupMessages:
       typeof parsed?.queueFollowupMessages === 'boolean'
@@ -1268,6 +1291,7 @@ export function importThemeBackup(raw: unknown): void {
   localStorage.setItem(STORAGE_KEY_TOOL_CARD_STYLE, backup.toolCardStyle)
   localStorage.setItem(STORAGE_KEY_IMMERSIVE_MODE, String(backup.immersiveMode))
   localStorage.setItem(STORAGE_KEY_COMPACT_INLINE_PERMISSION, String(backup.compactInlinePermission))
+  localStorage.setItem(STORAGE_KEY_COMPACTION_AUTO_COLLAPSE, String(backup.compactionAutoCollapse))
   localStorage.setItem(STORAGE_KEY_GLASS_EFFECT, String(backup.glassEffect))
   localStorage.setItem(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES, String(backup.queueFollowupMessages))
   localStorage.setItem(STORAGE_KEY_QUEUE_DELIVERY_CHIP_VISIBLE, String(backup.queueDeliveryChipVisible))

@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ShellInfo } from '@opencode/client/promise'
 import { createSessionPlaceholder } from '../../../utils/sessionPlaceholder'
-import { serverStore } from '../../../store/serverStore'
 
 const { listShellsMock, removeShellMock, getShellOutputMock } = vi.hoisted(() => ({
   listShellsMock: vi.fn(),
@@ -11,15 +10,13 @@ const { listShellsMock, removeShellMock, getShellOutputMock } = vi.hoisted(() =>
 }))
 
 vi.mock('../../../api/shell', () => ({
-  listShells: () => listShellsMock(),
+  listShells: (directory: string) => listShellsMock(directory),
   removeShell: (...args: unknown[]) => removeShellMock(...args),
   getShellOutput: (...args: unknown[]) => getShellOutputMock(...args),
 }))
 
 import { shellInventoryStore } from '../../../store/shellInventoryStore'
 import { SessionShellsSlot } from './SessionShellsSlot'
-
-const ACTIVE = serverStore.getActiveServerId()
 
 function makeShell(id: string, sessionID: string, command = `cmd-${id}`): ShellInfo {
   return {
@@ -51,7 +48,7 @@ describe('SessionShellsSlot（后台 shell 挂载）', () => {
       { ...makeShell('sh-4', 'session-1'), status: 'exited' } as ShellInfo,
     ])
 
-    render(<SessionShellsSlot parentSession={parent} serverId={ACTIVE} />)
+    render(<SessionShellsSlot parentSession={parent} />)
 
     await waitFor(() => expect(screen.getByText('npm run dev')).toBeInTheDocument())
     expect(screen.getByText('pytest')).toBeInTheDocument()
@@ -61,20 +58,20 @@ describe('SessionShellsSlot（后台 shell 挂载）', () => {
 
   it('没有 running shell → 什么都不渲染', async () => {
     listShellsMock.mockResolvedValue([makeShell('sh-9', 'session-2')])
-    const { container } = render(<SessionShellsSlot parentSession={parent} serverId={ACTIVE} />)
+    const { container } = render(<SessionShellsSlot parentSession={parent} />)
     await waitFor(() => expect(listShellsMock).toHaveBeenCalled())
     expect(container).toBeEmptyDOMElement()
   })
 
   it('行尾 × 停止：调 removeShell 并请求库存重取', async () => {
     listShellsMock.mockResolvedValue([makeShell('sh-1', 'session-1', 'npm run dev')])
-    render(<SessionShellsSlot parentSession={parent} serverId={ACTIVE} />)
+    render(<SessionShellsSlot parentSession={parent} />)
 
     const stopButton = await screen.findByTitle('Stop this shell')
     const callsBefore = listShellsMock.mock.calls.length
     fireEvent.click(stopButton)
 
-    await waitFor(() => expect(removeShellMock).toHaveBeenCalledWith('sh-1', undefined, ACTIVE))
+    await waitFor(() => expect(removeShellMock).toHaveBeenCalledWith('sh-1', '/workspace', undefined))
     // 停止后请求重取库存（500ms 防抖后触发）
     await waitFor(() => expect(listShellsMock.mock.calls.length).toBeGreaterThan(callsBefore), { timeout: 2000 })
   })
@@ -82,7 +79,7 @@ describe('SessionShellsSlot（后台 shell 挂载）', () => {
   it('点击行打开输出弹窗（打开时存快照，shell 退出列表后弹窗不闪关）', async () => {
     getShellOutputMock.mockResolvedValue({ output: 'hello\n', cursor: 6, size: 6, truncated: false })
     listShellsMock.mockResolvedValue([makeShell('sh-1', 'session-1', 'npm run dev')])
-    render(<SessionShellsSlot parentSession={parent} serverId={ACTIVE} />)
+    render(<SessionShellsSlot parentSession={parent} />)
 
     fireEvent.click(await screen.findByText('npm run dev'))
     // 弹窗打开：状态行出现「运行中」

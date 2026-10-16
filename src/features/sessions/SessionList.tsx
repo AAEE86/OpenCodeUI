@@ -10,7 +10,7 @@ import { useSessionActiveEntry } from '../../store/activeSessionStore'
 import { notificationStore, useHasUnreadCompletedNotification } from '../../store/notificationStore'
 import { SessionChildrenSlot } from '../chat/sidebar/SessionChildrenSlot'
 import { SessionShellsSlot } from '../chat/sidebar/SessionShellsSlot'
-import { shellInventoryStore } from '../../store/shellInventoryStore'
+import { useHasBackgroundShells } from '../../store/shellInventoryStore'
 import type { ApiSession } from '../../api'
 import { startInternalDrag } from '../../lib/internalDragCore'
 import { makeSessionKey, splitSessionKey } from '../../utils/sessionKey'
@@ -101,20 +101,6 @@ export function SessionList({
     sessionId: null,
   })
 
-  // 后台 shell 库存：父会话活跃判定（后台 shell 活着 = 会话仍活跃）。
-  // 挂载行由 SessionShellsSlot 自己订阅，这里只算「哪些会话有 running shell」
-  const shellInventoryVersion = useSyncExternalStore(shellInventoryStore.subscribe, shellInventoryStore.getVersion)
-  const backgroundWorkSessionIds = useMemo(() => {
-    const shells = shellInventoryStore.getShells(serverId ?? '')
-    const ids = new Set<string>()
-    for (const shell of shells) {
-      if (shell.status !== 'running') continue
-      const sessionID = shell.metadata?.sessionID
-      if (typeof sessionID === 'string') ids.add(sessionID)
-    }
-    return ids
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shellInventoryVersion, serverId])
 
   // 滚动加载
   const handleScroll = useCallback(() => {
@@ -265,7 +251,6 @@ export function SessionList({
                             isChecked={isChecked}
                             checkedPrev={prevChecked}
                             checkedNext={nextChecked}
-                            hasBackgroundWork={backgroundWorkSessionIds.has(session.id)}
                             onToggleCheck={
                               onToggleSessionSelection
                                 ? options => onToggleSessionSelection(session.id, options)
@@ -336,7 +321,6 @@ export function SessionList({
                     isChecked={isChecked}
                     checkedPrev={prevChecked}
                     checkedNext={nextChecked}
-                    hasBackgroundWork={backgroundWorkSessionIds.has(session.id)}
                     onToggleCheck={
                       onToggleSessionSelection ? options => onToggleSessionSelection(session.id, options) : undefined
                     }
@@ -415,8 +399,6 @@ export interface SessionListItemProps {
   /** 下一项也选中时，去掉下圆角 */
   checkedNext?: boolean
   onToggleCheck?: (options?: { shiftKey?: boolean }) => void
-  /** 有后台 shell 在跑（会话本身 idle 也算活跃，侧边栏活跃标识亮着） */
-  hasBackgroundWork?: boolean
 }
 
 export function SessionListItem({
@@ -435,7 +417,6 @@ export function SessionListItem({
   checkedPrev = false,
   checkedNext = false,
   onToggleCheck,
-  hasBackgroundWork = false,
 }: SessionListItemProps) {
   const { t } = useTranslation(['commands', 'common', 'chat'])
   const [isEditing, setIsEditing] = useState(false)
@@ -455,6 +436,9 @@ export function SessionListItem({
   // 单服务器模式 session.id 是原始 id，需用活动服务器合成复合 key 查询）
   const activeQueryKey = activeSessionKey ?? makeSessionKey(serverStore.getActiveServerId(), session.id)
   const activeEntry = useSessionActiveEntry(activeQueryKey)
+  // 后台 shell 活着 = 会话仍活跃（store 自己订阅，不用列表层层喂 props；
+  // 库存按工作区目录隔离，用会话自己的 location.directory 查）
+  const hasBackgroundWork = useHasBackgroundShells(session.id, session.location?.directory)
   const activeStatus = activeEntry
     ? activeEntry.pendingAction?.type === 'permission'
       ? { dot: 'bg-warning-100', label: t('chat:activeSession.awaitingPermission'), pulse: false }

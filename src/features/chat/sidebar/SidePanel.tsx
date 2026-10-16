@@ -4,6 +4,7 @@ import { SessionList } from '../../sessions'
 import { FolderRecentList } from './FolderRecentList'
 import { MultiServerFolderList } from './MultiServerFolderList'
 import { SearchResults } from './SearchResults'
+import { SessionShellsSlot } from './SessionShellsSlot'
 import { useMultiServerStore, multiServerStore } from '../../../store/multiServerStore'
 import { useServerStore } from '../../../hooks/useServerStore'
 import { getProjectGroupIdentity } from './projectGrouping'
@@ -818,6 +819,8 @@ export function SidePanel({
               handleSelectActive({ ...session, serverId } as ApiSession & { serverId?: string })
             }
           />
+          {/* 活跃列表也挂后台 shell（resolvedSession 带 location.directory，数据按目录取） */}
+          {resolvedSession && <SessionShellsSlot parentSession={resolvedSession} serverId={serverId} />}
           {childEntries.map(childEntry => renderActiveSessionNode(childEntry, level + 1))}
         </div>
       )

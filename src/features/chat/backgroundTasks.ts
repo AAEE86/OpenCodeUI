@@ -77,17 +77,17 @@ export function mergeRunningShells(
  * 「移到后台」候选需要并入服务端 running shells——比如模型上一轮启动、
  * 事件流尚未物化进消息工具态的 shell。
  */
-export function useRunningShells(sessionId: string | null, active: boolean, serverId?: string): ShellInfo[] {
+export function useRunningShells(sessionId: string | null, active: boolean, directory?: string, serverId?: string): ShellInfo[] {
   const [shells, setShells] = useState<ShellInfo[]>([])
   useEffect(() => {
-    if (!sessionId || !active) {
+    if (!sessionId || !active || !directory) {
       setShells([])
       return
     }
     let cancelled = false
     const load = async () => {
       try {
-        const list = await listShells(serverId)
+        const list = await listShells(directory, serverId)
         if (!cancelled) setShells(list)
       } catch {
         // 失败不影响主流程，下一轮再试
@@ -99,6 +99,6 @@ export function useRunningShells(sessionId: string | null, active: boolean, serv
       cancelled = true
       clearInterval(timer)
     }
-  }, [sessionId, active, serverId])
+  }, [sessionId, active, directory, serverId])
   return shells
 }

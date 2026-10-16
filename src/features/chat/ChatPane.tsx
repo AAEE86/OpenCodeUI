@@ -368,7 +368,7 @@ export const ChatPane = memo(function ChatPane({
   // 最新未完成 assistant 回合里有 running 的 shell/task 工具 → 允许转后台；
   // 并入服务端 running shells（官方 background.ts:100-109 同款）
   // ============================================
-  const runningShells = useRunningShells(routeSessionId, isStreaming, paneServerId)
+  const runningShells = useRunningShells(routeSessionId, isStreaming, effectiveDirectory, paneServerId)
   const blockingBackgroundTasks = useMemo(() => {
     if (!isStreaming || !routeSessionId) return []
     const { sessionId: rawSessionId } = splitSessionKey(routeSessionId)

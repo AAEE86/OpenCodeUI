@@ -1,23 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ShellInfo } from '@opencode/client/promise'
 
-const listShellsMock = vi.fn<() => Promise<ShellInfo[]>>()
+const listShellsMock = vi.fn<(directory: string) => Promise<ShellInfo[]>>()
 vi.mock('../api/shell', () => ({
-  listShells: () => listShellsMock(),
+  listShells: (directory: string) => listShellsMock(directory),
   removeShell: vi.fn(),
 }))
 
 import { runningShellsForSession, shellInventoryStore } from './shellInventoryStore'
-import { serverStore } from './serverStore'
 
-const ACTIVE = serverStore.getActiveServerId()
+const DIR = '/repo'
 
 function makeShell(id: string, sessionID: string, status: ShellInfo['status'] = 'running'): ShellInfo {
   return {
     id,
     status,
     command: `cmd-${id}`,
-    cwd: '/repo',
+    cwd: DIR,
     shell: 'bash',
     file: '',
     metadata: { sessionID },
@@ -39,7 +38,7 @@ describe('runningShellsForSession（挂载过滤）', () => {
   })
 })
 
-describe('shellInventoryStore（事件驱动 + 兜底轮询）', () => {
+describe('shellInventoryStore（按目录登记 + 事件驱动 + 兜底轮询）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     listShellsMock.mockReset()
@@ -49,18 +48,23 @@ describe('shellInventoryStore（事件驱动 + 兜底轮询）', () => {
     vi.useRealTimers()
   })
 
-  it('第一个订阅者出现时拉初始清单，退订干净后停止轮询', async () => {
+  it('目录首次登记立即拉取；退订干净后停止轮询并丢弃目录数据', async () => {
     listShellsMock.mockResolvedValue([makeShell('a', 's1')])
     const spy = vi.fn()
     const unsubscribe = shellInventoryStore.subscribe(spy)
+    const untrack = shellInventoryStore.trackDirectory(DIR)
 
     await vi.advanceTimersByTimeAsync(0)
-    expect(listShellsMock).toHaveBeenCalledTimes(1)
-    expect(shellInventoryStore.getShells(ACTIVE).map(s => s.id)).toEqual(['a'])
+    expect(listShellsMock).toHaveBeenCalledWith(DIR)
+    expect(shellInventoryStore.getShellsForDir(DIR).map(s => s.id)).toEqual(['a'])
     // 有数据（从无到有的变化）→ version bump 通知订阅者
     expect(spy).toHaveBeenCalled()
 
+    untrack()
     unsubscribe()
+    // 目录引用归零 → 数据丢弃
+    expect(shellInventoryStore.getShellsForDir(DIR)).toEqual([])
+
     const callsBefore = listShellsMock.mock.calls.length
     await vi.advanceTimersByTimeAsync(60_000)
     // 没有订阅者 → 兜底轮询不再打
@@ -71,6 +75,7 @@ describe('shellInventoryStore（事件驱动 + 兜底轮询）', () => {
     listShellsMock.mockResolvedValue([makeShell('a', 's1')])
     const spy = vi.fn()
     const unsubscribe = shellInventoryStore.subscribe(spy)
+    const untrack = shellInventoryStore.trackDirectory(DIR)
     await vi.advanceTimersByTimeAsync(0)
     expect(listShellsMock).toHaveBeenCalledTimes(1)
     const versionAfterInit = shellInventoryStore.getVersion()
@@ -92,12 +97,15 @@ describe('shellInventoryStore（事件驱动 + 兜底轮询）', () => {
     await vi.advanceTimersByTimeAsync(600)
     expect(shellInventoryStore.getVersion()).toBe(versionAfterInit + 1)
     expect(spy).toHaveBeenCalled()
+
+    untrack()
     unsubscribe()
   })
 
   it('shell 状态流转（running → exited）也算变化', async () => {
     listShellsMock.mockResolvedValue([makeShell('a', 's1')])
     const unsubscribe = shellInventoryStore.subscribe(() => {})
+    const untrack = shellInventoryStore.trackDirectory(DIR)
     await vi.advanceTimersByTimeAsync(0)
     const v0 = shellInventoryStore.getVersion()
 
@@ -105,6 +113,25 @@ describe('shellInventoryStore（事件驱动 + 兜底轮询）', () => {
     shellInventoryStore.requestRefresh()
     await vi.advanceTimersByTimeAsync(600)
     expect(shellInventoryStore.getVersion()).toBe(v0 + 1)
+
+    untrack()
+    unsubscribe()
+  })
+
+  it('多个目录各自隔离拉取（serve --service 按目录隔离的现实）', async () => {
+    listShellsMock.mockImplementation(async (directory: string) =>
+      directory === '/a' ? [makeShell('sh-a', 's1')] : [makeShell('sh-b', 's2')],
+    )
+    const unsubscribe = shellInventoryStore.subscribe(() => {})
+    const untrackA = shellInventoryStore.trackDirectory('/a')
+    const untrackB = shellInventoryStore.trackDirectory('/b')
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(shellInventoryStore.getShellsForDir('/a').map(s => s.id)).toEqual(['sh-a'])
+    expect(shellInventoryStore.getShellsForDir('/b').map(s => s.id)).toEqual(['sh-b'])
+
+    untrackA()
+    untrackB()
     unsubscribe()
   })
 })

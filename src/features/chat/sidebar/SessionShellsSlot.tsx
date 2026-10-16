@@ -10,13 +10,13 @@
 // - 父会话活跃判定由 SessionList 读同一批数据（后台 shell 活着 = 会话活跃）
 // ============================================
 
-import { useMemo, useState, useSyncExternalStore } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ApiSession } from '../../../api'
 import type { ShellInfo } from '@opencode/client/promise'
 import { CloseIcon, TerminalIcon } from '../../../components/Icons'
 import { removeShell } from '../../../api/shell'
-import { runningShellsForSession, shellInventoryStore } from '../../../store/shellInventoryStore'
+import { shellInventoryStore, useRunningShellsForSession } from '../../../store/shellInventoryStore'
 import { uiErrorHandler } from '../../../utils'
 import { ShellOutputDialog } from './ShellOutputDialog'
 
@@ -33,19 +33,16 @@ export function SessionShellsSlot({ parentSession, serverId }: SessionShellsSlot
   const [openShell, setOpenShell] = useState<ShellInfo | null>(null)
   const [stoppingId, setStoppingId] = useState<string | null>(null)
 
-  const version = useSyncExternalStore(shellInventoryStore.subscribe, shellInventoryStore.getVersion)
-  const shells = useMemo(
-    () => runningShellsForSession(shellInventoryStore.getShells(serverId ?? ''), parentSession.id),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [version, parentSession.id, serverId],
-  )
+  // shell 按工作区目录隔离：挂到哪取哪，目录即会话的 location.directory
+  const directory = parentSession.location?.directory
+  const shells = useRunningShellsForSession(parentSession.id, directory)
 
   const handleStop = async (e: React.MouseEvent, shellId: string) => {
     e.stopPropagation()
     if (stoppingId) return
     setStoppingId(shellId)
     try {
-      await removeShell(shellId, undefined, serverId)
+      await removeShell(shellId, directory, serverId)
       shellInventoryStore.requestRefresh()
     } catch (err) {
       uiErrorHandler('stop shell', err)
@@ -97,7 +94,9 @@ export function SessionShellsSlot({ parentSession, serverId }: SessionShellsSlot
         </div>
       )}
 
-      {openShell && <ShellOutputDialog shell={openShell} onClose={() => setOpenShell(null)} serverId={serverId} />}
+      {openShell && (
+        <ShellOutputDialog shell={openShell} directory={directory} onClose={() => setOpenShell(null)} serverId={serverId} />
+      )}
     </>
   )
 }

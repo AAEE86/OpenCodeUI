@@ -95,6 +95,34 @@ describe('QueueBubbles（下轮队列虚线气泡）', () => {
     })
   })
 
+  it('collapses long queued text like normal user messages（CollapsibleUserText 同款折叠）', () => {
+    // jsdom 的 scrollHeight 恒 0、--fs-base 读不到，mock 出"超长溢出"的环境
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(9999)
+    const originalGetComputedStyle = window.getComputedStyle
+    const computedStyleSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) => {
+      const styles = originalGetComputedStyle(el, pseudo)
+      return {
+        ...styles,
+        getPropertyValue: (name: string) => (name === '--fs-base' ? '14' : styles.getPropertyValue(name)),
+      } as CSSStyleDeclaration
+    })
+    try {
+      const longText = Array.from({ length: 30 }, (_, i) => `第 ${i + 1} 行`).join('\n')
+      render(<QueueBubbles stateKey={EXPANDED_KEY} items={[makeItem('q1', longText)]} />)
+
+      // 折叠态：展开按钮出现，正文 maxHeight 被限制（预览 8 行）
+      const toggle = screen.getByRole('button', { name: 'Show more' })
+      expect(toggle).toBeInTheDocument()
+
+      // 点击展开 → 按钮变 Show less
+      fireEvent.click(toggle)
+      expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument()
+    } finally {
+      scrollHeightSpy.mockRestore()
+      computedStyleSpy.mockRestore()
+    }
+  })
+
   it('expands by default when the collapse setting is off（默认展开开关）', () => {
     themeStore.setQueueAutoCollapse(false)
     render(<QueueBubbles stateKey="queue-bubbles:test-setting-off" items={[makeItem('q1', '排队这条')]} />)

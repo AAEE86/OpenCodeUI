@@ -26,6 +26,7 @@ import { useTheme } from '../../hooks/useTheme'
 import { useUiDisclosureState } from '../../utils/uiDisclosureState'
 import { chevronClass, MessageExpandPanel, useMessageExpandRender } from '../message/messageExpand'
 import { AgentPartView, FilePartView } from '../message/parts/AttachmentPartViews'
+import { CollapsibleUserText } from '../message/CollapsibleUserText'
 
 interface QueueBubblesProps {
   /** 下轮队列条目（delivery='queue'，等当前回合结束后由服务端投递） */
@@ -91,7 +92,7 @@ export const QueueBubbles = memo(function QueueBubbles({
 
   // 折叠（compact 同款）：默认折叠/展开由设置项 queueAutoCollapse 决定，
   // 用户手动展开/收起后按 key 记住（uiDisclosureState touched 语义）
-  const { queueAutoCollapse } = useTheme()
+  const { queueAutoCollapse, collapseUserMessages } = useTheme()
   const [expanded, setExpanded] = useUiDisclosureState(stateKey ?? 'queue-bubbles', !queueAutoCollapse)
   const shouldRenderBody = useMessageExpandRender(expanded)
   const { withScrollLock } = useDisclosureScrollLock()
@@ -187,14 +188,19 @@ export const QueueBubbles = memo(function QueueBubbles({
                 <div key={item.id} data-queue-item className="group/msg flex flex-col items-end gap-1 max-w-[85%]">
                   {/* 插入指示线：拖拽指针越过该条目中线时显示在其上方 */}
                   {showInsertion && <div className="w-full h-0.5 rounded bg-accent-main-100" aria-hidden="true" />}
-                  {/* 气泡：虚线边框表示尚未投递；编辑中的条目 accent 高亮 */}
-                  <div
-                    className={`whitespace-pre-wrap break-words rounded-2xl border border-dashed px-4 py-2.5 text-[length:var(--fs-base)] leading-relaxed text-text-200 ${
+                  {/* 气泡：虚线边框表示尚未投递；编辑中的条目 accent 高亮。
+                      正文折叠和普通用户消息同款（CollapsibleUserText，超长预览 8 行） */}
+                  <CollapsibleUserText
+                    text={text}
+                    collapseEnabled={collapseUserMessages}
+                    renderMarkdown={false}
+                    messageId={`queue:${item.id}`}
+                    className={`rounded-2xl border border-dashed px-4 py-2.5 max-w-full ${
                       isEditing ? 'border-accent-main-100 bg-accent-main-100/10' : 'border-border-200 bg-bg-300/60'
                     }`}
-                  >
-                    {text}
-                  </div>
+                    textClassName="text-text-200"
+                    showMask={false}
+                  />
                   {/* 附件胶囊：和普通用户消息同款（files + agents），挂在气泡下方 */}
                   {(files.length > 0 || agents.length > 0) && (
                     <div className="flex max-w-full min-w-0 flex-wrap gap-2 justify-end">

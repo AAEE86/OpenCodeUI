@@ -1556,7 +1556,11 @@ export function useChatSession({
   }, [clearRevert])
 
   const activeRestoredContent = useMemo(() => {
-    if (!restoredContent || restoredContent.sessionId !== routeSessionId) return null
+    if (!restoredContent || !routeSessionId) return null
+    // restoredContent.sessionId 是 fork 接口返回的原始 id（ses_x），而 routeSessionId
+    // 是带服务器前缀的复合 key（local::ses_x），直接全等比较永远不匹配，导致 fork 后
+    // 输入框预填丢失。按原始 id 比较，对带前缀/不带前缀的 routeSessionId 都成立。
+    if (restoredContent.sessionId !== splitSessionKey(routeSessionId).sessionId) return null
     return restoredContent.content
   }, [restoredContent, routeSessionId])
 

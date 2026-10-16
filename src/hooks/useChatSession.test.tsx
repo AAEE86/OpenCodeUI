@@ -86,6 +86,8 @@ vi.mock('../store', () => ({
     handlePartUpdated: vi.fn(),
     upsertLocalMessage: vi.fn(),
     removeMessage: vi.fn(),
+    extractUserText: vi.fn(() => 'forked prompt text'),
+    extractUserAttachments: vi.fn(() => []),
   },
   useSessionFamily: (sessionId: string | null) => useSessionFamilyMock(sessionId),
   useSessionState: (sessionId: string | null) => useSessionStateMock(sessionId),
@@ -392,6 +394,44 @@ describe('useChatSession handleCommand', () => {
     expect(saveDataMock).toHaveBeenCalled()
 
     expect(executeCommandMock).not.toHaveBeenCalled()
+  })
+
+  it('fork 用户消息后，带服务器前缀的新会话能恢复输入框预填内容', async () => {
+    useSessionStateMock.mockReturnValue({
+      isStreaming: false,
+      canRedo: false,
+      messages: [{ id: 'u1', type: 'user', text: 'forked prompt text', time: { created: 1 } }],
+    } as never)
+    const navigateToSession = vi.fn()
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string }) =>
+        useChatSession({
+          paneId: 'pane-1',
+          chatAreaRef: { current: null },
+          currentModel: { id: 'model-1', providerID: 'provider-1', variants: [] } as never,
+          refetchModels: vi.fn(async () => {}),
+          sessionId,
+          navigateToSession,
+          navigateHome: vi.fn(),
+        }),
+      { initialProps: { sessionId: 'session-1' } },
+    )
+
+    // fork 一条用户消息 → fork 接口返回原始 id（ses-forked），并跳转到新会话
+    await act(async () => {
+      await result.current.handleForkMessage({ id: 'u1', type: 'user', sessionID: 'session-1' } as never)
+    })
+    expect(forkSessionMock).toHaveBeenCalledWith('session-1', 'u1', '/workspace/demo', 'local')
+    expect(navigateToSession).toHaveBeenCalledWith('ses-forked', '/workspace/demo')
+
+    // 模拟导航完成：route 变为带服务器前缀的复合 key（local::ses-forked）
+    rerender({ sessionId: 'local::ses-forked' })
+
+    // 预填内容应能按原始 id 匹配上。
+    // 回归：restoredContent.sessionId（原始 ses-forked）与 routeSessionId（local::ses-forked）
+    // 直接全等比较永远不匹配，导致 fork 后输入框预填丢失。
+    expect(result.current.restoredContent?.text).toBe('forked prompt text')
   })
 
   it('/undo 在无用户消息时不动作；/redo 在不可 redo 时不动作', async () => {

@@ -488,7 +488,10 @@ export function useGlobalEvents(directories?: string[]) {
           }
           const currentDirectories = directoriesRef.current
           const currentScopeKey = getScopeKey(directoriesRef.current)
-          for (const pending of latePendingRequests.values()) {
+          // 重放后立即消费掉：latePendingRequests 的语义是「本次拉取窗口内迟到的
+          // 事件」，补进 store 一次就该交给服务端快照接管。留着不删的话，下一次
+          // fetch 会把它再重放一遍——已经回复过的请求就是这么在侧边栏复活的。
+          for (const [requestId, pending] of latePendingRequests) {
             // 只处理属于该 server 的 pending（复合 key 前缀）
             if (!pending.sessionId.startsWith(`${serverId}::`)) continue
             const matchesScope = pending.directory
@@ -501,6 +504,7 @@ export function useGlobalEvents(directories?: string[]) {
               pending.type,
               pending.description,
             )
+            latePendingRequests.delete(requestId)
           }
         })
         .catch(() => {

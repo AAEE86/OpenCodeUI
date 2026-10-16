@@ -90,6 +90,15 @@ class ActiveSessionStore {
   // 未回复的 permission/question 请求 — requestId → PendingRequest
   private pendingRequests = new Map<string, PendingRequest>()
 
+  // 已回复/取消的 requestId（FIFO，取最近 512 条）。
+  // 存在的意义：useGlobalEvents 会把拉取窗口内迟到的 asked 事件记在闭包里的
+  // latePendingRequests，fetch 回来后再补进 store。本地乐观回复只清得掉 store
+  // 里的 pendingRequests，够不着那个闭包——于是已回复的请求会被下一次 fetch
+  // 重放回来，侧边栏徽标就这么卡住（不刷新页面永远不消失）。
+  // 只要 requestId 记在这里，addPendingRequest 一律不认。
+  private settledRequestIds = new Map<string, true>()
+  private static readonly SETTLED_LIMIT = 512
+
   // 服务端已报告 idle，但因有未回复请求而暂缓移出的 session
   private deferredIdleSessions = new Set<string>()
 
@@ -143,6 +152,14 @@ class ActiveSessionStore {
       if (req.sessionId === sessionId) return true
     }
     return false
+  }
+
+  private markSettled(requestId: string) {
+    this.settledRequestIds.set(requestId, true)
+    if (this.settledRequestIds.size > ActiveSessionStore.SETTLED_LIMIT) {
+      const oldest = this.settledRequestIds.keys().next().value
+      if (oldest !== undefined) this.settledRequestIds.delete(oldest)
+    }
   }
 
   getSnapshot = (): ActiveSessionState => this.state
@@ -308,6 +325,8 @@ class ActiveSessionStore {
   // ============================================
 
   addPendingRequest(requestId: string, sessionId: string, type: 'permission' | 'question', description?: string) {
+    // 已回复/取消过的请求：fetch 快照重放、乱序事件再推回来都不认
+    if (this.settledRequestIds.has(requestId)) return
     this.pendingRequests.set(requestId, { requestId, sessionId, type, description })
     // 确保 session 在 busy 列表
     if (!this.state.statusMap[sessionId] || this.state.statusMap[sessionId].type === 'idle') {
@@ -323,6 +342,10 @@ class ActiveSessionStore {
   // ============================================
 
   resolvePendingRequest(requestId: string) {
+    // 无论这条当前还在不在 pending 里都先记下：SSE replied 和本地乐观回复都会
+    // 走到这里，先到的把 id 记牢，后到的（含 fetch 重放）就被 addPendingRequest 挡掉。
+    this.markSettled(requestId)
+
     const req = this.pendingRequests.get(requestId)
     if (!req) return
     this.pendingRequests.delete(requestId)
@@ -419,6 +442,22 @@ class ActiveSessionStore {
 
   get busyCount(): number {
     return this.cachedBusyCount
+  }
+
+  // ============================================
+  // 全量重置（测试隔离 / 会话上下文彻底切换）
+  // ============================================
+
+  reset() {
+    this.state = { statusMap: {}, initialized: false }
+    this.pendingRequests = new Map()
+    this.settledRequestIds = new Map()
+    this.deferredIdleSessions = new Set()
+    this.sessionMeta = new Map()
+    this.statusSnapshotFlights = new Map()
+    this.cachedBusySessions = []
+    this.cachedBusyCount = 0
+    this.notify()
   }
 }
 

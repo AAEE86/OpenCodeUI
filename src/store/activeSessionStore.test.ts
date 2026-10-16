@@ -3,8 +3,7 @@ import { activeSessionStore } from './activeSessionStore'
 
 describe('activeSessionStore scoped refresh handling', () => {
   beforeEach(() => {
-    activeSessionStore.initialize({})
-    activeSessionStore.initializePendingRequests([], [])
+    activeSessionStore.reset()
   })
 
   it('drops same-server sessions missing from the snapshot (snapshot is absolute per server)', () => {
@@ -137,6 +136,52 @@ describe('activeSessionStore scoped refresh handling', () => {
       attempt: 1,
       message: 'retrying',
       next: 1000,
+    })
+  })
+
+  it('drops a replayed pending request after it has been replied', () => {
+    // 症状：本地乐观回复清掉了 store，但 useGlobalEvents 闭包里的
+    // latePendingRequests 没清；下一次 fetch 重放就把已回复的请求补回来，
+    // 侧边栏徽标卡住不消失。settled 记录必须把它挡住。
+    activeSessionStore.addPendingRequest('req-1', 'local::root', 'permission', 'bash: rm -rf')
+    expect(activeSessionStore.getBusySessions()[0]?.pendingAction).toEqual({
+      type: 'permission',
+      description: 'bash: rm -rf',
+    })
+
+    activeSessionStore.resolvePendingRequest('req-1')
+
+    // 模拟下一次 fetch 快照里的迟到事件重放
+    activeSessionStore.addPendingRequest('req-1', 'local::root', 'permission', 'bash: rm -rf')
+
+    expect(activeSessionStore.getBusySessions()).toEqual([])
+  })
+
+  it('still accepts a fresh request id after another one settled', () => {
+    activeSessionStore.addPendingRequest('req-1', 'local::root', 'question', 'first')
+    activeSessionStore.resolvePendingRequest('req-1')
+    activeSessionStore.addPendingRequest('req-2', 'local::root', 'question', 'second')
+
+    expect(activeSessionStore.getBusySessions()[0]?.pendingAction).toEqual({
+      type: 'question',
+      description: 'second',
+    })
+  })
+
+  it('lets a server snapshot revive a request the local side had settled', () => {
+    // 服务端快照是权威：它说还 pending 就要显示（本地乐观回复可能没真正生效），
+    // 所以 settled 只拦 addPendingRequest，不拦 applyPendingSnapshot。
+    activeSessionStore.addPendingRequest('req-1', 'local::root', 'permission', 'x')
+    activeSessionStore.resolvePendingRequest('req-1')
+
+    activeSessionStore.initializePendingRequests(
+      [{ id: 'req-1', sessionID: 'local::root', action: 'bash', resources: ['x'] }],
+      [],
+    )
+
+    expect(activeSessionStore.getBusySessions()[0]?.pendingAction).toEqual({
+      type: 'permission',
+      description: 'bash: x',
     })
   })
 })

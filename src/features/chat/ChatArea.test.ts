@@ -819,25 +819,60 @@ describe('buildProcessTimeline', () => {
     expect(shells[1]).toMatchObject({ userMessageId: 'user-2', isActive: true })
   })
 
-  it('does not reopen a completed turn when session becomes busy before the next user lands', () => {
-    // 发送瞬间：streaming 已 true，新 user 还没进列表 → 已 Worked 的回合不能闪回 Working
+  it('keeps the last turn Working while the session is still busy (multi-step gap)', () => {
+    // 上一步已 completed、下一步还没到，但 session.status 仍是 busy —— 这是多步 agent 的常态。
+    // 不能在这一刻判成 Worked 收壳，否则下一步内容到达时又要展开，看着像「提前收工」。
+    const stepped = createAssistantMessage(
+      'assistant-1',
+      [createToolPart('tool-1', 'assistant-1'), { type: 'text', text: '看一眼' }],
+      1001,
+      1500,
+    )
+    const messages = [createUserMessage('user-1', 1000), stepped]
+
+    const busy = buildProcessTimeline(messages, {
+      turnDurationMap: new Map([['assistant-1', 500]]),
+      sessionIsStreaming: true,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+    expect(busy.find(item => item.kind === 'process-shell')).toMatchObject({
+      kind: 'process-shell',
+      isActive: true,
+    })
+
+    // busy 摘掉（idle）→ 收壳，并显示总耗时
+    const settled = buildProcessTimeline(messages, {
+      turnDurationMap: new Map([['assistant-1', 500]]),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+    expect(settled.find(item => item.kind === 'process-shell')).toMatchObject({
+      kind: 'process-shell',
+      isActive: false,
+      durationMs: 500,
+    })
+  })
+
+  it('settles the previous turn once the next user turn lands, even while busy', () => {
+    // 发送瞬间：busy 已 true、新 user 已入列 → 上一轮立刻 Worked，不能闪回 Working
     const settled = createAssistantMessage(
       'assistant-1',
       [createToolPart('tool-1', 'assistant-1'), { type: 'text', text: 'done' }],
       1001,
       1500,
     )
-    const messages = [createUserMessage('user-1', 1000), settled]
+    const messages = [createUserMessage('user-1', 1000), settled, createUserMessage('user-2', 2000)]
     const timeline = buildProcessTimeline(messages, {
       turnDurationMap: new Map([['assistant-1', 500]]),
       sessionIsStreaming: true,
       messageHasProcess: hasProcess,
       messageHasFinal: hasFinal,
     })
-    expect(timeline.find(item => item.kind === 'process-shell')).toMatchObject({
-      kind: 'process-shell',
-      isActive: false,
-    })
+
+    const shells = timeline.filter(item => item.kind === 'process-shell')
+    expect(shells[0]).toMatchObject({ userMessageId: 'user-1', isActive: false })
   })
 
   it('settles shell with process inside and final answer outside', () => {

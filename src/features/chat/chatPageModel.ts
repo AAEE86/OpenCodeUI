@@ -971,9 +971,12 @@ export function buildProcessTimeline(
       // 空回合：idle 结束；或后面已有 assistant（被跳过）
       return !sessionIsStreaming || laterHasAssistant(index)
     }
-    // 全 completed 且无 live → 锁定 Worked。
-    // 不要再用 sessionIsStreaming 重开：发送时 busy 常早于新 user 入列，会闪一下。
-    // 工具循环间隙若下一助手还没到，会短暂 Worked；下一助手 live 后自然回到 Working。
+    // 全 completed 但会话还 busy（服务端 session.status busy/retry）且这是最后一个用户回合：
+    // 只是同一回合「上一步已收尾、下一步还没到」的间隙（多步 agent 的常态），
+    // 不能判成 Worked —— 否则壳会先收起、等下一步内容到了再展开。
+    // 等 idle 把 busy 摘掉，或下一轮 user 接手（index 不再是最后一个）才收。
+    if (sessionIsStreaming && index === userTurns.length - 1) return false
+    // 确实收工（busy 已清 / 后面已有新一轮）
     return assistants.every(m => m.time.completed != null)
   }
 

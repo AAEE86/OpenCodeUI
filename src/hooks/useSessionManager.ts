@@ -234,9 +234,9 @@ export function useSessionManager({
           title: sessionInfo?.title,
           hasMoreHistory: nextCursor !== null,
           historyCursor: nextCursor,
-          // v2 的 SessionInfo 不再携带 revert / share：
-          // 回退状态由 session.revert 接口与事件维护，分享改为导出
-          revertState: null,
+          // 服务端把回退边界持久化在 Session.Info.revert（schema session.ts），
+          // 刷新后据此重建 redo 历史，否则刷新就像没 undo 过。
+          revertState: sessionInfo?.revert ?? null,
           // 会话级 agent/model 的 durable 来源（官方 selection.tsx 同款）：
           // 新鲜客户端没有 live SSE 历史时，composer 从这里恢复
           agent: sessionInfo?.agent,

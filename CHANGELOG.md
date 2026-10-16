@@ -1,5 +1,25 @@
 # Changelog
 
+## [v0.7.17] - 2026-10-16
+
+- fix(chat): 会话还 busy 时过程壳不再提前收成「已处理」 (6596015f)
+- fix(message): step 完成信息改为消息级末尾一行，不再因末尾是正文而整块丢失 (42cdac7b)
+- fix(chat): 进入会话时可靠对齐输入框模型 (5cb5c39c)
+- fix(markdown): 修正 CJK 强调闭合、货币 $、脚注与任务列表解析 (19daea72)
+- fix(message): 移动端不再把 agent 徽标撑高（内联紧凑按钮退出 32px 最小点击区域） (9176a514)
+- feat(chat): 会话操作收进标题菜单，去掉弹窗头部横线 (f4a7d7c4)
+- fix(sessions): 已回复的权限/提问不再被快照重放复活，清掉侧边栏残留徽标 (be027569)
+- fix(ui): 边缘渐隐改用 mask，避开 Tailwind v4 渐变在 oklab 下的色带分层 (8e86eee6)
+- feat(chat): 输入框 ↑↓ 优先翻阅当前会话自己的历史输入 (0fe07571)
+- feat(settings): 新增「渲染 HTML 内容」开关，可关闭 AI 输出的 HTML 活渲染 (aae118ad)
+- feat(sessions): shell 库存接入全局事件直写，挂载/摘下的实时性对齐官方 (1ed2b55f)
+- fix(message): followShellOutput UTF-8 边界自愈，修流式输出的中文乱码 (cd3a793c)
+- feat(message): bash/shell 工具卡运行中实时输出跟随 (31cb107a)
+- feat(sessions): shell 输出弹窗复用信息流沉浸模式工具卡 (146db2a3)
+- feat(sessions): 后台 shell 在跑的 idle 会话也算活跃，进活跃 tab (70db9fa8)
+- fix(sessions): shell 库存按工作区目录取数，挂载覆盖文件夹/活跃列表 (2f204f26)
+- feat(sessions): 后台 shell 挂到侧边栏父会话下，活着就算会话活跃 (aff816d5)
+
 ## [v0.7.16] - 2026-10-16
 
 - fix(chat): 队列操作行插队按钮挪到行首 (80cb042f)

@@ -19,11 +19,17 @@ function makeStatus(overrides: Partial<RetryStatusInlineData> = {}): RetryStatus
 
 describe('RetryStatusInline', () => {
   it('把 next 当成绝对时间戳，算出剩余倒计时', () => {
-    render(<RetryStatusInline status={makeStatus({ next: Date.now() + 5000 })} />)
+    // 冻结时间：测试与组件各自 Date.now() 之间差 >50ms 就会少显示 0.1s（并行负载下必现的 flake）
+    vi.useFakeTimers()
+    try {
+      render(<RetryStatusInline status={makeStatus({ next: Date.now() + 5000 })} />)
 
-    // 5s → formatRemaining 走 <10s 分支，显示 "5.0s"
-    expect(screen.getByText(/5\.\ds/)).toBeTruthy()
-    expect(screen.getByText(/2/)).toBeTruthy()
+      // 5s → formatRemaining 走 <10s 分支，显示 "5.0s"
+      expect(screen.getByText(/5\.\ds/)).toBeTruthy()
+      expect(screen.getByText(/2/)).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('next 已经过去时不显示倒计时', () => {

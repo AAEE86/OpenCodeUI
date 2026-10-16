@@ -16,6 +16,7 @@ import {
 } from '../../chat/InlineToolRequestContext'
 import { InlinePermission } from '../../chat/InlinePermission'
 import { InlineQuestion } from '../../chat/InlineQuestion'
+import { extractPermissionDiff } from '../../chat/permissionDiff'
 import {
   getToolIcon,
   extractToolData,
@@ -122,13 +123,20 @@ export const ToolPartView = memo(function ToolPartView({
   // 精简模式：非 edit/write 权限时不隐藏 ToolBody（ToolBody 已经渲染了命令内容）
   const isEditWritePermission =
     permissionRequest?.action === 'edit' || permissionRequest?.action === 'write' || permissionResolved
-  const hideToolBodyForPermission = isEditWritePermission
+  // metadata 里有 diff → 交给 InlinePermission 显示（藏 ToolBody，避免重复渲染）；
+  // metadata 缺 diff（官方 edit 多匹配未给 preview）→ ToolBody 用 input 派生兜底。
+  const permissionDiff = isEditWritePermission ? extractPermissionDiff(effectivePermissionRequest?.metadata) : null
+  const permissionHasDiff = !!(
+    permissionDiff &&
+    (permissionDiff.diff || (permissionDiff.before !== undefined && permissionDiff.after !== undefined))
+  )
+  const hideToolBodyForPermission = isEditWritePermission && permissionHasDiff
   // 精简模式：ToolBody 已渲染时，InlinePermission 只显示按钮
   // task/subagent 工具除外：其 renderer 无法显示详细的工具请求内容，需要完整展示权限信息
   const toolNameLower = toolName.toLowerCase()
   const isTaskTool = toolNameLower === 'task' || toolNameLower === 'subagent'
   const permissionContentHidden =
-    compactInlinePermission && !isEditWritePermission && !isTaskTool && !!permissionRequest
+    compactInlinePermission && !isTaskTool && !!permissionRequest && (isEditWritePermission ? !permissionHasDiff : true)
   const isReadable = isReadableTool(toolName)
   const shouldStartExpanded =
     isActive ||

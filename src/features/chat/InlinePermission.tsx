@@ -12,6 +12,7 @@ import type { ApiPermissionRequest, PermissionReply } from '../../api'
 import { ContentBlock } from '../../components'
 import { autoApproveStore } from '../../store'
 import { themeStore } from '../../store/themeStore'
+import { extractPermissionDiff } from './permissionDiff'
 
 interface InlinePermissionProps {
   request: ApiPermissionRequest
@@ -34,23 +35,9 @@ export const InlinePermission = memo(function InlinePermission({
   const { toolCardStyle } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
   const isCompact = toolCardStyle === 'compact'
 
-  const metadata = request.metadata
-  const diff = metadata?.diff as string | undefined
-  const filepath = metadata?.filepath as string | undefined
-
-  let diffData: { before: string; after: string } | string | undefined
-  if (metadata?.filediff && typeof metadata.filediff === 'object') {
-    const fd = metadata.filediff as Record<string, unknown>
-    // 上游优先返回 patch 格式
-    if (typeof fd.patch === 'string') {
-      diffData = fd.patch
-    } else if (fd.before !== undefined && fd.after !== undefined) {
-      diffData = { before: String(fd.before), after: String(fd.after) }
-    }
-  }
-  if (!diffData && diff) {
-    diffData = diff
-  }
+  const { diff, before, after, filePath: filepath } = extractPermissionDiff(request.metadata)
+  const diffData: { before: string; after: string } | string | undefined =
+    diff ?? (before !== undefined && after !== undefined ? { before, after } : undefined)
 
   const isFileEdit = request.action === 'edit' || request.action === 'write'
   const hasPatterns = request.resources && request.resources.length > 0

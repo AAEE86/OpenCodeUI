@@ -5,6 +5,7 @@ import { DiffView } from '../../components/DiffView'
 import { ContentBlock } from '../../components'
 import { childSessionStore, autoApproveStore } from '../../store'
 import { makeSessionKey, splitSessionKey } from '../../utils/sessionKey'
+import { extractPermissionDiff } from './permissionDiff'
 import { usePresence } from '../../hooks'
 import { useChatViewport } from './chatViewport'
 
@@ -32,24 +33,8 @@ export function PermissionDialog({
   const { t } = useTranslation(['chat', 'common'])
   const { presentation } = useChatViewport()
   const isCompact = presentation.isCompact
-  // 从 metadata 中提取 diff 信息
-  const metadata = request.metadata
-  const filepath = metadata?.filepath as string | undefined
-  let diffData = metadata?.diff as string | undefined
-
-  // Extract structured filediff if available
-  let before: string | undefined
-  let after: string | undefined
-
-  if (metadata?.filediff && typeof metadata.filediff === 'object') {
-    const fd = metadata.filediff as Record<string, unknown>
-    // 上游优先返回 patch 格式
-    if (typeof fd.patch === 'string') {
-      diffData = fd.patch
-    }
-    before = fd.before !== undefined ? String(fd.before) : undefined
-    after = fd.after !== undefined ? String(fd.after) : undefined
-  }
+  // 从 metadata 中提取 diff 信息（兼容 v1 diff/filediff 与 v2 files[].patch）
+  const { diff: diffData, before, after, filePath: filepath } = extractPermissionDiff(request.metadata)
 
   // 判断是否是文件编辑类权限
   const isFileEdit = request.action === 'edit' || request.action === 'write'

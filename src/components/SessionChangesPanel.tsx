@@ -16,7 +16,7 @@ import { getSessionDiff } from '../api/session'
 import { getVcsDiff, getVcsInfo } from '../api/vcs'
 import type { ApiProject, FileDiff, VcsInfo } from '../api/types'
 import { detectLanguage } from '../utils/languageUtils'
-import { extractContentFromUnifiedDiff } from '../utils/diffUtils'
+import { extractContentFromUnifiedDiff, reconstructBeforeAfterFromPatch } from '../utils/diffUtils'
 import { sessionErrorHandler } from '../utils'
 import { PreviewTabsBar, type PreviewTabsBarItem } from './PreviewTabsBar'
 import { useVerticalSplitResize } from '../hooks/useVerticalSplitResize'
@@ -929,9 +929,9 @@ const DiffPreviewPanel = memo(function DiffPreviewPanel({
   onClose,
 }: DiffPreviewPanelProps) {
   const language = detectLanguage(diff.file) || 'text'
-  // 优先用 patch 提取 before/after，回退到直接的 before/after 字段（旧版后端兼容）
+  // 优先用 patch 还原 before/after（带 @@ 绝对行号），回退到直接的 before/after 字段（旧版后端兼容）
   const { before, after } = useMemo(() => {
-    if (diff.patch) return extractContentFromUnifiedDiff(diff.patch)
+    if (diff.patch) return reconstructBeforeAfterFromPatch(diff.patch) ?? extractContentFromUnifiedDiff(diff.patch)
     if (diff.before !== undefined && diff.after !== undefined) return { before: diff.before, after: diff.after }
     return { before: '', after: '' }
   }, [diff.patch, diff.before, diff.after])

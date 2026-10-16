@@ -16,7 +16,7 @@ import { DiffViewer, useDiffViewerData, type ViewMode } from './DiffViewer'
 import { CodePreview } from './CodePreview'
 import { detectLanguage } from '../utils/languageUtils'
 import { ViewModeSwitch } from './FullscreenViewer'
-import { extractContentFromUnifiedDiff } from '../utils/diffUtils'
+import { extractContentFromUnifiedDiff, reconstructBeforeAfterFromPatch } from '../utils/diffUtils'
 import { useCompositorExpand } from '../hooks/useCompositorExpand'
 import { useDelayedRender } from '../hooks/useDelayedRender'
 import { useResponsiveMaxHeight } from '../hooks/useResponsiveMaxHeight'
@@ -152,7 +152,9 @@ export const ContentBlock = memo(function ContentBlock({
   const resolvedDiff = useMemo(() => {
     if (!diff) return null
     if (typeof diff === 'object') return diff
-    return extractContentFromUnifiedDiff(diff)
+    // 优先按 patch 的 @@ 绝对行号还原完整 before/after（行号正确）；
+    // 失败（非标准 patch、超大等）退回片段提取（行号从 1 开始）
+    return reconstructBeforeAfterFromPatch(diff) ?? extractContentFromUnifiedDiff(diff)
   }, [diff])
   const diffViewerData = useDiffViewerData(resolvedDiff?.before ?? '', resolvedDiff?.after ?? '', lang, false, isDiff)
 

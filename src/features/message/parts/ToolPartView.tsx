@@ -102,9 +102,16 @@ export const ToolPartView = memo(function ToolPartView({
       frameId = requestAnimationFrame(() => {
         setCachedPermissionRequest(permissionRequest)
       })
-    } else if (toolDone) {
+    } else {
+      // 权限已处理（本端或他端批准/拒绝）：edit/write 等工具完成再清缓存，
+      // 避免 "权限消失→空白→结果出现" 的跳动；其余权限立即清缓存让卡片消失，
+      // 命令/输出交给 ToolBody 展示，否则按钮会一直残留到工具跑完。
       frameId = requestAnimationFrame(() => {
-        setCachedPermissionRequest(undefined)
+        setCachedPermissionRequest(prev => {
+          if (!prev) return prev
+          const cachedIsFile = prev.action === 'edit' || prev.action === 'write'
+          return cachedIsFile && !toolDone ? prev : undefined
+        })
       })
     }
 

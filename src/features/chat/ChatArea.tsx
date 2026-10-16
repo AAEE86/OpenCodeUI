@@ -1100,6 +1100,7 @@ export const ChatArea = memo(
                   items={queuedFollowUps}
                   editingId={queueEditingId}
                   mutation={queueMutation}
+                  stateKey={sessionId ? `queue-bubbles:${sessionId}` : undefined}
                   onSteer={onQueueSteer}
                   onEdit={onQueueEdit}
                   onRemove={onQueueRemove}

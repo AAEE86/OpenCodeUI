@@ -204,6 +204,8 @@
     "compactInlinePermissionDesc": "When the tool already shows content, only display action buttons for permissions to avoid duplication",
     "compactionAutoCollapse": "Auto-collapse Compaction",
     "compactionAutoCollapseDesc": "Automatically collapse the compaction summary once it finishes streaming; turn off to keep it expanded",
+    "queueAutoCollapse": "Collapse queued messages",
+    "queueAutoCollapseDesc": "Collapse queued messages into a one-line summary that expands on click; turn off to always show all bubbles",
     "toolCardStyle": "Tool Output Style",
     "toolCardStyleDesc": "Choose how tool call results are displayed",
     "toolCardClassic": "Classic",

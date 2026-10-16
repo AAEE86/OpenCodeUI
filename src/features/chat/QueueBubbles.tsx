@@ -17,10 +17,14 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowUpIcon, CloseIcon, GripVerticalIcon, PencilIcon, TrashIcon } from '../../components/Icons'
+import { ArrowUpIcon, ChevronDownIcon, CloseIcon, GripVerticalIcon, PencilIcon, TrashIcon } from '../../components/Icons'
 import { CopyButton } from '../../components/ui'
 import { queuedPromptText, type QueuedUserPrompt } from '../../store/inboxStore'
 import { projectQueueItems, type QueueMutation } from './queueProjection'
+import { useDisclosureScrollLock } from '../../hooks'
+import { useTheme } from '../../hooks/useTheme'
+import { useUiDisclosureState } from '../../utils/uiDisclosureState'
+import { chevronClass, MessageExpandPanel, useMessageExpandRender } from '../message/messageExpand'
 
 interface QueueBubblesProps {
   /** 下轮队列条目（delivery='queue'，等当前回合结束后由服务端投递） */
@@ -37,6 +41,8 @@ interface QueueBubblesProps {
   editingId?: string
   /** 队列 mutation 投影（编辑/重排期间显示期望形态，官方 rows() 同款） */
   mutation?: QueueMutation | null
+  /** 折叠状态的记忆 key（按会话区分；缺省全局共享一个） */
+  stateKey?: string
 }
 
 const ACTION_BTN_CLASS =
@@ -74,12 +80,20 @@ export const QueueBubbles = memo(function QueueBubbles({
   onReorder,
   editingId,
   mutation,
+  stateKey,
 }: QueueBubblesProps) {
   const { t } = useTranslation('chat')
   const listRef = useRef<HTMLDivElement>(null)
   // 拖拽会话：起点条目 + 起点 Y；过了阈值才进入拖拽（显示插入指示线）
   const dragRef = useRef<{ id: string; startY: number; active: boolean } | null>(null)
   const [dragTarget, setDragTarget] = useState<number | null>(null)
+
+  // 折叠（compact 同款）：默认折叠/展开由设置项 queueAutoCollapse 决定，
+  // 用户手动展开/收起后按 key 记住（uiDisclosureState touched 语义）
+  const { queueAutoCollapse } = useTheme()
+  const [expanded, setExpanded] = useUiDisclosureState(stateKey ?? 'queue-bubbles', !queueAutoCollapse)
+  const shouldRenderBody = useMessageExpandRender(expanded)
+  const { withScrollLock } = useDisclosureScrollLock()
 
   // mutation 投影（官方 rows() 同款）：编辑/重排期间显示期望形态，
   // 服务端 admit/cancel 事件落地时不抖（数量/位置/文本都稳）
@@ -145,82 +159,95 @@ export const QueueBubbles = memo(function QueueBubbles({
   const label = t('queue.queuedLabel', { count: rows.length })
   return (
     <section data-message-queue="queued" aria-label={label} className="w-full pt-3 pb-2">
-      <div className="flex items-center gap-3 pb-3 text-[length:var(--fs-sm)] text-text-500" role="status">
+      {/* 标题行兼折叠开关（compact 同款 chevron）：点击展开/收起队列气泡 */}
+      <button
+        type="button"
+        className="flex w-full items-center gap-3 pb-3 text-[length:var(--fs-sm)] text-text-500 cursor-pointer select-none hover:text-text-300 transition-colors"
+        onClick={() => withScrollLock(() => setExpanded(!expanded))}
+        aria-expanded={expanded}
+      >
         <span className="h-px flex-1 bg-border-200" aria-hidden="true" />
-        <span className="shrink-0">{label}</span>
+        <span className="shrink-0 inline-flex items-center gap-1.5">
+          {label}
+          <ChevronDownIcon className={chevronClass(expanded)} />
+        </span>
         <span className="h-px flex-1 bg-border-200" aria-hidden="true" />
-      </div>
-      <div ref={listRef} className="flex flex-col items-end gap-2">
-        {rows.map(({ item }, index) => {
-          const text = queuedPromptText(item)
-          const isEditing = item.id === editingId
-          const showInsertion = dragTarget !== null && dragTarget === index && dragRef.current?.active
-          return (
-            <div key={item.id} data-queue-item className="group/msg flex flex-col items-end gap-1 max-w-[85%]">
-              {/* 插入指示线：拖拽指针越过该条目中线时显示在其上方 */}
-              {showInsertion && <div className="w-full h-0.5 rounded bg-accent-main-100" aria-hidden="true" />}
-              {/* 气泡：虚线边框表示尚未投递；编辑中的条目 accent 高亮 */}
-              <div
-                className={`whitespace-pre-wrap break-words rounded-2xl border border-dashed px-4 py-2.5 text-[length:var(--fs-base)] leading-relaxed text-text-200 ${
-                  isEditing ? 'border-accent-main-100 bg-accent-main-100/10' : 'border-border-200 bg-bg-300/60'
-                }`}
-              >
-                {text}
-              </div>
-              {/* 操作行：气泡下方（对齐用户消息 action bar） */}
-              {(onSteer || onEdit || onRemove || onReorder) && (
-                <div className="flex items-center gap-0.5 px-1 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity">
-                  {onReorder && items.length > 1 && (
-                    <button
-                      type="button"
-                      onPointerDown={startDrag(item.id)}
-                      title={t('queue.dragReorder')}
-                      aria-label={t('queue.dragReorder')}
-                      className={`${ACTION_BTN_CLASS} cursor-grab active:cursor-grabbing touch-none`}
-                    >
-                      <GripVerticalIcon size={14} />
-                    </button>
-                  )}
-                  <CopyButton text={text} position="static" />
-                  {onRemove && (
-                    <button
-                      type="button"
-                      onClick={() => onRemove(item)}
-                      title={t('queue.cancelTitle')}
-                      aria-label={t('queue.cancelTitle')}
-                      className={ACTION_BTN_CLASS}
-                    >
-                      <TrashIcon size={14} />
-                    </button>
-                  )}
-                  {onSteer && (
-                    <button
-                      type="button"
-                      onClick={() => onSteer(item)}
-                      title={t('queue.moveToSteering')}
-                      aria-label={t('queue.moveToSteering')}
-                      className={ACTION_BTN_CLASS}
-                    >
-                      <ArrowUpIcon size={14} />
-                    </button>
-                  )}
-                  {onEdit && (
-                    <button
-                      type="button"
-                      onClick={() => onEdit(item)}
-                      title={isEditing ? t('queue.editCancel') : t('queue.edit')}
-                      aria-label={isEditing ? t('queue.editCancel') : t('queue.edit')}
-                      className={ACTION_BTN_CLASS}
-                    >
-                      {isEditing ? <CloseIcon size={14} /> : <PencilIcon size={14} />}
-                    </button>
+      </button>
+      <MessageExpandPanel open={expanded} variant="fade" innerClassName="overflow-hidden">
+        {shouldRenderBody && (
+          <div ref={listRef} className="flex flex-col items-end gap-2">
+            {rows.map(({ item }, index) => {
+              const text = queuedPromptText(item)
+              const isEditing = item.id === editingId
+              const showInsertion = dragTarget !== null && dragTarget === index && dragRef.current?.active
+              return (
+                <div key={item.id} data-queue-item className="group/msg flex flex-col items-end gap-1 max-w-[85%]">
+                  {/* 插入指示线：拖拽指针越过该条目中线时显示在其上方 */}
+                  {showInsertion && <div className="w-full h-0.5 rounded bg-accent-main-100" aria-hidden="true" />}
+                  {/* 气泡：虚线边框表示尚未投递；编辑中的条目 accent 高亮 */}
+                  <div
+                    className={`whitespace-pre-wrap break-words rounded-2xl border border-dashed px-4 py-2.5 text-[length:var(--fs-base)] leading-relaxed text-text-200 ${
+                      isEditing ? 'border-accent-main-100 bg-accent-main-100/10' : 'border-border-200 bg-bg-300/60'
+                    }`}
+                  >
+                    {text}
+                  </div>
+                  {/* 操作行：气泡下方（对齐用户消息 action bar） */}
+                  {(onSteer || onEdit || onRemove || onReorder) && (
+                    <div className="flex items-center gap-0.5 px-1 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity">
+                      {onReorder && items.length > 1 && (
+                        <button
+                          type="button"
+                          onPointerDown={startDrag(item.id)}
+                          title={t('queue.dragReorder')}
+                          aria-label={t('queue.dragReorder')}
+                          className={`${ACTION_BTN_CLASS} cursor-grab active:cursor-grabbing touch-none`}
+                        >
+                          <GripVerticalIcon size={14} />
+                        </button>
+                      )}
+                      <CopyButton text={text} position="static" />
+                      {onRemove && (
+                        <button
+                          type="button"
+                          onClick={() => onRemove(item)}
+                          title={t('queue.cancelTitle')}
+                          aria-label={t('queue.cancelTitle')}
+                          className={ACTION_BTN_CLASS}
+                        >
+                          <TrashIcon size={14} />
+                        </button>
+                      )}
+                      {onSteer && (
+                        <button
+                          type="button"
+                          onClick={() => onSteer(item)}
+                          title={t('queue.moveToSteering')}
+                          aria-label={t('queue.moveToSteering')}
+                          className={ACTION_BTN_CLASS}
+                        >
+                          <ArrowUpIcon size={14} />
+                        </button>
+                      )}
+                      {onEdit && (
+                        <button
+                          type="button"
+                          onClick={() => onEdit(item)}
+                          title={isEditing ? t('queue.editCancel') : t('queue.edit')}
+                          aria-label={isEditing ? t('queue.editCancel') : t('queue.edit')}
+                          className={ACTION_BTN_CLASS}
+                        >
+                          {isEditing ? <CloseIcon size={14} /> : <PencilIcon size={14} />}
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
+              )
+            })}
+          </div>
+        )}
+      </MessageExpandPanel>
     </section>
   )
 })

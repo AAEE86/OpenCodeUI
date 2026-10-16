@@ -337,6 +337,12 @@ export function useTheme() {
       themeStore.setCompactionAutoCollapse(enabled)
     }, []),
 
+    // 队列消息默认折叠成一行摘要
+    queueAutoCollapse: state.queueAutoCollapse,
+    setQueueAutoCollapse: useCallback((enabled: boolean) => {
+      themeStore.setQueueAutoCollapse(enabled)
+    }, []),
+
     // 毛玻璃效果
     glassEffect: state.glassEffect,
     setGlassEffect: useCallback((enabled: boolean) => {

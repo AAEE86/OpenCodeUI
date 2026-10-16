@@ -204,6 +204,8 @@
     "compactInlinePermissionDesc": "工具已有内容时，内嵌权限只显示操作按钮，避免重复",
     "compactionAutoCollapse": "自动收起压缩结果",
     "compactionAutoCollapseDesc": "上下文压缩的摘要流式输出结束后自动收起，关闭则保持展开",
+    "queueAutoCollapse": "默认折叠队列消息",
+    "queueAutoCollapseDesc": "排队中的消息折叠成一行摘要，点击标题展开；关闭则默认展开全部气泡",
     "toolCardStyle": "工具输出风格",
     "toolCardStyleDesc": "选择工具调用结果的展示方式",
     "toolCardClassic": "经典",

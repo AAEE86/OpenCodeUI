@@ -114,7 +114,7 @@ describe('CompactionPartView（单标识 + 可收起）', () => {
     expect(screen.getByText('Compaction interrupted')).toBeInTheDocument()
   })
 
-  it('completed：展开后底部有 undo/分叉/复制操作条，undo 回传消息 id', () => {
+  it('completed：undo/分叉/复制操作条不随摘要收起，undo 回传消息 id', () => {
     const onUndo = vi.fn()
     const onFork = vi.fn()
     render(
@@ -125,22 +125,31 @@ describe('CompactionPartView（单标识 + 可收起）', () => {
         canUndo
       />,
     )
-    // 展开后才渲染操作条
-    fireEvent.click(screen.getByRole('button', { name: /History compacted/ }))
+    // 与助手消息同一逻辑：操作条始终渲染（悬浮显现），不随摘要收起
     const undoBtn = screen.getByRole('button', { name: 'Undo from here' })
     fireEvent.click(undoBtn)
     expect(onUndo).toHaveBeenCalledWith('c-actions')
     expect(screen.getByRole('button', { name: 'Fork from here' })).toBeInTheDocument()
   })
 
-  it('collapsed 时不渲染 undo 按钮（操作条随内容收起）', () => {
+  it('step 完成信息在操作条上面（与助手消息同一顺序）', () => {
     render(
       <CompactionPartView
-        message={compaction({ id: 'c-collapsed', status: 'completed', summary: '压缩完成', recent: '' })}
+        message={compaction({
+          id: 'c-order',
+          status: 'completed',
+          summary: 'x',
+          recent: '',
+          tokens: { input: 1000, output: 200, reasoning: 100, cache: { read: 2000, write: 500 } },
+        })}
         onUndo={vi.fn()}
         canUndo
       />,
     )
-    expect(screen.queryByRole('button', { name: 'Undo from here' })).not.toBeInTheDocument()
+    // step 信息：tokens 总数 1000+200+100+2000+500=3800 → 3.8k
+    const stepInfo = screen.getByText('3.8k tokens')
+    const undoBtn = screen.getByRole('button', { name: 'Undo from here' })
+    // step 信息在 undo 按钮之前（内容 → step 信息 → 操作条）
+    expect(stepInfo.compareDocumentPosition(undoBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })

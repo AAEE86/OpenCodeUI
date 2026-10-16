@@ -10,6 +10,7 @@ import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
 import { unwrapErrorMessage } from '../../../utils/errorMessage'
 import { chevronClass, MessageExpandPanel, useMessageExpandRender } from '../messageExpand'
 import { ForkActionButton, UndoActionButton, useMessageActionBarClass } from '../MessageActionBar'
+import { StepFinishPartView, type StepFinishInfo } from './StepFinishPartView'
 
 // ============================================
 // Retry Part View - 显示重试状态
@@ -173,6 +174,26 @@ export const CompactionPartView = memo(function CompactionPartView({
   const headerLabel = isRunning ? t('system.compactionStarted') : outcomeLabel
   const hasContent = !!(summary.trim() || failureDetail)
 
+  // step 完成信息（对齐助手消息）：model + tokens + cost。
+  // 注意 v2 压缩消息只记录 time.created（官方不持久化完成时间），
+  // 所以助手那种"耗时 / 完成时刻"没有数据，这里不显示。
+  const stepFinish = ((): StepFinishInfo | undefined => {
+    if (isRunning) return undefined
+    const tokens = message.tokens
+    const cost = message.cost ?? 0
+    if (!tokens && cost <= 0) return undefined
+    return {
+      tokens: {
+        input: tokens?.input ?? 0,
+        output: tokens?.output ?? 0,
+        reasoning: tokens?.reasoning ?? 0,
+        cache: { read: tokens?.cache?.read ?? 0, write: tokens?.cache?.write ?? 0 },
+      },
+      cost,
+    }
+  })()
+  const stepFinishModel = message.status === 'completed' ? message.model?.id : undefined
+
   // 收起状态：running 时展开看流式；结束后默认收起（可在设置里关掉自动收起）
   const stateKey = `message:compaction:${message.id}`
   const [expanded, setExpanded] = useUiDisclosureState(stateKey, isRunning || !compactionAutoCollapse)
@@ -224,17 +245,25 @@ export const CompactionPartView = memo(function CompactionPartView({
             {failureDetail && (
               <div className="px-3 pb-1 text-[length:var(--fs-sm)] text-danger-100">{failureDetail}</div>
             )}
-            {/* 操作条：undo / 分叉 / 复制，与助手消息一致；仅展开且压缩结束后可见 */}
-            {!isRunning && (onUndo || onFork || summary.trim()) && (
-              <div className={`px-3 pb-1 ${actionBarClass}`}>
-                <UndoActionButton messageId={message.id} onUndo={onUndo} canUndo={canUndo} />
-                <ForkActionButton message={message} onFork={onFork} forkMessageId={forkMessageId} />
-                {summary.trim() && <CopyButton text={summary} position="static" />}
-              </div>
-            )}
           </>
         )}
       </MessageExpandPanel>
+
+      {/* step 完成信息（model + tokens + cost），与助手消息一致：内容下方、始终显示 */}
+      {stepFinish && (
+        <div className="px-3">
+          <StepFinishPartView part={stepFinish} modelLabel={stepFinishModel} />
+        </div>
+      )}
+
+      {/* 操作条：undo / 分叉 / 复制，在 step 信息下面（与助手消息同一逻辑，悬浮显现） */}
+      {!isRunning && (onUndo || onFork || summary.trim()) && (
+        <div className={`px-3 pb-1 ${actionBarClass}`}>
+          <UndoActionButton messageId={message.id} onUndo={onUndo} canUndo={canUndo} />
+          <ForkActionButton message={message} onFork={onFork} forkMessageId={forkMessageId} />
+          {summary.trim() && <CopyButton text={summary} position="static" />}
+        </div>
+      )}
     </div>
   )
 })

@@ -973,13 +973,16 @@ function InputBoxComponent({
       const newText = beforeAt + mentionText + ' ' + afterQuery
 
       // 创建附件（reference 按目录附件插入，值为引用目录的绝对路径——官方 mime 是 application/x-directory）
+      // url 必须是合法 file:// URL（服务端 readFileAttachment 用 new URL + protocol==='file:' 校验，
+      // 裸绝对路径 `E:/...` 会被解析成 `e:` 协议直接 400——侧边栏拖入走 toFileUrl 所以没事，
+      // 这里对齐官方 request.ts:109 的 `file://${encodeFilePath(path)}`）
       const attachType = item.type === 'reference' ? 'folder' : item.type
       const attachment: Attachment = {
         id: crypto.randomUUID(),
         type: attachType,
         displayName: item.displayName,
         relativePath: item.type === 'reference' ? item.value : item.relativePath,
-        url: item.type !== 'agent' && item.type !== 'skill' ? item.value : undefined,
+        url: item.type !== 'agent' && item.type !== 'skill' ? toFileUrl(item.value) : undefined,
         mime: item.type === 'reference' ? 'application/x-directory' : item.type !== 'agent' ? 'text/plain' : undefined,
         agentName: item.type === 'agent' ? item.displayName : undefined,
         skillId: item.type === 'skill' ? item.value : undefined,

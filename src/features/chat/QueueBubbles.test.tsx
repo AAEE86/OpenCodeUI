@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueueBubbles } from './QueueBubbles'
 import { setUiDisclosureState } from '../../utils/uiDisclosureState'
 import { themeStore } from '../../store/themeStore'
+import { FullscreenProvider } from '../../contexts/FullscreenContext'
 import type { QueuedUserPrompt } from '../../store/inboxStore'
 
 function makeItem(id: string, text: string): QueuedUserPrompt {
@@ -56,6 +57,22 @@ describe('QueueBubbles（下轮队列虚线气泡）', () => {
     expect(onEdit).toHaveBeenCalledWith(item)
     fireEvent.click(screen.getByTitle('Remove from queue'))
     expect(onRemove).toHaveBeenCalledWith(item)
+  })
+
+  it('renders attachment chips for queued files/agents（和普通用户消息同款）', () => {
+    const item = makeItem('q1', '带附件')
+    ;(item.payload as Record<string, unknown>).files = [
+      { data: 'aGVsbG8=', mime: 'text/plain', source: { type: 'uri', uri: 'file:///workspace/notes.txt' }, name: 'notes.txt' },
+    ]
+    ;(item.payload as Record<string, unknown>).agents = [{ name: 'reviewer' }]
+    // AttachmentItem 的详情弹窗要 FullscreenProvider 上下文
+    render(
+      <FullscreenProvider>
+        <QueueBubbles stateKey={EXPANDED_KEY} items={[item]} />
+      </FullscreenProvider>,
+    )
+    expect(screen.getByText('notes.txt')).toBeInTheDocument()
+    expect(screen.getByText('reviewer')).toBeInTheDocument()
   })
 
   it('collapses bubbles by default and toggles on header click（compact 同款）', async () => {

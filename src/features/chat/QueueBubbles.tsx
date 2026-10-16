@@ -25,6 +25,7 @@ import { useDisclosureScrollLock } from '../../hooks'
 import { useTheme } from '../../hooks/useTheme'
 import { useUiDisclosureState } from '../../utils/uiDisclosureState'
 import { chevronClass, MessageExpandPanel, useMessageExpandRender } from '../message/messageExpand'
+import { AgentPartView, FilePartView } from '../message/parts/AttachmentPartViews'
 
 interface QueueBubblesProps {
   /** 下轮队列条目（delivery='queue'，等当前回合结束后由服务端投递） */
@@ -178,6 +179,8 @@ export const QueueBubbles = memo(function QueueBubbles({
           <div ref={listRef} className="flex flex-col items-end gap-2">
             {rows.map(({ item }, index) => {
               const text = queuedPromptText(item)
+              const files = item.payload.files ?? []
+              const agents = item.payload.agents ?? []
               const isEditing = item.id === editingId
               const showInsertion = dragTarget !== null && dragTarget === index && dragRef.current?.active
               return (
@@ -192,6 +195,17 @@ export const QueueBubbles = memo(function QueueBubbles({
                   >
                     {text}
                   </div>
+                  {/* 附件胶囊：和普通用户消息同款（files + agents），挂在气泡下方 */}
+                  {(files.length > 0 || agents.length > 0) && (
+                    <div className="flex max-w-full min-w-0 flex-wrap gap-2 justify-end">
+                      {files.map((file, fileIndex) => (
+                        <FilePartView key={`file:${fileIndex}`} file={file} index={fileIndex} />
+                      ))}
+                      {agents.map((agent, agentIndex) => (
+                        <AgentPartView key={`agent:${agentIndex}`} agent={agent} index={agentIndex} />
+                      ))}
+                    </div>
+                  )}
                   {/* 操作行：气泡下方（对齐用户消息 action bar） */}
                   {(onSteer || onEdit || onRemove || onReorder) && (
                     <div className="flex items-center gap-0.5 px-1 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity">

@@ -389,3 +389,83 @@ describe('InputBox slash command selection', () => {
     })
   })
 })
+
+describe('InputBox shell mode', () => {
+  beforeEach(() => {
+    slashCommands = []
+    messagesMock = []
+    promptHistoryStore.reset()
+  })
+
+  it('enters shell mode when typing ! into an empty input', () => {
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onShell={vi.fn()} />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '!' } })
+
+    expect(textarea.hasAttribute('data-shell-mode')).toBe(true)
+    // `!` 被消费，不进文本
+    expect(textarea.value).toBe('')
+  })
+
+  it('restores the consumed ! when exiting shell mode with backspace on empty input', async () => {
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onShell={vi.fn()} />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '!' } })
+    expect(textarea.hasAttribute('data-shell-mode')).toBe(true)
+
+    // 「其实想输入 !」的退路：空命令退格 → 退模式并把 ! 还回来
+    fireEvent.keyDown(textarea, { key: 'Backspace' })
+
+    expect(textarea.hasAttribute('data-shell-mode')).toBe(false)
+    expect(textarea.value).toBe('!')
+
+    // 光标在末尾，好继续打（如 !这个很重要）
+    await waitFor(() => {
+      expect(textarea.selectionStart).toBe(1)
+    })
+
+    // 继续输入就是普通文本
+    fireEvent.change(textarea, { target: { value: '!这个很重要' } })
+    expect(textarea.hasAttribute('data-shell-mode')).toBe(false)
+    expect(textarea.value).toBe('!这个很重要')
+  })
+
+  it('does not re-enter shell mode when deleting back to a lone !', () => {
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onShell={vi.fn()} />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    // 经退格还原拿到字面 ! 后，继续编辑再删回 ! 不该重新进 shell 模式
+    fireEvent.change(textarea, { target: { value: '!x' } })
+    expect(textarea.hasAttribute('data-shell-mode')).toBe(false)
+
+    fireEvent.change(textarea, { target: { value: '!' } })
+    expect(textarea.hasAttribute('data-shell-mode')).toBe(false)
+    expect(textarea.value).toBe('!')
+  })
+
+  it('exits shell mode with escape and discards the input', () => {
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onShell={vi.fn()} />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '!' } })
+    fireEvent.change(textarea, { target: { value: 'git status' } })
+    expect(textarea.hasAttribute('data-shell-mode')).toBe(true)
+
+    fireEvent.keyDown(textarea, { key: 'Escape' })
+
+    expect(textarea.hasAttribute('data-shell-mode')).toBe(false)
+    expect(textarea.value).toBe('')
+  })
+
+  it('does not enter shell mode without onShell support', () => {
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '!' } })
+
+    expect(textarea.hasAttribute('data-shell-mode')).toBe(false)
+    expect(textarea.value).toBe('!')
+  })
+})

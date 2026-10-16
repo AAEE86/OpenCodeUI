@@ -723,7 +723,7 @@ function InputBoxComponent({
 
       if (isImeComposing && (e.key === 'Enter' || e.key === 'Tab')) return
 
-      // shell mode（官方 machine.ts:203 + submit.ts:147）：Enter 直接执行，
+      // shell mode（官方 machine.ts:232 + submit.ts:147）：Enter 直接执行，
       // esc / 空文本退格退回普通模式
       if (shellMode) {
         if (e.key === 'Escape') {
@@ -735,6 +735,14 @@ function InputBoxComponent({
         if (e.key === 'Backspace' && text.length === 0) {
           e.preventDefault()
           setShellMode(false)
+          // 「其实想输入 !」的退路：删掉 shell 模式，把进入时被消费的 `!` 还回来，
+          // 光标放到末尾好继续打（官方只退模式不还原，这里比官方宽容）
+          setText('!')
+          requestAnimationFrame(() => {
+            if (!textareaRef.current) return
+            textareaRef.current.focus()
+            textareaRef.current.setSelectionRange(1, 1)
+          })
           return
         }
         if (e.key === 'Enter' && !e.shiftKey && !isImeComposing) {
@@ -851,8 +859,10 @@ function InputBoxComponent({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value
 
-      // `!` 进入 shell mode（官方 machine.ts:203 同款：`!` 被消费，不进文本）
-      if (!shellMode && newText === '!' && onShell) {
+      // 空输入框敲入 `!` 进入 shell mode（官方 machine.ts:109 同款：`!` 被消费，不进文本）。
+      // 额外要求之前是空文本（官方是 value === "!" 就触发）：从 `!x` 删除回 `!`
+      // 不该重新进 shell——那是编辑普通文本，不是想跑命令。
+      if (!shellMode && newText === '!' && text === '' && onShell) {
         setShellMode(true)
         setText('')
         setMentionOpen(false)
@@ -913,7 +923,7 @@ function InputBoxComponent({
         }
       }
     },
-    [handleHistoryChange, shellMode, onShell],
+    [handleHistoryChange, shellMode, onShell, text],
   )
 
   const handleCompositionStart = useCallback(() => {

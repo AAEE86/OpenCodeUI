@@ -54,8 +54,8 @@
   "inputBox": {
     "dropFilesHere": "Drop files here",
     "replyToAgentMobile": "Reply to Agent...",
-    "replyToAgent": "Reply to Agent (type @ to mention, / for commands)",
-    "shellPlaceholder": "Shell command (esc to exit)",
+    "replyToAgent": "Reply to Agent (@ to mention · / for commands · ! for shell)",
+    "shellPlaceholder": "Shell command (esc to exit · ⌫ on empty restores !)",
     "shellMode": "Shell"
   },
   "shellMessage": {

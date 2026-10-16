@@ -259,6 +259,7 @@
     "awaitingAnswer": "等待回答",
     "retrying": "重试中",
     "working": "工作中",
+    "backgroundRunning": "后台任务运行中",
     "attempt": "第 {{count}} 次"
   },
   "notification": {

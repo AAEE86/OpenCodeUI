@@ -13,6 +13,7 @@ import { messageStore, childSessionStore, paneLayoutStore, serverStore } from '.
 import { messageIDFromEvent } from '../store/messageStore'
 import { inboxStore } from '../store/inboxStore'
 import { usageExceededStore } from '../store/usageExceededStore'
+import { shellInventoryStore } from '../store/shellInventoryStore'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { notificationStore } from '../store/notificationStore'
 import { soundStore } from '../store/soundStore'
@@ -883,11 +884,14 @@ export function useGlobalEvents(directories?: string[]) {
         onShellStarted: (data, facts) => {
           const scopedId = scope(data.sessionID)
           messageStore.handleShellStarted({ ...data, sessionID: scopedId }, facts)
+          // shell 库存变化 → 侧边栏后台任务挂载/活跃判定重取
+          shellInventoryStore.requestRefresh()
         },
 
         onShellEnded: (data, facts) => {
           const scopedId = scope(data.sessionID)
           messageStore.handleShellEnded({ ...data, sessionID: scopedId }, facts)
+          shellInventoryStore.requestRefresh()
         },
 
         onSkillActivated: (data, facts) => {

@@ -9,6 +9,8 @@ import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import { useSessionActiveEntry } from '../../store/activeSessionStore'
 import { notificationStore, useHasUnreadCompletedNotification } from '../../store/notificationStore'
 import { SessionChildrenSlot } from '../chat/sidebar/SessionChildrenSlot'
+import { SessionShellsSlot } from '../chat/sidebar/SessionShellsSlot'
+import { shellInventoryStore } from '../../store/shellInventoryStore'
 import type { ApiSession } from '../../api'
 import { startInternalDrag } from '../../lib/internalDragCore'
 import { makeSessionKey, splitSessionKey } from '../../utils/sessionKey'
@@ -98,6 +100,21 @@ export function SessionList({
     isOpen: false,
     sessionId: null,
   })
+
+  // 后台 shell 库存：父会话活跃判定（后台 shell 活着 = 会话仍活跃）。
+  // 挂载行由 SessionShellsSlot 自己订阅，这里只算「哪些会话有 running shell」
+  const shellInventoryVersion = useSyncExternalStore(shellInventoryStore.subscribe, shellInventoryStore.getVersion)
+  const backgroundWorkSessionIds = useMemo(() => {
+    const shells = shellInventoryStore.getShells(serverId ?? '')
+    const ids = new Set<string>()
+    for (const shell of shells) {
+      if (shell.status !== 'running') continue
+      const sessionID = shell.metadata?.sessionID
+      if (typeof sessionID === 'string') ids.add(sessionID)
+    }
+    return ids
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shellInventoryVersion, serverId])
 
   // 滚动加载
   const handleScroll = useCallback(() => {
@@ -248,6 +265,7 @@ export function SessionList({
                             isChecked={isChecked}
                             checkedPrev={prevChecked}
                             checkedNext={nextChecked}
+                            hasBackgroundWork={backgroundWorkSessionIds.has(session.id)}
                             onToggleCheck={
                               onToggleSessionSelection
                                 ? options => onToggleSessionSelection(session.id, options)
@@ -268,6 +286,7 @@ export function SessionList({
                                 onToggleSessionSelection={onToggleSessionSelection}
                               />
                             )}
+                          <SessionShellsSlot parentSession={session} serverId={serverId} />
                         </div>
                       )
                     })}
@@ -317,6 +336,7 @@ export function SessionList({
                     isChecked={isChecked}
                     checkedPrev={prevChecked}
                     checkedNext={nextChecked}
+                    hasBackgroundWork={backgroundWorkSessionIds.has(session.id)}
                     onToggleCheck={
                       onToggleSessionSelection ? options => onToggleSessionSelection(session.id, options) : undefined
                     }
@@ -334,6 +354,7 @@ export function SessionList({
                       onToggleSessionSelection={onToggleSessionSelection}
                     />
                   )}
+                  <SessionShellsSlot parentSession={session} serverId={serverId} />
                   {showUnavailableAfter &&
                     unavailablePinnedEntries.map(entry => (
                       <UnavailablePinnedSessionItem key={entry.sessionId} entry={entry} density={density} preferTouchUi={preferTouchUi} />
@@ -394,6 +415,8 @@ export interface SessionListItemProps {
   /** 下一项也选中时，去掉下圆角 */
   checkedNext?: boolean
   onToggleCheck?: (options?: { shiftKey?: boolean }) => void
+  /** 有后台 shell 在跑（会话本身 idle 也算活跃，侧边栏活跃标识亮着） */
+  hasBackgroundWork?: boolean
 }
 
 export function SessionListItem({
@@ -412,6 +435,7 @@ export function SessionListItem({
   checkedPrev = false,
   checkedNext = false,
   onToggleCheck,
+  hasBackgroundWork = false,
 }: SessionListItemProps) {
   const { t } = useTranslation(['commands', 'common', 'chat'])
   const [isEditing, setIsEditing] = useState(false)
@@ -439,7 +463,10 @@ export function SessionListItem({
         : activeEntry.status.type === 'retry'
           ? { dot: 'bg-warning-100', label: t('chat:activeSession.retrying'), pulse: false }
           : { dot: 'bg-success-100', label: t('chat:activeSession.working'), pulse: true }
-    : null
+    : // 会话本身 idle 但有后台 shell 在跑 → 仍算活跃（绿点脉冲，标签区分）
+      hasBackgroundWork
+      ? { dot: 'bg-success-100', label: t('chat:activeSession.backgroundRunning'), pulse: true }
+      : null
   const hasUnreadCompletedNotification = useHasUnreadCompletedNotification(activeQueryKey)
   const itemRef = useRef<HTMLDivElement>(null)
   const isCompact = density === 'compact'

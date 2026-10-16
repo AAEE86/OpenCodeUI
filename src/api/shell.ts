@@ -36,3 +36,12 @@ export async function getShellOutput(
   })
   return result.data
 }
+
+/** 终止 shell（官方 session-running-menu 的 stop：sdk.shell.remove） */
+export async function removeShell(id: string, directory?: string, serverId?: string): Promise<void> {
+  const sdk = getSDKClient(serverId)
+  await sdk.shell.remove({
+    id,
+    ...(directory ? { location: { directory } } : {}),
+  })
+}

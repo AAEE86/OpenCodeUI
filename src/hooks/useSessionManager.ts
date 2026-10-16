@@ -37,6 +37,8 @@ export function leadingTurnNeedsParent(messages: SessionMessageInfo[]): boolean 
 /** enrichLeadingTurn 的上限与节奏（官方 leadingTurnPageLimit / Delay 同款） */
 const LEADING_TURN_PAGE_LIMIT = 3
 const LEADING_TURN_PAGE_DELAY = 200
+// deep undo 往回翻页补边界的安全上限；正常靠 hasMoreHistory 耗尽提前终止，这只是兜底
+const REVERT_BOUNDARY_PAGE_LIMIT = 50
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 /**
@@ -257,6 +259,21 @@ export function useSessionManager({
           }
         }
 
+        // deep undo：回退边界不在首屏时（undo 的消息很深），往回翻页把边界补进内存，
+        // 重建逐条 redo 历史 + 预填内容。边界一加载 rebuildRevertHistory 就返回 true 提前终止；
+        // 正常情况下同一页里边界之前的消息也一并带出来，当前（撤销后的）视图就有了。
+        if (sessionInfo?.revert?.messageID) {
+          for (let pages = 0; pages < REVERT_BOUNDARY_PAGE_LIMIT; pages++) {
+            if (messageStore.rebuildRevertHistory(sid)) break
+            const state = messageStore.getSessionState(sid)
+            if (!state?.hasMoreHistory) break
+            await pause(LEADING_TURN_PAGE_DELAY)
+            if (isStale()) return
+            const more = await prependHistoryPage(sid).catch(() => false)
+            if (!more) break
+          }
+        }
+
         // force 模式（如 SSE 重连）只静默刷新数据，不触发滚动
         if (!force) {
           onLoadComplete?.()
@@ -348,11 +365,17 @@ export function useSessionManager({
     if (!state?.revertState) return
 
     const { history } = state.revertState
-    if (history.length === 0) return
-
     const dir = state.directory || directoryRef.current
 
     try {
+      // 边界还没加载进来（deep undo 翻页失败/进行中）：没有逐条历史可退，
+      // 退化为全恢复（revert.clear，官方 redo 同款，不需要边界消息本体）。
+      if (history.length === 0) {
+        await unrevertSession(sessionId, dir, sessionKeyToServerId(sessionId))
+        messageStore.setRevertState(sessionId, null)
+        return
+      }
+
       // 移除第一条历史记录（最早撤销的）
       const newHistory = history.slice(1)
 

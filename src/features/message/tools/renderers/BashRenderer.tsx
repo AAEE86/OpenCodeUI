@@ -8,13 +8,17 @@
  * - exit code 内联在输出末尾
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MaximizeIcon, MinimizeIcon } from '../../../../components/Icons'
 import { useFullscreen } from '../../../../contexts'
+import { DirectoryContext } from '../../../../contexts/DirectoryContext.shared'
+import { useInlineToolRequests } from '../../../chat/InlineToolRequestContext'
 import { useSyntaxHighlight } from '../../../../hooks/useSyntaxHighlight'
 import { useResponsiveMaxHeight } from '../../../../hooks/useResponsiveMaxHeight'
 import { parseAnsi, type AnsiSegment } from '../../../../utils/ansiUtils'
+import { currentToolMetadata } from '../../../../types/api'
+import { followShellOutput } from '../../shellOutput'
 import { copyTextToClipboard, clipboardErrorHandler } from '../../../../utils'
 import type { ToolRendererProps } from '../types'
 
@@ -28,7 +32,30 @@ export function BashRenderer({ part, data, onFullscreenChange }: ToolRendererPro
   const isActive = state.status === 'running' || state.status === 'streaming'
   const hasError = !!data.error
   const command = data.input?.trim()
-  const output = data.output?.trim()
+  // 运行中 shell 的实时输出跟随（官方 session-ui shell 渲染器同款）：
+  // v2 shell 工具一启动就 progress({ shellID })，事件流只在结束时给最终
+  // output，存活期间靠 shell.output 游标轮询。目录上下文用可选读取——
+  // 没有 DirectoryProvider 的环境（部分测试）不启用跟随，而不是炸掉。
+  const shellID = (() => {
+    const metadata = currentToolMetadata(part)
+    return typeof metadata.shellID === 'string' ? metadata.shellID : undefined
+  })()
+  const directoryContext = useContext(DirectoryContext)
+  const currentDirectory = directoryContext?.currentDirectory
+  const { serverId } = useInlineToolRequests()
+  const [streamedOutput, setStreamedOutput] = useState('')
+  useEffect(() => {
+    if (!isActive || !shellID || !currentDirectory) return
+    return followShellOutput({
+      id: shellID,
+      directory: currentDirectory,
+      serverId: serverId || undefined,
+      running: true,
+      onOutput: setStreamedOutput,
+    })
+  }, [isActive, shellID, currentDirectory, serverId])
+  // 存活期间以流式输出为准；结束后 content 里的最终 output 是权威
+  const output = (isActive && shellID ? streamedOutput.trim() : '') || data.output?.trim()
   const cwd = data.cwd?.trim()
   const exitCode = data.exitCode
   const maxHeight = useResponsiveMaxHeight()

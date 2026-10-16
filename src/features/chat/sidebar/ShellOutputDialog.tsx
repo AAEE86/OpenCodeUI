@@ -63,10 +63,14 @@ export function ShellOutputDialog({ shell, directory, onClose, serverId }: Shell
   }
 
   // ShellInfo → ToolViewPart 投影（ShellMessageView 同款：
-  // input=command、output=输出文本、metadata 带 shellID/exit）
+  // input=command、output=输出文本、metadata 带 exit）。
+  // 注意 metadata 不放 shellID：BashRenderer 看到 shellID 会用全局
+  // currentDirectory 自己起一路跟随——弹窗的 shell 可能属于别的工作区，
+  // 错目录轮询会把共享缓存毒成 missing，反而卡死弹窗自己这路正确的跟随。
+  // 弹窗的实时输出由本组件的 followShellOutput（正确目录）喂进 metadata.output。
   const part = useMemo<ToolViewPart>(() => {
     const input = { command: live.command }
-    const metadata: Record<string, JsonValue> = { shellID: live.id }
+    const metadata: Record<string, JsonValue> = {}
     let state: ToolViewPart['state']
     if (live.status === 'running') {
       state = {

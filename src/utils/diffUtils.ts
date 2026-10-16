@@ -1,3 +1,67 @@
+import { parsePatch } from 'diff'
+
+/** 重建行数上限：超出则退回片段提取，避免超大文件的 diff/高亮开销 */
+const MAX_RECONSTRUCTED_LINES = 20000
+
+/**
+ * 把 unified diff（带 `@@ -oldStart,n +newStart,n @@` 绝对行号）还原成"完整" before/after：
+ * hunk 之间未变化的行用空行占位补齐，使后续 diffLines 重算后变更落在真实行号上，
+ * 且折叠/高亮/行号宽度全部沿用现有管线，无需改渲染组件。
+ *
+ * 解析失败、hunk 乱序/重叠、或超出行数上限时返回 null，调用方退回 extractContentFromUnifiedDiff。
+ */
+export function reconstructBeforeAfterFromPatch(patch: string): { before: string; after: string } | null {
+  let files
+  try {
+    files = parsePatch(patch)
+  } catch {
+    return null
+  }
+  const file = files?.[0]
+  if (!file || !file.hunks || file.hunks.length === 0) return null
+
+  const beforeLines: string[] = []
+  const afterLines: string[] = []
+  let oldPos = 1
+  let newPos = 1
+
+  for (const hunk of file.hunks) {
+    // hunk 之前的未变化行（前导 + hunk 间隙）用空行占位，保持绝对行号对齐。
+    // 正常 patch 中 gapOld === gapNew（未变化段两侧行数相同），不等则说明 patch 异常。
+    const gapOld = hunk.oldStart - oldPos
+    const gapNew = hunk.newStart - newPos
+    if (gapOld < 0 || gapNew < 0) return null
+    for (let i = 0; i < gapOld; i++) beforeLines.push('')
+    for (let i = 0; i < gapNew; i++) afterLines.push('')
+    oldPos += gapOld
+    newPos += gapNew
+
+    for (const raw of hunk.lines) {
+      const tag = raw[0]
+      const text = raw.slice(1)
+      if (tag === ' ') {
+        beforeLines.push(text)
+        afterLines.push(text)
+        oldPos++
+        newPos++
+      } else if (tag === '-') {
+        beforeLines.push(text)
+        oldPos++
+      } else if (tag === '+') {
+        afterLines.push(text)
+        newPos++
+      }
+      // '\'（No newline at end of file）标记忽略
+    }
+  }
+
+  if (beforeLines.length > MAX_RECONSTRUCTED_LINES || afterLines.length > MAX_RECONSTRUCTED_LINES) {
+    return null
+  }
+
+  return { before: beforeLines.join('\n'), after: afterLines.join('\n') }
+}
+
 export function extractContentFromUnifiedDiff(diff: string): { before: string; after: string } {
   let before = ''
   let after = ''

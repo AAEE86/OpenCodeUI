@@ -4,7 +4,7 @@ import { diffLines } from 'diff'
 import { ChevronDownIcon, MaximizeIcon } from './Icons'
 import { clsx } from 'clsx'
 import { detectLanguage } from '../utils/languageUtils'
-import { extractContentFromUnifiedDiff } from '../utils/diffUtils'
+import { extractContentFromUnifiedDiff, reconstructBeforeAfterFromPatch } from '../utils/diffUtils'
 import { ViewModeSwitch } from './FullscreenViewer'
 import { DiffViewer, useDiffViewerData, type ViewMode } from './DiffViewer'
 import { useFullscreenLayer } from '../contexts'
@@ -59,7 +59,9 @@ export const DiffView = memo(function DiffView({
       return { before, after }
     }
     if (diff) {
-      return extractContentFromUnifiedDiff(diff)
+      // 优先按 patch 的 @@ 绝对行号还原完整 before/after（行号正确）；
+      // 失败（非标准 patch、超大等）退回片段提取（行号从 1 开始）
+      return reconstructBeforeAfterFromPatch(diff) ?? extractContentFromUnifiedDiff(diff)
     }
     return null
   }, [before, after, diff])

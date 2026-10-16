@@ -1,5 +1,38 @@
 # Changelog
 
+## [v0.7.16] - 2026-10-16
+
+- fix(chat): 队列操作行插队按钮挪到行首 (80cb042f)
+- fix(chat): 队列操作图标对齐用户消息 action bar 规格 (27adc4a9)
+- fix(chat): 队列长文本折叠复用 CollapsibleUserText，不再搞特殊 (37a52d5e)
+- fix(chat): @ 提及的附件 url 补 file:// scheme，修发送 400 (24e90dae)
+- test(chat): 修 RetryStatusInline 倒计时测试的时序 flake (d19c9cfa)
+- fix(chat): 队列气泡渲染附件胶囊，和普通用户消息同款 (de3269d8)
+- refactor(chat): 会话移动菜单从下拉改成 Dialog (e3a79d35)
+- feat(chat): 对话列/输入框左缘拖拽调宽（两个独立把手，dsh 样式） (622c0e32)
+- feat(chat): 队列消息可折叠，默认折叠/展开有设置开关 (79db1df6)
+- feat(chat): shell 模式给「真心想输入 !」留退路，并写进输入框提示 (78c9d12f)
+- feat(chat): 发送改为官方时序——提交即清空、后台发送、失败恢复 (e253d45a)
+- fix(chat): 失败 idle 标记不再被可见性过滤掉（错误不渲染的最后一环） (f1470a04)
+- fix(chat): 会话级错误（失败 idle 标记）渲染成错误卡片 (054e554a)
+- feat(plugins): 插件面板显示所有插件的来源位置，头部横线对齐 MCP 面板 (56e7ffb2)
+- feat(changes): 文件变更面板改为事件驱动刷新，刷新无感 (e3650e30)
+- fix(sessions): fork 出的新会话实时进列表，不用手动刷新 (62b01d92)
+- fix(session): deep undo 刷新后正确隐藏已撤销消息并保留 redo (4efc8b60)
+- fix(chat): fork 用户消息后新会话输入框预填恢复 (17979ef2)
+- fix(session): 刷新后从 Session.Info.revert 重建 undo/redo 状态 (b9780d49)
+- feat(message): 压缩消息补 step 完成信息，操作条按其下排列（对齐助手） (474c529c)
+- fix(message): 压缩消息的 undo 按钮真正拿到 onUndo/canUndo (bc5a375c)
+- feat(message): 压缩结果展开后支持 undo / 分叉 / 复制操作条 (e3d4c6f3)
+- feat(message): 上下文压缩改为单标识 + 可收起 + 结束后自动收起 (49c63e64)
+- fix(permissions): 他端批准权限后非文件权限卡片不再残留按钮 (77f8ac0c)
+- fix(diff): patch 还原的合成间隙区域不再渲染折叠条 (f3a56376)
+- fix(diff): ContentBlock/SessionChangesPanel 也按 @@ 绝对行号还原 (bafeb95d)
+- fix(diff): 按 patch 的 @@ 绝对行号还原 before/after (6833baa4)
+- fix(chat): truncate the load-error stack shown in the UI (b9dcdd7e)
+- fix(permissions): show the diff preview before approving edit/write (1ca87a18)
+- fix(startup): wait for the local service before loading a session (2c3b698e)
+
 ## [v0.7.15] - 2026-10-15
 
 - fix(composer): compress only the model name in the seat trigger (7ad42a0c)

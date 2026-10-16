@@ -35,6 +35,11 @@ export interface ActiveSessionEntry {
     type: 'permission' | 'question'
     description?: string
   }
+  /**
+   * 合成条目标记：会话本身 idle，仅因后台 shell 在跑而被视为活跃
+   * （SidePanel 活跃 tab 从 shellInventoryStore 合成，status 是 idle 占位）
+   */
+  backgroundOnly?: boolean
 }
 
 interface ActiveSessionState {

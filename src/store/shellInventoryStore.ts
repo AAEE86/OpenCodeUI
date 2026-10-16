@@ -60,6 +60,17 @@ class ShellInventoryStore {
   getShellsForDir = (directory?: string): ShellInfo[] =>
     (directory && this.shellsByDir.get(directory)) || EMPTY_SHELLS
 
+  /** 收集所有已登记目录里「有 running shell」的会话 raw id（活跃 tab 合成条目用，非响应式） */
+  collectShellActiveSessionIds = (out: Set<string>): void => {
+    for (const shells of this.shellsByDir.values()) {
+      for (const shell of shells) {
+        if (shell.status !== 'running') continue
+        const sessionID = shell.metadata?.sessionID
+        if (typeof sessionID === 'string') out.add(sessionID)
+      }
+    }
+  }
+
   /** 登记关心的目录（引用计数）。首次登记立即拉取，归零后丢弃该目录数据 */
   trackDirectory = (directory: string): (() => void) => {
     const count = this.dirRefs.get(directory) ?? 0
@@ -153,4 +164,15 @@ export function useRunningShellsForSession(rawSessionId: string, directory?: str
 export function useHasBackgroundShells(rawSessionId: string, directory?: string): boolean {
   const shells = useShellsForDir(directory)
   return useMemo(() => runningShellsForSession(shells, rawSessionId).length > 0, [shells, rawSessionId])
+}
+
+/** 所有已登记目录里「有 running shell」的会话 raw id 集合（SidePanel 活跃 tab 合成条目用） */
+export function useShellActiveSessionIds(): Set<string> {
+  const version = useSyncExternalStore(shellInventoryStore.subscribe, shellInventoryStore.getVersion)
+  return useMemo(() => {
+    const ids = new Set<string>()
+    shellInventoryStore.collectShellActiveSessionIds(ids)
+    return ids
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version])
 }

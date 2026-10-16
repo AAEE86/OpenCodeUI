@@ -134,4 +134,25 @@ describe('shellInventoryStore（按目录登记 + 事件驱动 + 兜底轮询）
     untrackB()
     unsubscribe()
   })
+
+  it('collectShellActiveSessionIds：跨目录收集有 running shell 的会话（活跃 tab 合成用）', async () => {
+    listShellsMock.mockImplementation(async (directory: string) =>
+      directory === '/a'
+        ? [makeShell('sh-a1', 's1'), makeShell('sh-a2', 's1', 'exited')]
+        : [makeShell('sh-b1', 's2'), makeShell('sh-b2', 's3', 'killed')],
+    )
+    const unsubscribe = shellInventoryStore.subscribe(() => {})
+    const untrackA = shellInventoryStore.trackDirectory('/a')
+    const untrackB = shellInventoryStore.trackDirectory('/b')
+    await vi.advanceTimersByTimeAsync(0)
+
+    const ids = new Set<string>()
+    shellInventoryStore.collectShellActiveSessionIds(ids)
+    // s1 有一个 exited 但还有一个 running → 活跃；s3 只有 killed → 不算
+    expect([...ids].sort()).toEqual(['s1', 's2'])
+
+    untrackA()
+    untrackB()
+    unsubscribe()
+  })
 })

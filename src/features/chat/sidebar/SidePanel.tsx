@@ -5,6 +5,7 @@ import { FolderRecentList } from './FolderRecentList'
 import { MultiServerFolderList } from './MultiServerFolderList'
 import { SearchResults } from './SearchResults'
 import { SessionShellsSlot } from './SessionShellsSlot'
+import { shellInventoryStore, useShellActiveSessionIds } from '../../../store/shellInventoryStore'
 import { useMultiServerStore, multiServerStore } from '../../../store/multiServerStore'
 import { useServerStore } from '../../../hooks/useServerStore'
 import { getProjectGroupIdentity } from './projectGrouping'
@@ -31,7 +32,7 @@ import {
 import { useDirectory, useKeybindingLabel, useVcsInfo } from '../../../hooks'
 import { useSessionContext } from '../../../contexts/useSessionContext'
 import { useLayoutStore, childSessionStore } from '../../../store'
-import { useBusySessions, useBusyCount } from '../../../store/activeSessionStore'
+import { useBusySessions, useBusyCount, type ActiveSessionEntry } from '../../../store/activeSessionStore'
 import { notificationStore, useNotifications, useUnreadNotificationCount } from '../../../store/notificationStore'
 import { pinnedSessionsStore } from '../../../store/pinnedSessionsStore'
 import { serverStore } from '../../../store/serverStore'
@@ -307,7 +308,6 @@ export function SidePanel({
   // Notification history
   const notifications = useNotifications()
   const unreadNotificationCount = useUnreadNotificationCount()
-  const attentionCount = busyCount + unreadNotificationCount
 
   useEffect(() => {
     return subscribeToConnectionState(setConnectionState)
@@ -341,6 +341,50 @@ export function SidePanel({
     }
     return map
   }, [sessions, fetchedSessions])
+
+  // 活跃 tab 要发现「idle 但后台 shell 在跑」的会话：库存按目录隔离且只拉
+  // 登记过的目录，挂载行只登记自己可见的——这里把所有已知会话的目录都登记上，
+  // 否则那些目录的库存根本不会出现（先有鸡先有蛋）
+  const sessionDirectoriesKey = useMemo(() => {
+    const dirs = new Set<string>()
+    for (const session of sessionLookup.values()) {
+      const dir = session.location?.directory
+      if (dir) dirs.add(dir)
+    }
+    return [...dirs].sort().join('\n')
+  }, [sessionLookup])
+  useEffect(() => {
+    if (!sessionDirectoriesKey) return
+    const untracks = sessionDirectoriesKey.split('\n').map(dir => shellInventoryStore.trackDirectory(dir))
+    return () => untracks.forEach(untrack => untrack())
+  }, [sessionDirectoriesKey])
+
+  // 后台 shell 在跑但不在 busy 名单里的会话 → 合成活跃条目（backgroundOnly）。
+  // 会话对象必须能从 lookup 解析（否则标题/目录都没有，挂出来也是死行）
+  const shellActiveSessionIds = useShellActiveSessionIds()
+  const shellActiveEntries = useMemo(() => {
+    const busyRawIds = new Set(busySessions.map(entry => splitSessionKey(entry.sessionId).sessionId))
+    const entries: ActiveSessionEntry[] = []
+    for (const rawId of shellActiveSessionIds) {
+      if (busyRawIds.has(rawId)) continue
+      const session = sessionLookup.get(rawId)
+      if (!session) continue
+      entries.push({
+        sessionId: makeSessionKey(serverStore.getActiveServerId(), rawId),
+        status: { type: 'idle' },
+        backgroundOnly: true,
+        title: session.title,
+        directory: session.location?.directory,
+      })
+    }
+    return entries
+  }, [shellActiveSessionIds, busySessions, sessionLookup])
+
+  const mergedBusySessions = useMemo(
+    () => [...busySessions, ...shellActiveEntries],
+    [busySessions, shellActiveEntries],
+  )
+  const attentionCount = busyCount + shellActiveEntries.length + unreadNotificationCount
 
   const orderedSessions = useMemo(() => {
     const pinnedSet = new Set(pinnedEntries.map(e => e.sessionId))
@@ -550,8 +594,8 @@ export function SidePanel({
   ])
 
   const activeSessionTree = useMemo(
-    () => buildActiveSessionTree(busySessions, findParentId),
-    [busySessions, findParentId],
+    () => buildActiveSessionTree(mergedBusySessions, findParentId),
+    [mergedBusySessions, findParentId],
   )
 
   // worktree 不合并进项目：每个已保存目录都是独立文件夹（见 projectGrouping.ts）
@@ -1344,7 +1388,7 @@ export function SidePanel({
                   {attentionCount > 0 && (
                     <span
                       className={`inline-flex h-[15px] min-w-[15px] shrink-0 items-center justify-center self-center rounded-full px-1 text-[length:var(--fs-xxs)] font-medium leading-none transition-colors ${
-                        attentionCount > busyCount
+                        unreadNotificationCount > 0
                           ? 'bg-accent-main-100/10 text-accent-main-100'
                           : 'bg-success-100/10 text-success-100'
                       }`}
@@ -1460,7 +1504,7 @@ export function SidePanel({
           {/* Active Sessions Tab */}
           {sidebarTab === 'active' && (
             <div className="flex-1 overflow-y-auto custom-scrollbar px-2 pb-3">
-              {busySessions.length === 0 && notifications.length === 0 ? (
+              {mergedBusySessions.length === 0 && notifications.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-text-400 opacity-60">
                   <p className="text-[length:var(--fs-sm)]">{t('sidebar.noActiveSessions')}</p>
                 </div>
@@ -1527,7 +1571,7 @@ export function SidePanel({
                   {/* Divider + actions between busy and notifications */}
                   {notifications.length > 0 && (
                     <div
-                      className={`flex items-center justify-between gap-2 ${busySessions.length > 0 ? 'mt-2 pt-2 border-t border-border-200/30' : ''}`}
+                      className={`flex items-center justify-between gap-2 ${mergedBusySessions.length > 0 ? 'mt-2 pt-2 border-t border-border-200/30' : ''}`}
                     >
                       <span className="text-[length:var(--fs-xxs)] font-medium text-text-400 uppercase tracking-wider pl-[6px]">
                         {t('sidebar.notifications')}

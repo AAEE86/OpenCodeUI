@@ -21,9 +21,10 @@ export function ActiveSessionItem({ entry, resolvedSession, isSelected, onSelect
   // 目录优先从 resolvedSession 取
   const directory = resolvedSession?.location?.directory || entry.directory
 
-  // 状态显示：permission > question > retry > working
-  const statusConfig =
-    pending?.type === 'permission'
+  // 状态显示：backgroundOnly（仅后台 shell 活跃）> permission > question > retry > working
+  const statusConfig = entry.backgroundOnly
+    ? { label: t('activeSession.backgroundRunning'), color: 'text-success-100', dotColor: 'bg-success-100', pulse: true }
+    : pending?.type === 'permission'
       ? {
           label: t('activeSession.awaitingPermission'),
           color: 'text-warning-100',

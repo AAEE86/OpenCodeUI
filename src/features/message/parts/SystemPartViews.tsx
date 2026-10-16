@@ -1,13 +1,15 @@
 import { memo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { RetryIcon, ChevronDownIcon } from '../../../components/Icons'
+import { CopyButton } from '../../../components/ui'
 import { MarkdownRenderer } from '../../../components/MarkdownRenderer'
 import { useDisclosureScrollLock } from '../../../hooks'
 import { useTheme } from '../../../hooks/useTheme'
-import type { SessionMessageAssistant, SessionMessageCompaction } from '@opencode/client/promise'
+import type { SessionMessageAssistant, SessionMessageCompaction, SessionMessageInfo } from '@opencode/client/promise'
 import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
 import { unwrapErrorMessage } from '../../../utils/errorMessage'
 import { chevronClass, MessageExpandPanel, useMessageExpandRender } from '../messageExpand'
+import { ForkActionButton, UndoActionButton, useMessageActionBarClass } from '../MessageActionBar'
 
 // ============================================
 // Retry Part View - 显示重试状态
@@ -90,6 +92,10 @@ export const RetryPartView = memo(function RetryPartView({ retry, stateKey }: Re
 interface CompactionPartViewProps {
   /** 原生压缩消息（`status` / `summary` / `tokens` / `error` …） */
   message: SessionMessageCompaction
+  onUndo?: (messageId: string) => void
+  onFork?: (message: SessionMessageInfo, forkMessageId?: string) => Promise<void> | void
+  forkMessageId?: string
+  canUndo?: boolean
 }
 
 /** 官方 TimelineSeparator 同款：细分隔线 + 中间标签 */
@@ -114,9 +120,16 @@ function compactNumber(value: number, locale: string): string {
  *   不再额外渲染第二条结果分隔线，也不显示流式中的转圈指示。
  * - 摘要内容可点击头部收起/展开；流式输出结束后默认自动收起（设置里可关）。
  */
-export const CompactionPartView = memo(function CompactionPartView({ message }: CompactionPartViewProps) {
+export const CompactionPartView = memo(function CompactionPartView({
+  message,
+  onUndo,
+  onFork,
+  forkMessageId,
+  canUndo,
+}: CompactionPartViewProps) {
   const { t, i18n } = useTranslation('message')
   const { compactionAutoCollapse } = useTheme()
+  const actionBarClass = useMessageActionBarClass()
   const isRunning = message.status === 'running'
   const isFailed = message.status === 'failed'
   const summary = isFailed ? '' : message.summary
@@ -186,7 +199,7 @@ export const CompactionPartView = memo(function CompactionPartView({ message }: 
   }
 
   return (
-    <div data-component="session-compaction-message" ref={rootRef}>
+    <div data-component="session-compaction-message" ref={rootRef} className="group">
       <button
         type="button"
         ref={headerRef}
@@ -210,6 +223,14 @@ export const CompactionPartView = memo(function CompactionPartView({ message }: 
             )}
             {failureDetail && (
               <div className="px-3 pb-1 text-[length:var(--fs-sm)] text-danger-100">{failureDetail}</div>
+            )}
+            {/* 操作条：undo / 分叉 / 复制，与助手消息一致；仅展开且压缩结束后可见 */}
+            {!isRunning && (onUndo || onFork || summary.trim()) && (
+              <div className={`px-3 pb-1 ${actionBarClass}`}>
+                <UndoActionButton messageId={message.id} onUndo={onUndo} canUndo={canUndo} />
+                <ForkActionButton message={message} onFork={onFork} forkMessageId={forkMessageId} />
+                {summary.trim() && <CopyButton text={summary} position="static" />}
+              </div>
             )}
           </>
         )}

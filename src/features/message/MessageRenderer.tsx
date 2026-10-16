@@ -2,11 +2,10 @@ import { memo, useState, useRef, useEffect, useLayoutEffect, useMemo, useCallbac
 import { useTranslation } from 'react-i18next'
 import { diffLines } from 'diff'
 import { animate } from 'motion/mini'
-import { ChevronDownIcon, ChevronRightIcon, SplitIcon, SpinnerIcon, UndoIcon } from '../../components/Icons'
+import { ChevronDownIcon, ChevronRightIcon } from '../../components/Icons'
 import { CopyButton, SmoothHeight } from '../../components/ui'
 import { MarkdownRenderer } from '../../components/MarkdownRenderer'
 import { useCompositorExpand, useDisclosureScrollLock } from '../../hooks'
-import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import { useNow } from '../../hooks/useNow'
 import { useTheme } from '../../hooks/useTheme'
 import { useDirectory } from '../../hooks'
@@ -30,6 +29,7 @@ import {
   type StepFinishInfo,
 } from './parts'
 import { extractToolData, type ToolViewPart } from './tools'
+import { ForkActionButton, UndoActionButton, useMessageActionBarClass } from './MessageActionBar'
 import { MSG_SPACING } from './messageSpacing'
 import { MessageExpandPanel, useMessageExpandRender } from './messageExpand'
 import type { AssistantContent, AssistantMessage, SessionMessageInfo, UserMessage } from '../../types/api/message'
@@ -310,7 +310,13 @@ export const MessageRenderer = memo(function MessageRenderer({
   if (message.type === 'compaction') {
     return (
       <div className="flex flex-col w-full">
-        <CompactionPartView message={message} />
+        <CompactionPartView
+          message={message}
+          onUndo={onUndo}
+          onFork={onFork}
+          forkMessageId={forkMessageId}
+          canUndo={canUndo}
+        />
       </div>
     )
   }
@@ -583,45 +589,6 @@ const CollapsibleUserText = memo(function CollapsibleUserText({
   )
 })
 
-interface ForkActionButtonProps {
-  message: SessionMessageInfo
-  onFork?: (message: SessionMessageInfo, forkMessageId?: string) => Promise<void> | void
-  forkMessageId?: string
-}
-
-const ForkActionButton = memo(function ForkActionButton({ message, onFork, forkMessageId }: ForkActionButtonProps) {
-  const { t } = useTranslation('message')
-  const [isForking, setIsForking] = useState(false)
-
-  const handleFork = useCallback(async () => {
-    if (!onFork || isForking) return
-
-    setIsForking(true)
-
-    try {
-      await onFork(message, forkMessageId)
-    } catch {
-      // 业务错误由上层统一处理
-    } finally {
-      setIsForking(false)
-    }
-  }, [forkMessageId, isForking, message, onFork])
-
-  if (!onFork) return null
-
-  return (
-    <button
-      onClick={() => void handleFork()}
-      disabled={isForking}
-      className="p-1.5 rounded-md transition-colors duration-150 text-text-400 hover:text-text-200 disabled:cursor-default disabled:text-text-500"
-      title={isForking ? t('forkingFromHere') : t('forkFromHere')}
-      aria-label={isForking ? t('forkingFromHere') : t('forkFromHere')}
-    >
-      {isForking ? <SpinnerIcon className="animate-spin" /> : <SplitIcon />}
-    </button>
-  )
-})
-
 // ============================================
 // User Message View
 // ============================================
@@ -635,14 +602,6 @@ interface UserMessageViewProps {
   onEntryGrowComplete?: (messageId: string) => void
 }
 
-/** PC 精细指针：默认隐藏，悬浮消息/聚焦时显示；触控优先设备始终显示 */
-function useMessageActionBarClass() {
-  const { preferTouchUi } = useInputCapabilities()
-  return preferTouchUi
-    ? 'flex items-center gap-1 transition-opacity'
-    : 'flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto focus-within:pointer-events-auto transition-opacity'
-}
-
 const UserMessageView = memo(function UserMessageView({
   message,
   onUndo,
@@ -651,7 +610,6 @@ const UserMessageView = memo(function UserMessageView({
   canUndo,
   onEntryGrowComplete,
 }: UserMessageViewProps) {
-  const { t } = useTranslation('message')
   const { collapseUserMessages, renderUserMarkdown } = useTheme()
   const actionBarClass = useMessageActionBarClass()
 
@@ -694,16 +652,7 @@ const UserMessageView = memo(function UserMessageView({
 
         {/* Action buttons — PC 悬浮消息显示；触控设备始终显示 */}
         <div className={actionBarClass}>
-          {/* Undo button */}
-          {canUndo && onUndo && (
-            <button
-              onClick={() => onUndo(message.id)}
-              className="p-1.5 rounded-md transition-colors duration-150 text-text-400 hover:text-text-200"
-              title={t('undoFromHere')}
-            >
-              <UndoIcon />
-            </button>
-          )}
+          <UndoActionButton messageId={message.id} onUndo={onUndo} canUndo={canUndo} />
           <ForkActionButton message={message} onFork={onFork} forkMessageId={forkMessageId} />
           {/* Copy button */}
           {messageText && <CopyButton text={messageText} position="static" />}

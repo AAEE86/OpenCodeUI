@@ -113,4 +113,34 @@ describe('CompactionPartView（单标识 + 可收起）', () => {
     )
     expect(screen.getByText('Compaction interrupted')).toBeInTheDocument()
   })
+
+  it('completed：展开后底部有 undo/分叉/复制操作条，undo 回传消息 id', () => {
+    const onUndo = vi.fn()
+    const onFork = vi.fn()
+    render(
+      <CompactionPartView
+        message={compaction({ id: 'c-actions', status: 'completed', summary: '压缩完成', recent: '' })}
+        onUndo={onUndo}
+        onFork={onFork}
+        canUndo
+      />,
+    )
+    // 展开后才渲染操作条
+    fireEvent.click(screen.getByRole('button', { name: /History compacted/ }))
+    const undoBtn = screen.getByRole('button', { name: 'Undo from here' })
+    fireEvent.click(undoBtn)
+    expect(onUndo).toHaveBeenCalledWith('c-actions')
+    expect(screen.getByRole('button', { name: 'Fork from here' })).toBeInTheDocument()
+  })
+
+  it('collapsed 时不渲染 undo 按钮（操作条随内容收起）', () => {
+    render(
+      <CompactionPartView
+        message={compaction({ id: 'c-collapsed', status: 'completed', summary: '压缩完成', recent: '' })}
+        onUndo={vi.fn()}
+        canUndo
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Undo from here' })).not.toBeInTheDocument()
+  })
 })

@@ -1264,6 +1264,18 @@ export function useChatSession({
           return
         }
 
+        // compaction 分叉：新 session 包含这条压缩消息（即带着压缩后的上下文继续），
+        // 边界传它之后的第一条消息；已是末尾则不传，fork 整个 session。
+        if (message.type === 'compaction') {
+          const currentMessages = messagesRef.current
+          const idx = currentMessages.findIndex(m => m.id === targetMessageId)
+          const forkAtMessageId = idx >= 0 ? currentMessages[idx + 1]?.id : undefined
+          const forkedSession = await forkSession(routeSessionId, forkAtMessageId, effectiveDirectory, paneServerId)
+          setRestoredContent(null)
+          navigateToSession(forkedSession.id, forkedSession.location?.directory)
+          return
+        }
+
         if (!isUserMessage(message)) return
 
         // v2 的用户消息没有 model / agent（那是会话级状态），

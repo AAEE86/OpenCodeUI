@@ -109,6 +109,14 @@ export interface SessionStateSnapshot {
   hasMoreHistory: boolean
   directory: string
   title: string | null
+  /**
+   * 会话级模型（持 store 里的同一引用）。
+   *
+   * 消费方（进入会话时对齐输入框模型）要靠引用变化判断「durable 模型到了」，
+   * 所以这里不做深拷贝：store 只在 `setMessages` / `session.model.selected`
+   * 时换新对象。
+   */
+  model?: ModelRef
 }
 
 // Re-export for convenience

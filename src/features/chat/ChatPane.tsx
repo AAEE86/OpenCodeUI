@@ -24,7 +24,7 @@ import {
 } from './ChatWidthHandle'
 import { useFolderProjectDrop } from './useFolderProjectDrop'
 import { FolderProjectDropOverlay } from './FolderProjectDropOverlay'
-import { useChatSession, useModels, useModelSelection } from '../../hooks'
+import { useChatSession, useModels, useModelSelection, useSessionModelRestore } from '../../hooks'
 import { useServerStore } from '../../hooks/useServerStore'
 import { useCancelHint } from '../../hooks/useCancelHint'
 import { makeSessionKey, sessionKeyToServerId, splitSessionKey } from '../../utils/sessionKey'
@@ -297,6 +297,7 @@ export const ChatPane = memo(function ChatPane({
     routeSessionId,
     loadState,
     loadError,
+    sessionModel,
     hasMoreHistory,
     retryStatus,
     effectiveDirectory,
@@ -548,23 +549,17 @@ export const ChatPane = memo(function ChatPane({
   // session 切换：只在 routeSessionId 变化时，恢复该会话当前的模型。
   // v2 的用户消息**不带** model / agent（那是会话级状态，由
   // session.model.selected / session.agent.selected 维护在 messageStore 上），
-  // 因此这里改读会话级状态，与 store 的 RevertHistoryItem 同一口径。
-  const restoredSessionRef = useRef<string | null>(null)
-  useEffect(() => {
-    // 没有 session、或者这个 session 已经恢复过了 → 跳过
-    if (!routeSessionId || restoredSessionRef.current === routeSessionId) return
-    // 还没加载完（空会话也算：loadState 到达 loaded 即放行）→ 等下次
-    if (messages.length === 0 && loadState !== 'loaded') return
-
-    restoredSessionRef.current = routeSessionId
-
-    const sessionModel = messageStore.getSessionState(routeSessionId)?.model
-    if (sessionModel) {
-      restoreFromMessage({ providerID: sessionModel.providerID, modelID: sessionModel.id }, sessionModel.variant)
-    }
-    // 依赖 routeSessionId 和 messages.length（等加载完），不依赖 messages 引用
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeSessionId, messages.length, loadState, visibleModels, restoreFromMessage])
+  // 因此这里读会话级状态（缺失时用最后一条助手消息的 model 兜底）。
+  // 详见 useSessionModelRestore：快照/目录没就绪时不落锁，避免把「还没读到」
+  // 当成「这个会话没有模型」而永远恢复不了。
+  useSessionModelRestore({
+    sessionId: routeSessionId,
+    messages,
+    loadState,
+    sessionModel,
+    models: visibleModels,
+    restoreFromMessage,
+  })
 
   // ============================================
   // Agent Restoration Effect

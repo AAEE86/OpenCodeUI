@@ -206,6 +206,7 @@ export function useSessionState(sessionId: string | null): SessionStateSnapshot 
       hasMoreHistory: state.hasMoreHistory,
       directory: state.directory,
       title: state.title ?? null,
+      model: state.model,
     }
 
     sessionSnapshots.set(sessionId, snapshot)

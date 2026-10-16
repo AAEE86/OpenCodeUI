@@ -100,6 +100,7 @@ const EMPTY_SESSION_STATE = {
   hasMoreHistory: false,
   directory: '',
   title: null,
+  model: undefined,
 } as const
 
 interface UseChatSessionOptions {
@@ -219,6 +220,8 @@ export function useChatSession({
   messagesRef.current = messages
   const isStreaming = perSessionState.isStreaming
   const sessionDirectory = perSessionState.directory
+  /** durable 会话级模型（进入会话时对齐输入框模型的权威来源） */
+  const sessionModel = perSessionState.model
   const canUndo = perSessionState.canUndo
   const canRedo = perSessionState.canRedo
   const redoSteps = perSessionState.redoSteps
@@ -1580,6 +1583,7 @@ export function useChatSession({
     restoredContent: activeRestoredContent,
     loadState,
     loadError,
+    sessionModel,
     hasMoreHistory,
     retryStatus,
     agents,

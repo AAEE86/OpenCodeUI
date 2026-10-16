@@ -147,6 +147,7 @@ const DEFAULT_COMPLETED_AT_FORMAT: CompletedAtFormat = 'time'
 
 const DEFAULT_REASONING_DISPLAY_MODE: ReasoningDisplayMode = 'markdown'
 const DEFAULT_RENDER_USER_MARKDOWN = false
+const DEFAULT_RENDER_HTML_CONTENT = true
 const DEFAULT_DIFF_STYLE: DiffStyle = 'markers'
 const DEFAULT_DESCRIPTIVE_TOOL_STEPS = true
 const DEFAULT_INLINE_TOOL_REQUESTS = true
@@ -192,6 +193,8 @@ export interface ThemeState {
   collapseUserMessages: boolean
   /** 是否将用户消息渲染为 Markdown */
   renderUserMarkdown: boolean
+  /** 是否渲染 AI 输出中的 HTML（关闭后 HTML 一律按源码展示） */
+  renderHtmlContent: boolean
   /** step-finish 信息栏显示开关 */
   stepFinishDisplay: StepFinishDisplay
   /** 完成时刻显示格式 */
@@ -265,6 +268,7 @@ const STORAGE_KEY_CUSTOM_CSS_SNIPPETS = 'theme-custom-css-snippets'
 const STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID = 'theme-active-custom-css-snippet-id'
 const STORAGE_KEY_COLLAPSE_USER_MESSAGES = 'collapse-user-messages'
 const STORAGE_KEY_RENDER_USER_MARKDOWN = 'render-user-markdown'
+const STORAGE_KEY_RENDER_HTML_CONTENT = 'render-html-content'
 const STORAGE_KEY_STEP_FINISH_DISPLAY = 'step-finish-display'
 const STORAGE_KEY_COMPLETED_AT_FORMAT = 'completed-at-format'
 const STORAGE_KEY_REASONING_DISPLAY_MODE = 'reasoning-display-mode'
@@ -350,6 +354,10 @@ class ThemeStore {
     const savedRenderUserMarkdown = localStorage.getItem(STORAGE_KEY_RENDER_USER_MARKDOWN)
     const renderUserMarkdown =
       savedRenderUserMarkdown === null ? DEFAULT_RENDER_USER_MARKDOWN : savedRenderUserMarkdown === 'true'
+
+    const savedRenderHtmlContent = localStorage.getItem(STORAGE_KEY_RENDER_HTML_CONTENT)
+    const renderHtmlContent =
+      savedRenderHtmlContent === null ? DEFAULT_RENDER_HTML_CONTENT : savedRenderHtmlContent === 'true'
     const savedReasoningDisplay = localStorage.getItem(STORAGE_KEY_REASONING_DISPLAY_MODE)
     const reasoningDisplayMode: ReasoningDisplayMode =
       savedReasoningDisplay === 'italic' || savedReasoningDisplay === 'markdown'
@@ -485,6 +493,7 @@ class ThemeStore {
       activeCustomCSSSnippetId,
       collapseUserMessages,
       renderUserMarkdown,
+      renderHtmlContent,
       stepFinishDisplay,
       completedAtFormat,
       reasoningDisplayMode,
@@ -543,6 +552,9 @@ class ThemeStore {
   }
   get renderUserMarkdown() {
     return this.state.renderUserMarkdown
+  }
+  get renderHtmlContent() {
+    return this.state.renderHtmlContent
   }
   get stepFinishDisplay() {
     return this.state.stepFinishDisplay
@@ -800,6 +812,13 @@ class ThemeStore {
     if (this.state.renderUserMarkdown === enabled) return
     this.state = { ...this.state, renderUserMarkdown: enabled }
     localStorage.setItem(STORAGE_KEY_RENDER_USER_MARKDOWN, String(enabled))
+    this.emit()
+  }
+
+  setRenderHtmlContent(enabled: boolean) {
+    if (this.state.renderHtmlContent === enabled) return
+    this.state = { ...this.state, renderHtmlContent: enabled }
+    localStorage.setItem(STORAGE_KEY_RENDER_HTML_CONTENT, String(enabled))
     this.emit()
   }
 
@@ -1240,6 +1259,8 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
     collapseUserMessages: typeof parsed?.collapseUserMessages === 'boolean' ? parsed.collapseUserMessages : true,
     renderUserMarkdown:
       typeof parsed?.renderUserMarkdown === 'boolean' ? parsed.renderUserMarkdown : DEFAULT_RENDER_USER_MARKDOWN,
+    renderHtmlContent:
+      typeof parsed?.renderHtmlContent === 'boolean' ? parsed.renderHtmlContent : DEFAULT_RENDER_HTML_CONTENT,
     stepFinishDisplay:
       parsed?.stepFinishDisplay && typeof parsed.stepFinishDisplay === 'object'
         ? { ...DEFAULT_STEP_FINISH_DISPLAY, ...(parsed.stepFinishDisplay as Partial<StepFinishDisplay>) }

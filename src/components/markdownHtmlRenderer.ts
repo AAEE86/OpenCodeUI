@@ -273,8 +273,16 @@ const MARKDOWN_ALERTS = {
   },
 } as const
 
-function createMarkdownHtmlRenderer(isReasoning: boolean) {
+function createMarkdownHtmlRenderer(isReasoning: boolean, renderHtml: boolean) {
   const renderer = new marked.Renderer()
+
+  // 关闭 HTML 渲染时：markdown 里的裸 HTML（块级+内联）一律转义成文本源码，
+  // 不再活渲染（artifact/island 在 MarkdownRenderer 块级已被分流成代码块）
+  if (!renderHtml) {
+    renderer.html = function ({ text }) {
+      return escapeHtml(text)
+    }
+  }
 
   renderer.heading = function ({ tokens, depth }) {
     const text = this.parser.parseInline(tokens)
@@ -408,10 +416,10 @@ function createMarkdownHtmlRenderer(isReasoning: boolean) {
   return renderer
 }
 
-function renderFootnoteDefinitionsHtml(src: string, isReasoning: boolean): string | null {
+function renderFootnoteDefinitionsHtml(src: string, isReasoning: boolean, renderHtml: boolean): string | null {
   const lines = src.trim().split(/\n+/)
   const items: string[] = []
-  const renderer = getRenderer(isReasoning)
+  const renderer = getRenderer(isReasoning, renderHtml)
 
   for (const line of lines) {
     const match = /^\[\^([^\]]+)\]:\s+([\s\S]+)$/.exec(line.trim())
@@ -594,35 +602,37 @@ function sanitizeHtml(html: string): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let rendererCache: { default: any; reasoning: any } | null = null
+let rendererCache: Record<string, any> | null = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getRenderer(isReasoning: boolean): any {
+function getRenderer(isReasoning: boolean, renderHtml: boolean): any {
   if (!rendererCache) {
     rendererCache = {
-      default: createMarkdownHtmlRenderer(false),
-      reasoning: createMarkdownHtmlRenderer(true),
+      'default:html': createMarkdownHtmlRenderer(false, true),
+      'default:nohtml': createMarkdownHtmlRenderer(false, false),
+      'reasoning:html': createMarkdownHtmlRenderer(true, true),
+      'reasoning:nohtml': createMarkdownHtmlRenderer(true, false),
     }
   }
-  return isReasoning ? rendererCache.reasoning : rendererCache.default
+  return rendererCache[`${isReasoning ? 'reasoning' : 'default'}:${renderHtml ? 'html' : 'nohtml'}`]
 }
 
-export function renderMarkdownToHtml(src: string, isReasoning: boolean): string {
+export function renderMarkdownToHtml(src: string, isReasoning: boolean, renderHtml = true): string {
   const displayMath = getDisplayMathSource(src)
   if (displayMath != null) {
     const className = isReasoning ? 'my-2 overflow-x-auto text-text-400' : 'my-4 overflow-x-auto text-text-200'
     return `<div class="${className}">${renderKatexHtml(displayMath, true)}</div>`
   }
 
-  const footnotes = renderFootnoteDefinitionsHtml(src, isReasoning)
+  const footnotes = renderFootnoteDefinitionsHtml(src, isReasoning, renderHtml)
   if (footnotes != null) return sanitizeHtml(footnotes)
 
-  const renderer = getRenderer(isReasoning)
+  const renderer = getRenderer(isReasoning, renderHtml)
   const html = marked.parse(src, { renderer, async: false }) as string
   return sanitizeHtml(html)
 }
 
-export function renderMarkdownInlineToHtml(src: string, isReasoning: boolean): string {
-  const renderer = getRenderer(isReasoning)
+export function renderMarkdownInlineToHtml(src: string, isReasoning: boolean, renderHtml = true): string {
+  const renderer = getRenderer(isReasoning, renderHtml)
   const html = marked.parseInline(src, { renderer }) as string
   return sanitizeHtml(html)
 }

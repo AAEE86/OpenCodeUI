@@ -22,7 +22,7 @@
 // store 只读负载里的 sessionID，**从不**读事件信封上的 sessionID —— 读原始
 // id 会让两个服务器上的同 id 会话串台。
 
-import type { ModelRef } from '@opencode/client/promise'
+import type { ModelRef, SessionStructuredError } from '@opencode/client/promise'
 import type {
   AssistantContent,
   AssistantMessage,
@@ -1193,7 +1193,10 @@ class MessageStore {
   }
 
   handleExecutionFailed(data: EventPayload<'session.execution.failed'>, facts?: EventFacts) {
-    this.closeExecution(data.sessionID, 'failed', facts)
+    // 官方 idle("failed", event.data.error)：错误必须挂到 idle 标记上。
+    // 会话级失败（pre-promotion failure）没有任何 assistant 消息，
+    // 错误只在这条标记里——丢了它，错误就永远不渲染。
+    this.closeExecution(data.sessionID, 'failed', facts, false, data.error)
   }
 
   handleExecutionInterrupted(data: EventPayload<'session.execution.interrupted'>, facts?: EventFacts) {
@@ -1208,7 +1211,13 @@ class MessageStore {
    * 它是服务端投影里就有的轮次边界，不补的话本地要等下一次 message.list
    * 才能对齐（期间轮次分组会错位）。
    */
-  private closeExecution(sessionID: string, outcome: ExecutionOutcome, facts?: EventFacts, skipIdle = false) {
+  private closeExecution(
+    sessionID: string,
+    outcome: ExecutionOutcome,
+    facts?: EventFacts,
+    skipIdle = false,
+    error?: SessionStructuredError,
+  ) {
     const state = this.ensureSession(sessionID)
     state.isStreaming = false
 
@@ -1223,8 +1232,10 @@ class MessageStore {
         id: messageIDFromFacts(facts),
         type: 'idle',
         outcome,
+        // 服务端投影的 idle 带 error（客户端类型漏了该字段），与官方对齐
+        ...(error ? { error } : {}),
         time: { created: facts?.created ?? Date.now() },
-      })
+      } as SessionMessageInfo)
     }
 
     this.notify([sessionID])

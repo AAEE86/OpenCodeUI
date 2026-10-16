@@ -34,7 +34,7 @@ import { MSG_SPACING } from './messageSpacing'
 import { MessageExpandPanel, useMessageExpandRender } from './messageExpand'
 import type { AssistantContent, AssistantMessage, SessionMessageInfo, UserMessage } from '../../types/api/message'
 import type { JsonValue } from '@opencode/client/promise'
-import { contentEntries, hasVisibleText, userMessageText, type ContentEntry } from '../../types/api/message'
+import { contentEntries, hasVisibleText, idleMessageError, userMessageText, type ContentEntry } from '../../types/api/message'
 import { currentToolFailed } from '../../types/api/toolState'
 import { resolveTaskChildSessionRef } from '../../utils/taskChildBinding'
 import { expandCodeModeSubCalls } from './parts/executeSubCallSummary'
@@ -324,6 +324,21 @@ export const MessageRenderer = memo(function MessageRenderer({
   // `!` shell 命令消息（官方 SessionShellMessage：投影成 shell 工具调用）
   if (message.type === 'shell') {
     return <ShellMessageView message={message} />
+  }
+
+  // 失败的 idle 标记：会话级错误（pre-promotion failure 等）渲染成错误卡片
+  // （官方 session-ui projection.ts 的 isFailedIdle → Error 卡片）。
+  // 这类失败没有任何 assistant 消息，不渲染的话错误永远不可见。
+  if (message.type === 'idle') {
+    const idleError = idleMessageError(message)
+    if (message.outcome === 'failed' && idleError) {
+      return (
+        <div className="flex flex-col w-full">
+          <MessageErrorView error={idleError} stateKey={`message:${message.id}:error`} />
+        </div>
+      )
+    }
+    return null
   }
 
   if (message.type !== 'assistant') return null

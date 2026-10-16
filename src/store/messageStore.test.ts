@@ -680,12 +680,13 @@ describe('messageStore（原生 v2 消息）', () => {
       expect(idle).toMatchObject({ id: 'msg_done', type: 'idle', outcome: 'succeeded', time: { created: 200 } })
     })
 
-    it('failed → outcome=failed', () => {
+    it('failed → outcome=failed + 错误挂到 idle 标记上（官方 idle("failed", error)，丢了就永不渲染）', () => {
       messageStore.handleExecutionFailed({ sessionID: SESSION, error: { type: 'x', message: 'boom' } })
 
       expect(messageStore.getSessionState(SESSION)?.messages.at(-1)).toMatchObject({
         type: 'idle',
         outcome: 'failed',
+        error: { type: 'x', message: 'boom' },
       })
     })
 

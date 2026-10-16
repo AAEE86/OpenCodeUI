@@ -45,6 +45,7 @@ import type {
   SessionMessageToolStateRunning as V2ToolStateRunning,
   SessionMessageToolStateStreaming as V2ToolStateStreaming,
   SessionMessagesResponse as V2MessagesResponse,
+  SessionStructuredError,
   ToolContent as V2ToolContent,
 } from '@opencode/client/promise'
 
@@ -213,4 +214,32 @@ export function hasVisibleText(content: AssistantContent): boolean {
 /** 用户消息的可见正文（v2 里正文就是 message.text） */
 export function userMessageText(message: UserMessage): string {
   return typeof message.text === 'string' ? message.text : ''
+}
+
+// ============================================
+// idle 标记消息
+// ============================================
+
+/**
+ * 取 idle 消息上的错误。
+ *
+ * 服务端投影的 idle 消息带 `error`（schema `session-message.ts` 的 Idle：
+ * `error: SessionError.Error.pipe(optional)`，`session.execution.failed`
+ * 投影成 `idle("failed", error)`），但 @opencode/client 生成的
+ * `SessionMessageIdle` 类型漏了该字段——运行时有、类型没有，这里用交叉类型取回。
+ */
+export function idleMessageError(message: SessionMessageInfo): SessionStructuredError | undefined {
+  if (message.type !== 'idle') return undefined
+  return (message as V2Idle & { error?: SessionStructuredError }).error
+}
+
+/**
+ * 失败 idle 标记（官方 session-ui `projection.ts` 的 isFailedIdle）。
+ *
+ * 会话级失败（如 pre-promotion failure：prompt 没能提升成 assistant 工作）时，
+ * 服务端只留一条带 error 的失败 idle 标记、没有任何 assistant 消息——
+ * 不把它渲染出来，这个错误就永远不可见。
+ */
+export function isFailedIdleMessage(message: SessionMessageInfo): boolean {
+  return message.type === 'idle' && message.outcome === 'failed' && idleMessageError(message) != null
 }

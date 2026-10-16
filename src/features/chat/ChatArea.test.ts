@@ -19,7 +19,7 @@ import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes 
 import { buildVisibleMessageEntries, getVisibleMessageForkTargetId } from './chatAreaVisibility'
 import { buildChatPageViewModel } from './useChatPageViewModel'
 import type { AssistantContent, AssistantMessage, SessionMessageInfo, UserMessage } from '../../types/api/message'
-import { isAssistantMessage } from '../../types/api/message'
+import { isAssistantMessage, isFailedIdleMessage, idleMessageError } from '../../types/api/message'
 
 /** 助手消息的 content（非助手返回空数组，测试断言里方便用） */
 function contentOf(message: SessionMessageInfo): AssistantContent[] {
@@ -612,6 +612,104 @@ describe('buildProcessTimeline', () => {
 
     expect(timeline).toHaveLength(1)
     expect(timeline[0]).toMatchObject({ kind: 'message', key: 'user-1' })
+  })
+
+  it('renders a failed idle marker as an error item (pre-promotion failure)', () => {
+    // 会话级失败：prompt 没能提升成 assistant 工作，只剩一条带 error 的失败 idle 标记。
+    // 不渲染它，错误就永远不可见（官方 session-ui projection.ts 的 isFailedIdle）。
+    const failedIdle = {
+      id: 'idle-1',
+      type: 'idle',
+      outcome: 'failed',
+      error: { type: 'provider.auth', message: 'Invalid API key' },
+      time: { created: 1001 },
+    } as SessionMessageInfo
+    const messages = [createUserMessage('user-1', 1000), failedIdle]
+    const timeline = buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    const errorItem = timeline.find(item => item.kind === 'message' && item.key === 'idle-1')
+    expect(errorItem).toBeTruthy()
+    if (errorItem?.kind === 'message') {
+      expect(isFailedIdleMessage(errorItem.message)).toBe(true)
+      expect(idleMessageError(errorItem.message)).toMatchObject({ type: 'provider.auth' })
+    }
+  })
+
+  it('does not duplicate the error card when the last assistant already shows it', () => {
+    // assistant.error 已由 MessageErrorView 渲染 → idle 卡片跳过（官方同款去重）
+    const failedAssistant = createAssistantMessage(
+      'assistant-1',
+      [createTextPart('text-1', 'assistant-1', 'oops')],
+      1001,
+      1002,
+      { type: 'provider', message: 'boom' },
+    )
+    const failedIdle = {
+      id: 'idle-1',
+      type: 'idle',
+      outcome: 'failed',
+      error: { type: 'provider', message: 'boom' },
+      time: { created: 1003 },
+    } as SessionMessageInfo
+    const messages = [createUserMessage('user-1', 1000), failedAssistant, failedIdle]
+    const timeline = buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    expect(timeline.some(item => item.kind === 'message' && item.key === 'idle-1')).toBe(false)
+  })
+
+  it('still shows the idle error card when the assistant error was an interruption', () => {
+    // assistant 是被中断的（abort）→ 不算「已显示错误」，idle 卡片仍要渲染
+    const aborted = createAssistantMessage(
+      'assistant-1',
+      [createTextPart('text-1', 'assistant-1', 'partial')],
+      1001,
+      1002,
+      { type: 'MessageAbortedError', message: 'aborted' },
+    )
+    const failedIdle = {
+      id: 'idle-1',
+      type: 'idle',
+      outcome: 'failed',
+      error: { type: 'provider', message: 'boom' },
+      time: { created: 1003 },
+    } as SessionMessageInfo
+    const messages = [createUserMessage('user-1', 1000), aborted, failedIdle]
+    const timeline = buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    expect(timeline.some(item => item.kind === 'message' && item.key === 'idle-1')).toBe(true)
+  })
+
+  it('ignores succeeded idle markers', () => {
+    const okIdle = {
+      id: 'idle-1',
+      type: 'idle',
+      outcome: 'succeeded',
+      time: { created: 1001 },
+    } as SessionMessageInfo
+    const messages = [createUserMessage('user-1', 1000), okIdle]
+    const timeline = buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    expect(timeline.some(item => item.key === 'idle-1')).toBe(false)
   })
 
   it('keeps only the earliest pending Working shell when a later user is queued', () => {

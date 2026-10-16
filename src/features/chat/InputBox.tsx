@@ -260,7 +260,6 @@ function InputBoxComponent({
   const [shellMode, setShellMode] = useState(false)
   // 附件状态（图片、文件、文件夹、agent）
   const [attachments, setAttachments] = useState<Attachment[]>([])
-  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // @ Mention 状态
   const [mentionOpen, setMentionOpen] = useState(false)
@@ -362,7 +361,7 @@ function InputBoxComponent({
           textareaRef.current.setSelectionRange(revertedText.length, revertedText.length)
         }
       })
-    } else if (prevRevertedTextRef.current !== undefined && revertedText === undefined && !isSubmitting) {
+    } else if (prevRevertedTextRef.current !== undefined && revertedText === undefined) {
       frameId = requestAnimationFrame(() => {
         setText('')
         setAttachments([])
@@ -376,7 +375,7 @@ function InputBoxComponent({
         cancelAnimationFrame(frameId)
       }
     }
-  }, [revertedText, revertedAttachments, isSubmitting])
+  }, [revertedText, revertedAttachments])
 
   // 队列编辑草稿：装载（暂存当前输入）/ 恢复（取消编辑），nonce 为触发键
   const draftStashRef = useRef<{ text: string; attachments: Attachment[] } | null>(null)
@@ -561,29 +560,42 @@ function InputBoxComponent({
     [attachments, onClearRevert, onCommand, resetDraft, restoreDraft, text],
   )
 
-  const runSubmit = useCallback(
-    async (submit: () => Promise<boolean | void> | boolean | void, onSuccess?: () => void, onFailure?: () => void) => {
-      if (isSubmitting) return false
-
-      setIsSubmitting(true)
-      try {
-        const result = await submit()
-        if (result === false) {
-          onFailure?.()
-          return false
+  /**
+   * 提交即清空、后台发送、失败恢复（官方 composer submit.ts 同款时序：
+   * clearSubmission → void sending → failSubmission(restore)）。
+   *
+   * 之前用 runSubmit 等 POST 落定（switchModel → switchAgent → prompt 三个
+   * 串行 RTT）才清输入框，按回车后文本要在框里「粘」几百毫秒——不优雅的
+   * 体感来源。现在提交瞬间清空，发送在后台跑；失败时输入框还没被新内容
+   * 占用才恢复旧草稿（sendMessageNow 另有失败通知）。
+   */
+  const submitOptimistically = useCallback(
+    (submit: () => Promise<boolean | void> | boolean | void, opts?: { onSuccess?: () => void; onFailure?: () => void }) => {
+      const draftSnapshot: HistoryEntry = { text, attachments: [...attachments] }
+      resetDraft()
+      void (async () => {
+        let ok: boolean
+        try {
+          ok = (await submit()) !== false
+        } catch {
+          ok = false
         }
-
-        onSuccess?.()
-        return true
-      } finally {
-        setIsSubmitting(false)
-      }
+        if (ok) {
+          opts?.onSuccess?.()
+          return
+        }
+        opts?.onFailure?.()
+        const currentDraft = latestDraftRef.current
+        if (currentDraft.text.length === 0 && currentDraft.attachments.length === 0) {
+          restoreDraft(draftSnapshot)
+        }
+      })()
     },
-    [isSubmitting],
+    [attachments, resetDraft, restoreDraft, text],
   )
 
   const handleSend = useCallback(() => {
-    if (!canSend || isSubmitting) return
+    if (!canSend) return
 
     // shell mode：原样提交命令给 session.shell，保持 shell mode（类终端连续输入）
     if (shellMode) {
@@ -591,11 +603,9 @@ function InputBoxComponent({
       if (!command || !onShell) return
       // shell 轨道历史记账（官方 history.add 同款：发送即记账、失败移除）
       promptHistoryStore.add(command, [], 'shell')
-      void runSubmit(
-        () => onShell(command),
-        () => setText(''),
-        () => promptHistoryStore.remove(command, [], 'shell'),
-      )
+      submitOptimistically(() => onShell(command), {
+        onFailure: () => promptHistoryStore.remove(command, [], 'shell'),
+      })
       return
     }
 
@@ -626,20 +636,21 @@ function InputBoxComponent({
 
       // normal 轨道历史记账（官方 history.add 同款：发送即记账、失败移除）
       promptHistoryStore.add(text, attachments, 'normal')
-      void runSubmit(
+      submitOptimistically(
         () =>
           onSend(text, attachments, {
             agent: agentObj?.id ?? agentRef,
             variant: selectedVariant,
           }),
-        () => {
-          // 队列编辑草稿发送成功 → 丢弃暂存（官方 confirmEdit 同款：
-          // 发送的内容就是编辑结果，不再恢复旧输入）
-          draftStashRef.current = null
-          resetDraft()
-          onClearRevert?.()
+        {
+          onSuccess: () => {
+            // 队列编辑草稿发送成功 → 丢弃暂存（官方 confirmEdit 同款：
+            // 发送的内容就是编辑结果，不再恢复旧输入）
+            draftStashRef.current = null
+            onClearRevert?.()
+          },
+          onFailure: () => promptHistoryStore.remove(text, attachments, 'normal'),
         },
-        () => promptHistoryStore.remove(text, attachments, 'normal'),
       )
     }
 
@@ -655,8 +666,7 @@ function InputBoxComponent({
         .catch(() => false)
         .then(isCommand => {
           if (isCommand) {
-            void onCommand(trimmedText)
-            resetDraft()
+            submitCommandOptimistically(trimmedText)
           } else {
             // 不是已知命令 → 按普通消息发送
             sendCurrent()
@@ -670,18 +680,16 @@ function InputBoxComponent({
     agents,
     attachments,
     canSend,
-    isSubmitting,
     onCommand,
     onClearRevert,
     onSend,
     onShell,
-    resetDraft,
-    runSubmit,
+    rootPath,
     selectedAgent,
     selectedVariant,
     shellMode,
     submitCommandOptimistically,
-    rootPath,
+    submitOptimistically,
     text,
   ])
 
@@ -1056,7 +1064,7 @@ function InputBoxComponent({
   // 通用文件上传 — 根据模型能力判断是否接受
   const handleFilesSelected = useCallback(
     async (files: File[]) => {
-      if (files.length === 0 || !supportsAnyFile || isSubmitting) return
+      if (files.length === 0 || !supportsAnyFile) return
 
       const nextAttachments: Attachment[] = []
 
@@ -1085,14 +1093,12 @@ function InputBoxComponent({
         setAttachments(prev => [...prev, ...nextAttachments])
       }
     },
-    [supportsAnyFile, fileCaps, isSubmitting],
+    [supportsAnyFile, fileCaps],
   )
 
   // 删除附件
   const handleRemoveAttachment = useCallback(
     (id: string) => {
-      if (isSubmitting) return
-
       const attachment = attachments.find(a => a.id === id)
       if (!attachment) return
 
@@ -1106,7 +1112,7 @@ function InputBoxComponent({
 
       setAttachments(prev => prev.filter(a => a.id !== id))
     },
-    [attachments, isSubmitting, text],
+    [attachments, text],
   )
 
   // 粘贴处理 — 根据模型能力过滤可粘贴的文件类型
@@ -1280,7 +1286,7 @@ function InputBoxComponent({
 
   const handleTauriExternalDrop = useCallback(
     async (paths: string[]) => {
-      if (paths.length === 0 || isSubmitting) return
+      if (paths.length === 0) return
 
       try {
         const droppedPaths = await getDroppedPathsInfo(paths)
@@ -1310,7 +1316,7 @@ function InputBoxComponent({
         console.warn('[InputBox] Failed to process Tauri dropped paths:', err)
       }
     },
-    [buildDraggedFileInfo, createUploadAttachmentFromDroppedPath, externalFileDropMode, insertDraggedFiles, isSubmitting],
+    [buildDraggedFileInfo, createUploadAttachmentFromDroppedPath, externalFileDropMode, insertDraggedFiles],
   )
 
   const handleTauriDragDropEvent = useCallback(
@@ -1531,7 +1537,7 @@ function InputBoxComponent({
                               attachments={attachments}
                               onRemove={handleRemoveAttachment}
                               variant="rail"
-                              className={isSubmitting ? 'pr-4 pointer-events-none opacity-70' : 'pr-4'}
+                              className="pr-4"
                             />
                           </div>
 
@@ -1598,7 +1604,6 @@ function InputBoxComponent({
                       fileCapabilities={fileCaps}
                       onFilesSelected={handleFilesSelected}
                       isStreaming={isStreaming}
-                      isSending={isSubmitting}
                       busyDelivery={busyDelivery}
                       onBusyDeliveryChange={onBusyDeliveryChange}
                       deliveryChipVisible={queueDeliveryChipVisible}

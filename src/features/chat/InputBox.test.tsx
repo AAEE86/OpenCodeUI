@@ -151,10 +151,13 @@ describe('InputBox slash command selection', () => {
       expect(onSend).toHaveBeenCalledWith('hello world', [], { agent: undefined, variant: undefined })
     })
 
-    expect(textarea.value).toBe('hello world')
+    // 官方同款失败恢复：输入框仍是空的，旧草稿被放回来
+    await waitFor(() => {
+      expect(textarea.value).toBe('hello world')
+    })
   })
 
-  it('waits for send acknowledgement before clearing the draft', async () => {
+  it('clears the draft immediately on submit and sends in the background', async () => {
     let resolveSend: ((value: boolean) => void) | null = null
     const onSend = vi.fn(
       () =>
@@ -169,15 +172,43 @@ describe('InputBox slash command selection', () => {
     fireEvent.change(textarea, { target: { value: 'pending send' } })
     fireEvent.click(screen.getByRole('button', { name: 'send' }))
 
-    expect(textarea.value).toBe('pending send')
+    // 官方 composer 时序：提交即清空，不等 POST RTT
+    expect(textarea.value).toBe('')
 
     await act(async () => {
       resolveSend?.(true)
     })
 
-    await waitFor(() => {
-      expect(textarea.value).toBe('')
+    // 发送成功后草稿保持清空
+    expect(textarea.value).toBe('')
+  })
+
+  it('does not clobber a newer draft when a background send fails', async () => {
+    let resolveSend: ((value: boolean) => void) | null = null
+    const onSend = vi.fn(
+      () =>
+        new Promise<boolean>(resolve => {
+          resolveSend = resolve
+        }),
+    )
+
+    render(<InputBox paneId="pane-test" onSend={onSend} />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'first message' } })
+    fireEvent.click(screen.getByRole('button', { name: 'send' }))
+
+    expect(textarea.value).toBe('')
+
+    // 上一条还在后台发，用户已经开始打下一条
+    fireEvent.change(textarea, { target: { value: 'next draft' } })
+
+    // 上一条发送失败 → 不能覆盖正在打的新草稿
+    await act(async () => {
+      resolveSend?.(false)
     })
+
+    expect(textarea.value).toBe('next draft')
   })
 
   it('clears api slash command drafts immediately after keyboard submission', async () => {

@@ -48,10 +48,12 @@ const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 function toLoadMessageError(error: unknown): APIError {
   const message = error instanceof Error ? error.message : String(error || 'Failed to load session')
   const stack = error instanceof Error ? error.stack : undefined
+  // 截断堆栈：完整堆栈整段塞进 UI 详情太吓人，留前几帧足够定位问题
+  const shortStack = stack?.split('\n').slice(0, 6).join('\n')
   return {
     type: 'APIError',
     message,
-    ...(stack ? { response: { body: stack } } : {}),
+    ...(shortStack ? { response: { body: shortStack } } : {}),
   }
 }
 

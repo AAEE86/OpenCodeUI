@@ -315,7 +315,11 @@ export function PaneHeader({
         )}
       </div>
 
-      <div data-chat-header-shadow className="absolute top-full left-0 right-0 h-8 bg-gradient-to-b from-bg-100 to-transparent pointer-events-none z-10" />
+      {/* 同 Header：纯色块 + mask 渐隐，避开 Tailwind v4 渐变类的 oklab 插值分层 */}
+      <div
+        data-chat-header-shadow
+        className="absolute top-full left-0 right-0 h-8 bg-bg-100 pointer-events-none z-10 [-webkit-mask-image:linear-gradient(to_bottom,black,transparent)] [mask-image:linear-gradient(to_bottom,black,transparent)]"
+      />
     </div>
   )
 }

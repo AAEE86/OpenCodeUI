@@ -284,7 +284,13 @@ export function Header({
 
       <ShareDialog isOpen={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />
 
-      <div data-chat-header-shadow className="absolute top-full left-0 right-0 h-8 bg-gradient-to-b from-bg-100 to-transparent pointer-events-none z-10" />
+      {/* 用纯色块 + mask 渐隐，而不是 bg-gradient：渐变类在 Tailwind v4 里默认走 oklab，
+          从 bg-bg-100 插值到 transparent（透明黑）中间会带出灰，和内容叠起来就是分层。
+          mask 只动 alpha，不插值颜色，任何主题下都干净。 */}
+      <div
+        data-chat-header-shadow
+        className="absolute top-full left-0 right-0 h-8 bg-bg-100 pointer-events-none z-10 [-webkit-mask-image:linear-gradient(to_bottom,black,transparent)] [mask-image:linear-gradient(to_bottom,black,transparent)]"
+      />
     </div>
   )
 }

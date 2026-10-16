@@ -3,7 +3,7 @@
 //
 // 原本私有于 MessageRenderer，抽出来给队列气泡（QueueBubbles）复用：
 // 正文/折叠/遮罩/展开按钮逻辑共享，气泡外壳（className）、正文颜色
-// （textClassName）、渐变遮罩色（maskClassName）按场景配。
+// （textClassName）、渐变遮罩底色（maskClassName）按场景配。
 // ============================================
 
 import { memo, useLayoutEffect, useRef, useState } from 'react'
@@ -32,9 +32,9 @@ export interface CollapsibleUserTextProps {
   className?: string
   /** 正文颜色等；默认 text-text-100 */
   textClassName?: string
-  /** 底部渐变遮罩的 from 色 token；默认 from-bg-300（与默认外壳底色一致） */
+  /** 底部渐变遮罩的底色类；默认 bg-bg-300（与默认外壳底色一致） */
   maskClassName?: string
-  /** 是否显示底部渐变遮罩（半透明底色的气泡没有能严丝合缝的 from 色，可关掉） */
+  /** 是否显示底部渐变遮罩（半透明底色的气泡没有能严丝合缝的底色，可关掉） */
   showMask?: boolean
 }
 
@@ -45,7 +45,7 @@ export const CollapsibleUserText = memo(function CollapsibleUserText({
   messageId,
   className = 'px-4 py-2.5 bg-bg-300 rounded-2xl max-w-full',
   textClassName = 'text-text-100',
-  maskClassName = 'from-bg-300',
+  maskClassName = 'bg-bg-300',
   showMask = true,
 }: CollapsibleUserTextProps) {
   const { t } = useTranslation('message')
@@ -110,7 +110,7 @@ export const CollapsibleUserText = memo(function CollapsibleUserText({
         {/* 底部渐变遮罩 */}
         {showMask && showCollapse && isCollapsed && (
           <div
-            className={`absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t ${maskClassName} to-transparent pointer-events-none`}
+            className={`absolute bottom-0 left-0 right-0 h-12 ${maskClassName} pointer-events-none [-webkit-mask-image:linear-gradient(to_top,black,transparent)] [mask-image:linear-gradient(to_top,black,transparent)]`}
           />
         )}
       </div>

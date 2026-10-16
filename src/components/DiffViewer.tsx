@@ -17,6 +17,7 @@ import { useDynamicVirtualScroll } from '../hooks/useDynamicVirtualScroll'
 import { themeStore } from '../store/themeStore'
 import type { DiffStyle } from '../store/themeStore'
 import { getLineCount, getLineNumberColumnWidth } from '../utils/lineNumberUtils'
+import { isSyntheticPadLine } from '../utils/diffUtils'
 import { useUiState } from '../utils/uiDisclosureState'
 
 // ============================================
@@ -137,6 +138,15 @@ interface ExpansionRegion {
 function collapseContextPaired(lines: PairedLine[], expandedRegions?: ReadonlyMap<number, ExpansionRegion>): PairedLineOrCollapsed[] {
   if (lines.length === 0) return []
 
+  // 被折叠区间是否含 patch 还原的合成占位行（展开了也没有真实内容）
+  const rangeHasSynthetic = (start: number, end: number): boolean => {
+    for (let j = start; j < end; j++) {
+      const line = lines[j]
+      if (isSyntheticPadLine(line.left.content) || isSyntheticPadLine(line.right.content)) return true
+    }
+    return false
+  }
+
   const result: PairedLineOrCollapsed[] = []
   let contextStart = -1
 
@@ -159,7 +169,9 @@ function collapseContextPaired(lines: PairedLine[], expandedRegions?: ReadonlyMa
           const suffixStart = Math.max(prefixCount, ctxLen - keepAfter - expanded.fromEnd)
 
           for (let j = contextStart; j < contextStart + prefixCount; j++) result.push(lines[j])
-          if (suffixStart > prefixCount) {
+          // 合成区域（patch 还原的间隙占位行）不渲染折叠条：展开了也没有真实内容，
+          // 直接让两侧真实 context 行相邻，靠行号跳跃体现不连续（与 git diff 一致）
+          if (suffixStart > prefixCount && !rangeHasSynthetic(contextStart + prefixCount, contextStart + suffixStart)) {
             const count = suffixStart - prefixCount
             result.push({
               collapsed: true,
@@ -186,6 +198,14 @@ function collapseContextPaired(lines: PairedLine[], expandedRegions?: ReadonlyMa
 function collapseContextUnified(lines: UnifiedLine[], expandedRegions?: ReadonlyMap<number, ExpansionRegion>): UnifiedLineOrCollapsed[] {
   if (lines.length === 0) return []
 
+  // 被折叠区间是否含 patch 还原的合成占位行（展开了也没有真实内容）
+  const rangeHasSynthetic = (start: number, end: number): boolean => {
+    for (let j = start; j < end; j++) {
+      if (isSyntheticPadLine(lines[j].content)) return true
+    }
+    return false
+  }
+
   const result: UnifiedLineOrCollapsed[] = []
   let contextStart = -1
 
@@ -208,7 +228,9 @@ function collapseContextUnified(lines: UnifiedLine[], expandedRegions?: Readonly
           const suffixStart = Math.max(prefixCount, ctxLen - keepAfter - expanded.fromEnd)
 
           for (let j = contextStart; j < contextStart + prefixCount; j++) result.push(lines[j])
-          if (suffixStart > prefixCount) {
+          // 合成区域（patch 还原的间隙占位行）不渲染折叠条：展开了也没有真实内容，
+          // 直接让两侧真实 context 行相邻，靠行号跳跃体现不连续（与 git diff 一致）
+          if (suffixStart > prefixCount && !rangeHasSynthetic(contextStart + prefixCount, contextStart + suffixStart)) {
             const count = suffixStart - prefixCount
             result.push({
               collapsed: true,

@@ -4,6 +4,17 @@ import { parsePatch } from 'diff'
 const MAX_RECONSTRUCTED_LINES = 20000
 
 /**
+ * 占位行的标记内容：私有使用区字符，真实代码行不可能恰好是它。
+ * 折叠逻辑据此识别"合成区域"（patch 里不存在的内容），渲染成不可展开的折叠条——
+ * 展开了也没有真实内容可看（官方同样不提供这种展开）。
+ */
+export const SYNTHETIC_PAD_LINE = ''
+
+export function isSyntheticPadLine(content: string): boolean {
+  return content === SYNTHETIC_PAD_LINE
+}
+
+/**
  * 把 unified diff（带 `@@ -oldStart,n +newStart,n @@` 绝对行号）还原成"完整" before/after：
  * hunk 之间未变化的行用空行占位补齐，使后续 diffLines 重算后变更落在真实行号上，
  * 且折叠/高亮/行号宽度全部沿用现有管线，无需改渲染组件。
@@ -31,8 +42,8 @@ export function reconstructBeforeAfterFromPatch(patch: string): { before: string
     const gapOld = hunk.oldStart - oldPos
     const gapNew = hunk.newStart - newPos
     if (gapOld < 0 || gapNew < 0) return null
-    for (let i = 0; i < gapOld; i++) beforeLines.push('')
-    for (let i = 0; i < gapNew; i++) afterLines.push('')
+    for (let i = 0; i < gapOld; i++) beforeLines.push(SYNTHETIC_PAD_LINE)
+    for (let i = 0; i < gapNew; i++) afterLines.push(SYNTHETIC_PAD_LINE)
     oldPos += gapOld
     newPos += gapNew
 

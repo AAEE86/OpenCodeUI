@@ -82,6 +82,9 @@ import type {
   SessionCompactionFailed,
   SessionShellStarted,
   SessionShellEnded,
+  ShellCreated,
+  ShellExited,
+  ShellDeleted,
   SessionSkillActivated,
   SessionInstructionsUpdated,
   V2Event,
@@ -292,6 +295,9 @@ export type CompactionFailedPayload = SessionCompactionFailed['data']
 // ---- shell / skill / instructions ----
 
 export type ShellStartedPayload = SessionShellStarted['data']
+export type ShellCreatedPayload = ShellCreated['data']
+export type ShellExitedPayload = ShellExited['data']
+export type ShellDeletedPayload = ShellDeleted['data']
 
 export type ShellEndedPayload = SessionShellEnded['data']
 
@@ -402,6 +408,14 @@ export interface EventCallbacks {
   /** shell 生命周期 */
   onShellStarted?: (data: ShellStartedPayload, facts?: EventFacts) => void
   onShellEnded?: (data: ShellEndedPayload, facts?: EventFacts) => void
+  /**
+   * 全局 shell 库存事件（官方客户端数据层的实时来源）：
+   * shell.created 带完整 ShellInfo 直写库存，挂载行即时出现；
+   * exited/deleted 就地更新/移除。location 是事件信封上的工作区引用
+   */
+  onShellInventoryCreated?: (data: ShellCreatedPayload, location?: LocationRef) => void
+  onShellInventoryExited?: (data: ShellExitedPayload, location?: LocationRef) => void
+  onShellInventoryDeleted?: (data: ShellDeletedPayload, location?: LocationRef) => void
   /** 激活 skill */
   onSkillActivated?: (data: SkillActivatedPayload, facts?: EventFacts) => void
   /** 指令文件变更（插入 system 消息） */

@@ -155,4 +155,43 @@ describe('shellInventoryStore（按目录登记 + 事件驱动 + 兜底轮询）
     untrackB()
     unsubscribe()
   })
+
+  it('shell.created/exited/deleted 事件直写：即时生效不等重取（官方数据层同款）', async () => {
+    listShellsMock.mockResolvedValue([makeShell('sh-1', 's1')])
+    const spy = vi.fn()
+    const unsubscribe = shellInventoryStore.subscribe(spy)
+    const untrack = shellInventoryStore.trackDirectory(DIR)
+    await vi.advanceTimersByTimeAsync(0)
+    const v0 = shellInventoryStore.getVersion()
+    spy.mockClear()
+
+    // created：新 shell 立即 upsert（不发 listShells）
+    const callsBefore = listShellsMock.mock.calls.length
+    shellInventoryStore.applyShellCreated(DIR, makeShell('sh-2', 's1'))
+    expect(shellInventoryStore.getShellsForDir(DIR).map(s => s.id)).toEqual(['sh-1', 'sh-2'])
+    expect(shellInventoryStore.getVersion()).toBe(v0 + 1)
+    expect(spy).toHaveBeenCalled()
+    expect(listShellsMock.mock.calls.length).toBe(callsBefore)
+
+    // exited：就地更新状态/退出码（running 过滤立即排除）
+    shellInventoryStore.applyShellExited(DIR, 'sh-2', 'exited', 0)
+    const shells = shellInventoryStore.getShellsForDir(DIR)
+    expect(shells.find(s => s.id === 'sh-2')?.status).toBe('exited')
+    expect(shells.find(s => s.id === 'sh-2')?.exit).toBe(0)
+    expect(runningShellsForSession(shells, 's1').map(s => s.id)).toEqual(['sh-1'])
+
+    // deleted：移除
+    shellInventoryStore.applyShellDeleted(DIR, 'sh-2')
+    expect(shellInventoryStore.getShellsForDir(DIR).map(s => s.id)).toEqual(['sh-1'])
+
+    // 未登记目录的事件不维护（登记时会全量拉）；无目录退化为防抖重取
+    shellInventoryStore.applyShellCreated('/not-tracked', makeShell('sh-9', 's9'))
+    expect(shellInventoryStore.getShellsForDir('/not-tracked')).toEqual([])
+    shellInventoryStore.applyShellCreated(undefined, makeShell('sh-9', 's9'))
+    await vi.advanceTimersByTimeAsync(600)
+    expect(listShellsMock.mock.calls.length).toBeGreaterThan(callsBefore)
+
+    untrack()
+    unsubscribe()
+  })
 })

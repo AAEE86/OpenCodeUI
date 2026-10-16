@@ -894,6 +894,24 @@ export function useGlobalEvents(directories?: string[]) {
           shellInventoryStore.requestRefresh()
         },
 
+        // 全局 shell 库存事件：官方客户端数据层的实时来源——事件带完整
+        // ShellInfo 直写库存，挂载行/活跃判定即时更新，不用等防抖重取。
+        // 库存只跟活动服务器，其它服务器的事件忽略
+        onShellInventoryCreated: (data, location) => {
+          if (serverId !== serverStore.getActiveServerId()) return
+          shellInventoryStore.applyShellCreated(location?.directory, data.info)
+        },
+
+        onShellInventoryExited: (data, location) => {
+          if (serverId !== serverStore.getActiveServerId()) return
+          shellInventoryStore.applyShellExited(location?.directory, data.id, data.status, data.exit)
+        },
+
+        onShellInventoryDeleted: (data, location) => {
+          if (serverId !== serverStore.getActiveServerId()) return
+          shellInventoryStore.applyShellDeleted(location?.directory, data.id)
+        },
+
         onSkillActivated: (data, facts) => {
           const scopedId = scope(data.sessionID)
           messageStore.handleSkillActivated({ ...data, sessionID: scopedId }, facts)

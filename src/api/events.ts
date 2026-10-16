@@ -347,6 +347,15 @@ function dispatchEvent(callbacks: EventCallbacks, event: GlobalEvent): void {
     case 'session.shell.ended':
       callbacks.onShellEnded?.(event.data, facts)
       break
+    case 'shell.created':
+      callbacks.onShellInventoryCreated?.(event.data, event.location)
+      break
+    case 'shell.exited':
+      callbacks.onShellInventoryExited?.(event.data, event.location)
+      break
+    case 'shell.deleted':
+      callbacks.onShellInventoryDeleted?.(event.data, event.location)
+      break
     case 'session.skill.activated':
       callbacks.onSkillActivated?.(event.data, facts)
       break

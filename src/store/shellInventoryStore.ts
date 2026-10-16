@@ -97,6 +97,66 @@ class ShellInventoryStore {
     }, REFRESH_DEBOUNCE_MS)
   }
 
+  /**
+   * shell.created 事件直写（官方客户端数据层同款实时来源）：
+   * 完整 ShellInfo 就地 upsert，挂载行/活跃判定即时出现，不等重取。
+   * 只维护已登记的目录（未登记的首次登记时会全量拉）；没有目录信息时
+   * 退化为防抖重取兜底
+   */
+  applyShellCreated = (directory: string | undefined, info: ShellInfo) => {
+    if (!directory) {
+      this.requestRefresh()
+      return
+    }
+    if (!this.dirRefs.has(directory)) return
+    const list = this.shellsByDir.get(directory) ?? []
+    const idx = list.findIndex(shell => shell.id === info.id)
+    if (idx >= 0 && sameShellList([list[idx]], [info])) return
+    const next = idx >= 0 ? list.map((shell, i) => (i === idx ? info : shell)) : [...list, info]
+    this.shellsByDir.set(directory, next)
+    this.bump()
+  }
+
+  /** shell.exited：状态/退出码就地更新——挂载行即时消失、弹窗状态即时翻转 */
+  applyShellExited = (directory: string | undefined, id: string, status: ShellInfo['status'], exit?: number) => {
+    if (!directory) {
+      this.requestRefresh()
+      return
+    }
+    const list = this.shellsByDir.get(directory)
+    if (!list) return
+    const idx = list.findIndex(shell => shell.id === id)
+    if (idx < 0) return
+    const prev = list[idx]
+    if (prev.status === status && prev.exit === exit) return
+    const updated: ShellInfo = {
+      ...prev,
+      status,
+      ...(exit !== undefined ? { exit } : {}),
+      time: { ...prev.time, completed: prev.time.completed ?? Date.now() },
+    }
+    this.shellsByDir.set(
+      directory,
+      list.map((shell, i) => (i === idx ? updated : shell)),
+    )
+    this.bump()
+  }
+
+  /** shell.deleted：从库存移除（服务端清理/被 remove） */
+  applyShellDeleted = (directory: string | undefined, id: string) => {
+    if (!directory) {
+      this.requestRefresh()
+      return
+    }
+    const list = this.shellsByDir.get(directory)
+    if (!list || !list.some(shell => shell.id === id)) return
+    this.shellsByDir.set(
+      directory,
+      list.filter(shell => shell.id !== id),
+    )
+    this.bump()
+  }
+
   private bump() {
     this.version++
     this.subscribers.forEach(fn => fn())

@@ -228,6 +228,18 @@ export const QueueBubbles = memo(function QueueBubbles({
                           <GripVerticalIcon />
                         </button>
                       )}
+                      {/* 插队是主操作，紧跟拖拽把手 */}
+                      {onSteer && (
+                        <button
+                          type="button"
+                          onClick={() => onSteer(item)}
+                          title={t('queue.moveToSteering')}
+                          aria-label={t('queue.moveToSteering')}
+                          className={ACTION_BTN_CLASS}
+                        >
+                          <ArrowUpIcon />
+                        </button>
+                      )}
                       <CopyButton text={text} position="static" />
                       {onRemove && (
                         <button
@@ -238,17 +250,6 @@ export const QueueBubbles = memo(function QueueBubbles({
                           className={ACTION_BTN_CLASS}
                         >
                           <TrashIcon />
-                        </button>
-                      )}
-                      {onSteer && (
-                        <button
-                          type="button"
-                          onClick={() => onSteer(item)}
-                          title={t('queue.moveToSteering')}
-                          aria-label={t('queue.moveToSteering')}
-                          className={ACTION_BTN_CLASS}
-                        >
-                          <ArrowUpIcon />
                         </button>
                       )}
                       {onEdit && (

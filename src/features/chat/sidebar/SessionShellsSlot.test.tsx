@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ShellInfo } from '@opencode/client/promise'
 import { createSessionPlaceholder } from '../../../utils/sessionPlaceholder'
+import { FullscreenProvider } from '../../../contexts/FullscreenContext'
 
 const { listShellsMock, removeShellMock, getShellOutputMock } = vi.hoisted(() => ({
   listShellsMock: vi.fn(),
@@ -76,21 +77,26 @@ describe('SessionShellsSlot（后台 shell 挂载）', () => {
     await waitFor(() => expect(listShellsMock.mock.calls.length).toBeGreaterThan(callsBefore), { timeout: 2000 })
   })
 
-  it('点击行打开输出弹窗（打开时存快照，shell 退出列表后弹窗不闪关）', async () => {
+  it('点击行打开输出弹窗（工具卡 UI + 快照，shell 退出列表后弹窗不闪关）', async () => {
     getShellOutputMock.mockResolvedValue({ output: 'hello\n', cursor: 6, size: 6, truncated: false })
     listShellsMock.mockResolvedValue([makeShell('sh-1', 'session-1', 'npm run dev')])
-    render(<SessionShellsSlot parentSession={parent} />)
+    // 工具卡的 BashRenderer 需要 FullscreenProvider（app 根部有，测试自己包）
+    render(
+      <FullscreenProvider>
+        <SessionShellsSlot parentSession={parent} />
+      </FullscreenProvider>,
+    )
 
     fireEvent.click(await screen.findByText('npm run dev'))
-    // 弹窗打开：状态行出现「运行中」
-    await screen.findByText('Running')
+    // 信息流同款工具卡：running 起始展开，实时输出直接可见
+    await screen.findByText(/hello/)
 
     // shell 退出 → 离开 running 列表（挂载行消失），但弹窗靠快照继续开着
     listShellsMock.mockResolvedValue([{ ...makeShell('sh-1', 'session-1'), status: 'exited', exit: 0 } as ShellInfo])
     shellInventoryStore.requestRefresh()
     await waitFor(() => expect(screen.queryByTitle('Stop this shell')).not.toBeInTheDocument(), { timeout: 2000 })
-    // 弹窗仍在，状态随后续库存刷新翻成 Exited
+    // 弹窗仍在，底部行随后续库存刷新出现退出码
     expect(screen.getByRole('dialog')).toBeInTheDocument()
-    await screen.findByText('Exited', {}, { timeout: 2000 })
+    await screen.findByText('Exit code 0', {}, { timeout: 2000 })
   })
 })

@@ -67,14 +67,7 @@
       "outputTitle": "后台 shell 输出",
       "stop": "停止",
       "stopTitle": "停止该 shell",
-      "exitCode": "退出码 {{code}}",
-      "emptyOutput": "（暂无输出）",
-      "status": {
-        "running": "运行中",
-        "exited": "已退出",
-        "timeout": "超时",
-        "killed": "已终止"
-      }
+      "exitCode": "退出码 {{code}}"
     },
     "searchChats": "搜索对话...",
     "newChat": "新对话",

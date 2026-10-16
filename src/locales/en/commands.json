@@ -67,14 +67,7 @@
       "outputTitle": "Background shell output",
       "stop": "Stop",
       "stopTitle": "Stop this shell",
-      "exitCode": "Exit code {{code}}",
-      "emptyOutput": "(no output yet)",
-      "status": {
-        "running": "Running",
-        "exited": "Exited",
-        "timeout": "Timed out",
-        "killed": "Killed"
-      }
+      "exitCode": "Exit code {{code}}"
     },
     "searchChats": "Search chats...",
     "newChat": "New Chat",

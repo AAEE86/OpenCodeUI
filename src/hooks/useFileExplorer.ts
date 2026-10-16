@@ -366,8 +366,10 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     await Promise.all([loadRoot(), loadStatuses()])
   }, [loadRoot, loadStatuses])
 
-  // 自动刷新：session idle / 窗口聚焦 / SSE 重连
-  useAutoRefresh(consumerId, sessionId ?? null, softRefresh, !!effectiveDirectory)
+  // 自动刷新：文件/分支变更事件 + session idle + SSE 重连（见 useAutoRefresh）
+  useAutoRefresh(consumerId, sessionId ?? null, softRefresh, !!effectiveDirectory, {
+    watchDirectory: effectiveDirectory,
+  })
 
   // 初始加载
   useEffect(() => {

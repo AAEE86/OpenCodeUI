@@ -39,6 +39,7 @@ import { outboxConfirm } from '../api/sendAdmission'
 import { autoApproveStore } from '../store/autoApproveStore'
 import { multiServerStore } from '../store/multiServerStore'
 import type { ApiFormInfo, ApiPermissionRequest } from '../api/types'
+import type { FilesystemChangedPayload, VcsBranchUpdatedPayload } from '../types/api'
 import type { SessionStatusMap } from '../types/api/session'
 import { INITIAL_MESSAGE_LIMIT } from '../constants'
 
@@ -59,6 +60,10 @@ export interface SessionEventCallbacks {
   onFormCancelled?: (data: { sessionID: string; formID: string }) => void
   onScrollRequest?: () => void
   onSessionIdle?: (sessionID: string) => void
+  /** 全局：工作区文件变更（广播给所有消费者，由消费者按目录过滤） */
+  onFilesystemChanged?: (data: FilesystemChangedPayload) => void
+  /** 全局：git 分支变化（commit / checkout / 切分支，广播给所有消费者） */
+  onVcsBranchUpdated?: (data: VcsBranchUpdatedPayload) => void
   /** v2：会话错误由 execution.failed 表达 */
   onExecutionFailed?: (sessionID: string) => void
   onReconnected?: (reason: 'network' | 'server-switch') => void
@@ -1076,6 +1081,20 @@ export function useGlobalEvents(directories?: string[]) {
           messageStore.handleSessionIdle(scopedId)
           childSessionStore.markIdle(scopedId)
           dispatchToConsumers(scopedId, cb => cb.onSessionIdle?.(scopedId))
+        },
+
+        // 全局事件（无 sessionId）：广播给所有消费者，由消费者按自己关心的目录过滤。
+        // filesystem.changed = 工作区文件真变了；vcs.branch.updated = commit/checkout/切分支。
+        onFilesystemChanged: data => {
+          for (const consumer of sessionConsumers.values()) {
+            consumer.callbacks.onFilesystemChanged?.(data)
+          }
+        },
+
+        onVcsBranchUpdated: data => {
+          for (const consumer of sessionConsumers.values()) {
+            consumer.callbacks.onVcsBranchUpdated?.(data)
+          }
         },
 
         onExecutionFailed: (data, facts) => {

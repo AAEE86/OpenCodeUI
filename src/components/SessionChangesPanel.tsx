@@ -106,6 +106,8 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
 
   // 展开的目录
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
+  // 已经出现过的目录路径：刷新时只把「新出现的目录」默认展开，不动用户手动展开/折叠的状态
+  const seenDirPathsRef = useRef<Set<string>>(new Set())
   const [fileContextMenu, setFileContextMenu] = useState<{ x: number; y: number; file: string } | null>(null)
 
   const projectRequestIdRef = useRef(0)
@@ -162,6 +164,9 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     [branchDiffs, changeMode, gitDiffs, turnDiffs],
   )
   const loading = projectLoading || loadingModes[changeMode]
+  // 仅「首次加载（还没数据）」才把内容区换成 loading 占位；
+  // 已有数据时的自动刷新保留现有列表与预览，新数据到了就地更新——刷新无感。
+  const initialLoading = loading && diffs.length === 0
 
   const focusChangeMenuOption = useCallback((mode: ChangeMode) => {
     changeMenuOptionRefs.current[mode]?.focus()
@@ -399,6 +404,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     setSelectedFile(null)
     setMountedPreviewFiles(new Set())
     setExpandedDirs(new Set())
+    seenDirPathsRef.current = new Set()
     setChangeMenuOpen(false)
     resetSplitHeight()
 
@@ -418,7 +424,19 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   }, [changeMode, changeOptions, loadDiffMode, project?.vcs])
 
   useEffect(() => {
-    setExpandedDirs(collectExpandedDirPaths(buildChangesTree(diffs)))
+    // 刷新时保留用户手动展开/折叠：首次（seen 为空）全部默认展开；
+    // 之后只把「新出现的目录」默认展开，已有的展开/折叠状态不动。
+    const currentDirs = collectExpandedDirPaths(buildChangesTree(diffs))
+    const seen = seenDirPathsRef.current
+    setExpandedDirs(prev => {
+      const next = new Set(prev)
+      for (const dir of currentDirs) {
+        if (!seen.has(dir)) next.add(dir)
+      }
+      return next
+    })
+    seenDirPathsRef.current = new Set([...seen, ...currentDirs])
+
     const { nextOpenFiles, nextActiveFile } = reconcileDiffPreviewState(
       diffs,
       openDiffFilesRef.current,
@@ -438,8 +456,10 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     await loadDiffMode(changeMode, { force: true, project: nextProject })
   }, [changeMode, loadDiffMode, loadProjectState])
 
-  // 自动刷新：session idle / 窗口聚焦 / SSE 重连
-  useAutoRefresh(consumerId, sessionId ?? null, handleRefresh, !!sessionId)
+  // 自动刷新：文件/分支变更事件 + session idle + SSE 重连（见 useAutoRefresh）
+  useAutoRefresh(consumerId, sessionId ?? null, handleRefresh, !!sessionId, {
+    watchDirectory: directory,
+  })
 
   // 选中文件
   const handleSelectFile = useCallback((file: string) => {
@@ -548,7 +568,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     () => previewDiffs.filter(diff => diff.file === selectedFile || mountedPreviewFiles.has(diff.file)),
     [mountedPreviewFiles, previewDiffs, selectedFile],
   )
-  const showPreview = !loading && selectedDiff !== null && !(error && diffs.length === 0)
+  const showPreview = !initialLoading && selectedDiff !== null && !(error && diffs.length === 0)
 
   if (projectLoading && !project) {
     return <div className="p-4 text-center text-text-400 text-[length:var(--fs-sm)]">{t('sessionChanges.loadingChanges')}</div>
@@ -785,7 +805,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
 
         {/* File List */}
         <div className="flex-1 overflow-auto panel-scrollbar-y">
-          {loading ? (
+          {initialLoading ? (
             <div className="p-4 text-center text-text-400 text-[length:var(--fs-sm)]">{t('sessionChanges.loadingChanges')}</div>
           ) : error && diffs.length === 0 ? (
             <div className="p-4 text-center text-danger-100 text-[length:var(--fs-sm)]">{error}</div>

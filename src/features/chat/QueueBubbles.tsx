@@ -47,8 +47,10 @@ interface QueueBubblesProps {
   stateKey?: string
 }
 
+// 和用户消息 action bar 同款规格：28×28 盒子 + 默认 16px 图标（CopyButton 也是 h-7 w-7），
+// 之前队列自己缩成 14px 图标，和 CopyButton 摆一排大小不一
 const ACTION_BTN_CLASS =
-  'p-1.5 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200/50 transition-colors'
+  'inline-flex items-center justify-center h-7 w-7 rounded-md text-text-400 hover:text-text-200 transition-colors'
 
 /** 官方 PointerActivationConstraints.Distance({ value: 4 }) 同款：4px 内不算拖拽 */
 const DRAG_THRESHOLD = 4
@@ -214,7 +216,7 @@ export const QueueBubbles = memo(function QueueBubbles({
                   )}
                   {/* 操作行：气泡下方（对齐用户消息 action bar） */}
                   {(onSteer || onEdit || onRemove || onReorder) && (
-                    <div className="flex items-center gap-0.5 px-1 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1 px-1 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity">
                       {onReorder && items.length > 1 && (
                         <button
                           type="button"
@@ -223,7 +225,7 @@ export const QueueBubbles = memo(function QueueBubbles({
                           aria-label={t('queue.dragReorder')}
                           className={`${ACTION_BTN_CLASS} cursor-grab active:cursor-grabbing touch-none`}
                         >
-                          <GripVerticalIcon size={14} />
+                          <GripVerticalIcon />
                         </button>
                       )}
                       <CopyButton text={text} position="static" />
@@ -235,7 +237,7 @@ export const QueueBubbles = memo(function QueueBubbles({
                           aria-label={t('queue.cancelTitle')}
                           className={ACTION_BTN_CLASS}
                         >
-                          <TrashIcon size={14} />
+                          <TrashIcon />
                         </button>
                       )}
                       {onSteer && (
@@ -246,7 +248,7 @@ export const QueueBubbles = memo(function QueueBubbles({
                           aria-label={t('queue.moveToSteering')}
                           className={ACTION_BTN_CLASS}
                         >
-                          <ArrowUpIcon size={14} />
+                          <ArrowUpIcon />
                         </button>
                       )}
                       {onEdit && (
@@ -257,7 +259,7 @@ export const QueueBubbles = memo(function QueueBubbles({
                           aria-label={isEditing ? t('queue.editCancel') : t('queue.edit')}
                           className={ACTION_BTN_CLASS}
                         >
-                          {isEditing ? <CloseIcon size={14} /> : <PencilIcon size={14} />}
+                          {isEditing ? <CloseIcon /> : <PencilIcon />}
                         </button>
                       )}
                     </div>

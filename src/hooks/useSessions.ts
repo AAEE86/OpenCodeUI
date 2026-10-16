@@ -242,30 +242,41 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
       ? (cb: Parameters<typeof subscribeToServerEvents>[1]) => subscribeToServerEvents(serverId, cb)
       : subscribeToEvents
 
+    // 回读完整会话并插到列表头部（session.created / session.forked 的负载都不是完整
+    // SessionInfo，都得回读一次）。去重靠 setSessions 里的 some 判断。
+    const prependSessionById = (sessionID: string) => {
+      void getSession(sessionID, undefined, serverId)
+        .then(session => {
+          if (!session || !matchesDirectory(session)) return
+
+          if (searchRef.current) {
+            void fetchSessionsRef.current({ search: searchRef.current || undefined })
+            return
+          }
+
+          setSessions(prev => {
+            if (prev.some(item => item.id === session.id)) return prev
+            return [session, ...prev]
+          })
+        })
+        .catch(() => {
+          // 回读失败退回整表刷新
+          void fetchSessionsRef.current({ search: searchRef.current || undefined })
+        })
+    }
+
     const unsubscribe = subscribe({
       onSessionCreated: data => {
+        // subagent 子会话（Task 工具 spawn，parentID 非空）不进主列表
         if (data.parentID) return
-
-        // v2 的 session.created 负载是创建记录（以 sessionID 为键、带 slug/version），
-        // 不是 SessionInfo，回读一次拿到完整会话再入列表。
-        void getSession(data.sessionID, undefined, serverId)
-          .then(session => {
-            if (!session || !matchesDirectory(session)) return
-
-            if (searchRef.current) {
-              void fetchSessionsRef.current({ search: searchRef.current || undefined })
-              return
-            }
-
-            setSessions(prev => {
-              if (prev.some(item => item.id === session.id)) return prev
-              return [session, ...prev]
-            })
-          })
-          .catch(() => {
-            // 回读失败退回整表刷新
-            void fetchSessionsRef.current({ search: searchRef.current || undefined })
-          })
+        prependSessionById(data.sessionID)
+      },
+      // fork 出来的是用户可见的新顶层会话，必须进列表：DB 里 parent_id=null（来源记在
+      // fork 字段，不是 subagent），且服务端 fork 只发 session.forked 不发 session.created，
+      // 所以走 onSessionCreated 永远接不到。负载里的 parentID 是「fork 自哪个会话」，
+      // 不是 subagent 标记，不能据此跳过。
+      onSessionForked: data => {
+        prependSessionById(data.sessionID)
       },
       onSessionRenamed: data => {
         // v2 把 v1 的 session.updated 收敛成 session.renamed（只有标题变化）

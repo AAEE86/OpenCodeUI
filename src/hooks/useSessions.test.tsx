@@ -85,6 +85,19 @@ function makeCreatedPayload(id: string, directory = '/workspace/demo', parentID?
   }
 }
 
+/**
+ * session.forked 负载（session-event.ts:187）：sessionID 是新会话，parentID 是「fork 自
+ * 哪个会话」（不是 subagent 标记），boundary 是 fork 边界。
+ */
+function makeForkedPayload(id: string, directory = '/workspace/demo', parentID = 'parent-1') {
+  createdDirectories.set(id, directory)
+  return {
+    sessionID: id,
+    parentID,
+    boundary: { type: 'through', messageID: 'msg-1' },
+  }
+}
+
 describe('useSessions', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -176,6 +189,22 @@ describe('useSessions', () => {
     })
 
     expect(result.current.sessions.map(session => session.id)).toEqual(['session-1'])
+  })
+
+  it('adds forked sessions from session.forked events（fork 负载也带 parentID，但那是 fork 来源不是 subagent，不能跳过）', async () => {
+    const { result } = renderHook(() => useSessions({ directory: '/workspace/demo' }))
+
+    await act(async () => {
+      vi.runAllTimers()
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      latestEventCallbacks.onSessionForked?.(makeForkedPayload('session-fork') as never)
+      latestEventCallbacks.onSessionForked?.(makeForkedPayload('session-fork-other', '/workspace/other') as never)
+    })
+
+    expect(result.current.sessions.map(session => session.id)).toEqual(['session-fork'])
   })
 
   it('queues a reconnect refresh while a newer request is still in flight', async () => {

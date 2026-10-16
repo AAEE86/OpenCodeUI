@@ -141,6 +141,8 @@ interface MessageBodyProps {
   isTurnLatestAssistant?: boolean
   allowStreamingLayoutAnimation: boolean
   processContentScope?: 'all' | 'process' | 'final' | 'inline'
+  /** step 完成信息是否由本实例渲染（壳内那截且壳外还有一份时传 false） */
+  stepFinishVisible?: boolean
   onEntryGrowComplete?: (messageId: string) => void
 }
 
@@ -155,6 +157,7 @@ const MessageBody = memo(function MessageBody({
   isTurnLatestAssistant,
   allowStreamingLayoutAnimation,
   processContentScope = 'all',
+  stepFinishVisible,
   onEntryGrowComplete,
 }: MessageBodyProps) {
   const messageId = message.id
@@ -175,6 +178,7 @@ const MessageBody = memo(function MessageBody({
             turnDuration={turnDuration}
             isTurnLatestAssistant={isTurnLatestAssistant}
             processContentScope={processContentScope}
+            stepFinishVisible={stepFinishVisible}
             onUndo={undoable ? onUndo : undefined}
             onFork={onFork}
             forkMessageId={forkMessageId}
@@ -285,6 +289,8 @@ const VirtualRow = memo(
                       isTurnLatestAssistant={turnLatestAssistantIds.has(child.message.id)}
                       allowStreamingLayoutAnimation={allowStreamingLayoutAnimation}
                       processContentScope={child.processContentScope}
+                      // 这条消息的正文还在壳外单独渲染一份 → step 完成信息由壳外那份负责
+                      stepFinishVisible={item.finalMessage?.id !== child.message.id}
                     />
                   ))}
                 </ProcessCollapseBlock>

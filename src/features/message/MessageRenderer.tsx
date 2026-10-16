@@ -273,6 +273,12 @@ interface MessageRendererProps {
   isTurnLatestAssistant?: boolean
   /** 过程折叠时的内容范围 */
   processContentScope?: ProcessContentScope
+  /**
+   * 本条消息的 step 完成信息是否由本实例渲染。
+   * 过程折叠时，末尾助手的「过程」截在壳内渲染、正文在壳外单独渲染一份，
+   * 这时壳内那份传 false，避免同一条消息出现两行用量。
+   */
+  stepFinishVisible?: boolean
   onUndo?: (userMessageId: string) => void
   onFork?: (message: SessionMessageInfo, forkMessageId?: string) => Promise<void> | void
   forkMessageId?: string
@@ -287,6 +293,7 @@ export const MessageRenderer = memo(function MessageRenderer({
   turnDuration,
   isTurnLatestAssistant = true,
   processContentScope = 'all',
+  stepFinishVisible = true,
   onUndo,
   onFork,
   forkMessageId,
@@ -350,6 +357,7 @@ export const MessageRenderer = memo(function MessageRenderer({
       turnDuration={turnDuration}
       isTurnLatestAssistant={isTurnLatestAssistant}
       processContentScope={processContentScope}
+      stepFinishVisible={stepFinishVisible}
       onFork={onFork}
       forkMessageId={forkMessageId}
     />
@@ -586,6 +594,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
   turnDuration,
   isTurnLatestAssistant = true,
   processContentScope = 'all',
+  stepFinishVisible = true,
   onFork,
   forkMessageId,
 }: {
@@ -594,6 +603,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
   turnDuration?: number
   isTurnLatestAssistant?: boolean
   processContentScope?: ProcessContentScope
+  stepFinishVisible?: boolean
   onFork?: (message: SessionMessageInfo, forkMessageId?: string) => Promise<void> | void
   forkMessageId?: string
 }) {
@@ -662,10 +672,9 @@ const AssistantMessageView = memo(function AssistantMessageView({
   const agent = message.agent || undefined
   const modelLabel = message.model?.id || undefined
 
-  // v2 没有 step-finish part：tokens / cost / finish 都在消息上，
-  // 因此「步骤完成」信息由消息级数据合成，只有一份。
+  // step 完成信息（v2 一个 assistant 消息 = 一个 step，tokens / cost / finish 全在消息上）
   const stepFinish = useMemo(() => toStepFinishInfo(message), [message])
-  const showStepFinish = allowStepFinishOnMessage && stepFinish != null
+  const showStepFinish = allowStepFinishOnMessage && stepFinishVisible && stepFinish != null
   const hasStepFinishData = stepFinish != null
 
   const showTurnDurationFooter =
@@ -697,9 +706,6 @@ const AssistantMessageView = memo(function AssistantMessageView({
     return null
   }
 
-  // step 完成信息只挂在本条消息最后一个可见条目上
-  const lastRenderIdx = findLastRenderableIndex(renderItems)
-
   return (
     <div ref={wrapperRef} className={`flex flex-col ${MSG_SPACING.stack} w-full group`}>
       {/* 流式增高走 SmoothHeight 0.12s 补间：贴底跟随时内容丝滑生长。
@@ -707,27 +713,14 @@ const AssistantMessageView = memo(function AssistantMessageView({
           否则壳内文本每 chunk 瞬时撑开，行高抖动且丢失生长动画 */}
       <SmoothHeight isActive={isStreaming && allowStreamingLayoutAnimation}>
         <div className={`flex flex-col ${MSG_SPACING.stack}`}>
-          {renderItems.map((item: RenderItem, idx: number) => {
-            const isLastItem = idx === lastRenderIdx
-            // latestOnly 开：整轮最后一条 assistant 的 step 才显示
-            // latestOnly 关：本消息也显示（旧行为）
-            const itemShowsStepFinish = showStepFinish && isLastItem
-            // duration / turnDuration / completedAt 始终只挂在本消息最后一个 step
-            const showTiming = itemShowsStepFinish
-
+          {renderItems.map((item: RenderItem) => {
             if (item.type === 'tool-group') {
               return (
                 <ToolGroup
                   key={item.tools[0].id}
                   tools={item.tools}
                   messageContext={{ messageID: message.id, created, completed }}
-                  stepFinish={itemShowsStepFinish ? stepFinish : undefined}
-                  duration={showTiming ? duration : undefined}
-                  turnDuration={showTiming ? turnDuration : undefined}
                   isStreaming={isStreaming}
-                  agent={itemShowsStepFinish ? agent : undefined}
-                  modelLabel={itemShowsStepFinish ? modelLabel : undefined}
-                  completedAt={showTiming ? completed : undefined}
                 />
               )
             }
@@ -751,6 +744,22 @@ const AssistantMessageView = memo(function AssistantMessageView({
                 return null
             }
           })}
+
+          {/* step 完成信息：v2 里一个助手消息就是一整个 step，tokens / cost / finish
+              全挂在消息上，所以固定放在本消息内容末尾一行。
+
+              以前挂「最后一个可见条目」：末尾是正文（最常见）时整块数据跟着丢，
+              只有工具组收尾才显示，过程折叠时还会藏在壳里。 */}
+          {stepFinish && showStepFinish && (
+            <StepFinishPartView
+              part={stepFinish}
+              duration={duration}
+              turnDuration={turnDuration}
+              agent={agent}
+              modelLabel={modelLabel}
+              completedAt={completed}
+            />
+          )}
         </div>
       </SmoothHeight>
 
@@ -794,13 +803,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
 interface ToolGroupProps {
   tools: ToolEntry[]
   messageContext: { messageID: string; created: number; completed?: number }
-  stepFinish?: StepFinishInfo
-  duration?: number
-  turnDuration?: number
   isStreaming?: boolean
-  agent?: string
-  modelLabel?: string
-  completedAt?: number
 }
 
 /** 用户需要阅读/交互的工具：沉浸模式下这些工具完成后保持展开 */
@@ -810,17 +813,7 @@ function isReadableTool(toolName: string): boolean {
   return READABLE_TOOL_PATTERNS.test(toolName.toLowerCase())
 }
 
-const ToolGroup = memo(function ToolGroup({
-  tools,
-  messageContext,
-  stepFinish,
-  duration,
-  turnDuration,
-  isStreaming,
-  agent,
-  modelLabel,
-  completedAt,
-}: ToolGroupProps) {
+const ToolGroup = memo(function ToolGroup({ tools, messageContext, isStreaming }: ToolGroupProps) {
   const { t } = useTranslation('message')
   const { descriptiveToolSteps, inlineToolRequests, immersiveMode, processCollapseEnabled } = useTheme()
   const { serverId, pendingPermissions, pendingQuestions } = useInlineToolRequests()
@@ -1005,11 +998,6 @@ const ToolGroup = memo(function ToolGroup({
                   ? t('stepsCount', { done: totalCount, total: totalCount })
                   : t('stepsCount', { done: doneCount, total: totalCount })}
               </span>
-              {!effectiveExpanded && stepFinish && (
-                <span className="text-[length:var(--fs-sm)] text-text-500 font-mono opacity-70">
-                  {formatTokens(stepFinish.tokens, t)}
-                </span>
-              )}
             </span>
           </button>
         ))}
@@ -1027,19 +1015,6 @@ const ToolGroup = memo(function ToolGroup({
       ) : (
         <div className="flex flex-col">{toolParts}</div>
       )}
-
-      {stepFinish && (
-        <div className={MSG_SPACING.finish}>
-          <StepFinishPartView
-            part={stepFinish}
-            duration={duration}
-            turnDuration={turnDuration}
-            agent={agent}
-            modelLabel={modelLabel}
-            completedAt={completedAt}
-          />
-        </div>
-      )}
     </div>
   )
 })
@@ -1047,17 +1022,6 @@ const ToolGroup = memo(function ToolGroup({
 // ============================================
 // Helpers
 // ============================================
-
-function formatTokens(
-  tokens: StepFinishInfo['tokens'],
-  t: (key: string, opts?: Record<string, unknown>) => string,
-): string {
-  const total = tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
-  if (total >= 1000) {
-    return t('tokensK', { count: (total / 1000).toFixed(1) })
-  }
-  return `${total} ${t('tokens')}`
-}
 
 /**
  * 消息级「步骤完成」信息。
@@ -1374,17 +1338,4 @@ function groupContentForRender(message: AssistantMessage): RenderItem[] {
 
   flushToolGroup()
   return result
-}
-
-/**
- * 最后一个「会真正渲染出内容」的条目下标。
- * step 完成信息只挂在它上面（对齐旧行为：只挂在本消息最后一个 step-finish）。
- */
-function findLastRenderableIndex(items: RenderItem[]): number {
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i]
-    if (item.type === 'tool-group') return i
-    if (hasVisibleText(item.content)) return i
-  }
-  return -1
 }

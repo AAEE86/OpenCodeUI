@@ -46,6 +46,17 @@ export function followShellOutput(input: {
   let text = cached?.output ?? ''
   let loading = false
   let disposed = false
+  // ── UTF-8 边界自愈 ──
+  // 服务端按字节区间独立 decode（core/shell.ts: buffer.subarray(...).toString('utf8')），
+  // 多字节字符被区间边界切开就永久变成 U+FFFD（逐字打印中文的场景必现）。
+  // 自愈规则：
+  //   1. 页头出现 U+FFFD → 上次「页尾剥离」猜错了回退字节数，游标落在字符中间。
+  //      回滚到追加前的存档点，等字符写全后整段重读（存档点一定是干净边界）
+  //   2. 页尾出现 U+FFFD → 区间终点切在字符中间：剥掉替换符，游标按每符 1 字节
+  //      回退（猜少了会被下一轮的规则 1 抓回来）
+  //   3. 输出本身含 U+FFFD 的极端情况：同一位置只自愈一次，再失败原样接受，不死循环
+  let savepoint = { cursor, text }
+  let recoveredAt = -1
   const read = async () => {
     if (loading) return
     loading = true
@@ -62,9 +73,30 @@ export function followShellOutput(input: {
         break
       }
       if (!page) break
-      const advanced = page.cursor > cursor
-      cursor = Math.max(cursor, page.cursor)
-      text = (text + page.output).slice(-SHELL_OUTPUT_TAIL_BYTES)
+
+      // 规则 1：页头替换符 → 游标在字符中间，回滚到存档点整段重读
+      if (page.output.startsWith('�') && recoveredAt !== cursor) {
+        recoveredAt = cursor
+        cursor = savepoint.cursor
+        text = savepoint.text
+        remember(input.id, { cursor, output: text, state: 'partial' })
+        break
+      }
+
+      // 规则 2：页尾替换符 → 剥掉，游标按每符 1 字节回退
+      let output = page.output
+      let pageCursor = page.cursor
+      const tail = output.match(/�+$/)
+      if (tail) {
+        output = output.slice(0, -tail[0].length)
+        pageCursor -= tail[0].length
+      }
+
+      // 追加前存档（下一轮的页头检查若失败，回滚到这里）
+      savepoint = { cursor, text }
+      const advanced = pageCursor > cursor
+      cursor = Math.max(cursor, pageCursor)
+      text = (text + output).slice(-SHELL_OUTPUT_TAIL_BYTES)
       const complete = !input.running && cursor >= page.size
       remember(input.id, { cursor, output: text, state: complete ? 'complete' : 'partial' })
       input.onOutput(text)

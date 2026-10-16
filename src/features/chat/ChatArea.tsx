@@ -159,6 +159,8 @@ const MessageBody = memo(function MessageBody({
 }: MessageBodyProps) {
   const messageId = message.id
   const isUser = isUserMessage(message)
+  // undo 边界：用户消息，或 v2 的独立压缩消息（revert.stage 接受任意 messageID）
+  const undoable = isUser || message.type === 'compaction'
   return (
     <div
       ref={node => registerMessage?.(messageId, node as HTMLDivElement | null)}
@@ -173,10 +175,10 @@ const MessageBody = memo(function MessageBody({
             turnDuration={turnDuration}
             isTurnLatestAssistant={isTurnLatestAssistant}
             processContentScope={processContentScope}
-            onUndo={isUser ? onUndo : undefined}
+            onUndo={undoable ? onUndo : undefined}
             onFork={onFork}
             forkMessageId={forkMessageId}
-            canUndo={isUser ? canUndo : undefined}
+            canUndo={undoable ? canUndo : undefined}
             onEntryGrowComplete={isUser ? onEntryGrowComplete : undefined}
           />
         </div>

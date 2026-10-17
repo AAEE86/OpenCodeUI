@@ -4,7 +4,6 @@ export type Choice = { value: string; label: string; hint?: string; disabled?: b
 
 export type SectionID =
   | 'general'
-  | 'server'
   | 'commands'
   | 'skills'
   | 'plugins'
@@ -14,8 +13,7 @@ export type SectionID =
   | 'permissions'
   | 'formatters'
   | 'lsp'
-  | 'attachments'
+  | 'media'
   | 'runtime'
   | 'experimental'
-  | 'compatibility'
   | 'advanced'

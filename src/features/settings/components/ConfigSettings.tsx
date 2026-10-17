@@ -12,7 +12,12 @@ import {
   KeyboardIcon,
   LayersIcon,
   PlugIcon,
-  SunIcon,
+  CodeIcon,
+  ImageIcon,
+  TerminalIcon,
+  LightbulbIcon,
+  ShieldIcon,
+  PencilIcon,
   QuestionIcon,
   CogIcon,
 } from '../../../components/Icons'
@@ -22,8 +27,9 @@ import {
   getConfig,
   getGlobalConfig,
   getActiveModels,
+  getProviders,
   listAvailableShells,
-  writeConfigDocument,
+  writeGlobalConfigDocument,
 } from '../../../api'
 import type { Config } from '../../../types/api/config'
 import { useCurrentDirectory, useIsMobile } from '../../../hooks'
@@ -39,28 +45,26 @@ import { clone, getObject, sameValue, tx } from './configEditorUtils'
 
 const CONFIG_TAB_ICONS: Record<SectionID, React.ReactNode> = {
   general: <CogIcon size={15} />,
-  server: <GlobeIcon size={15} />,
-  providers: <CpuIcon size={15} />,
-  agents: <AgentIcon size={15} />,
   commands: <KeyboardIcon size={15} />,
   skills: <LayersIcon size={15} />,
   plugins: <PlugIcon size={15} />,
-  mcp: <PlugIcon size={15} />,
-  permissions: <LayersIcon size={15} />,
-  formatters: <CogIcon size={15} />,
-  lsp: <GlobeIcon size={15} />,
-  attachments: <LayersIcon size={15} />,
-  runtime: <CpuIcon size={15} />,
-  experimental: <SunIcon size={15} />,
-  compatibility: <QuestionIcon size={15} />,
-  advanced: <CogIcon size={15} />,
+  providers: <CpuIcon size={15} />,
+  agents: <AgentIcon size={15} />,
+  mcp: <GlobeIcon size={15} />,
+  permissions: <ShieldIcon size={15} />,
+  formatters: <PencilIcon size={15} />,
+  lsp: <CodeIcon size={15} />,
+  media: <ImageIcon size={15} />,
+  runtime: <TerminalIcon size={15} />,
+  experimental: <LightbulbIcon size={15} />,
+  advanced: <QuestionIcon size={15} />,
 }
 
 const CONFIG_SECTION_GROUPS: { en: string; zh: string; sections: SectionID[] }[] = [
-  { en: 'Core', zh: '核心', sections: ['general', 'server'] },
+  { en: 'Core', zh: '核心', sections: ['general'] },
   { en: 'Extensions', zh: '扩展', sections: ['commands', 'skills', 'plugins', 'providers', 'agents', 'mcp'] },
   { en: 'Tools', zh: '工具', sections: ['permissions', 'formatters', 'lsp'] },
-  { en: 'Advanced', zh: '高级', sections: ['attachments', 'runtime', 'experimental', 'compatibility', 'advanced'] },
+  { en: 'Advanced', zh: '高级', sections: ['media', 'runtime', 'experimental', 'advanced'] },
 ]
 
 function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
@@ -170,12 +174,14 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
     setValidationErrors([])
     setValidationDrillTarget(null)
     try {
-      const [global, nextEffective, shellList, providerModels] = await Promise.all([
+      const [global, nextEffective, shellList, providerModels, providers] = await Promise.all([
         getGlobalConfig(),
         getConfig(directory),
         listAvailableShells(directory).catch(() => []),
         // v2 删除了 config.providers()，模型清单改由 model.list() 提供
         getActiveModels(directory).catch(() => []),
+        // provider 元信息（显示名）来自 provider.list()
+        getProviders(directory).catch(() => []),
       ])
 
       const modelChoices: Choice[] = providerModels.map(model => ({
@@ -183,14 +189,18 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
         label: `${model.providerID}/${model.id}`,
       }))
 
+      const catalog: JsonRecord = {}
+      for (const provider of providers) {
+        catalog[provider.id] = { name: provider.name }
+      }
+
       if (request !== loadRequestRef.current) return
       setOriginal(clone(global))
       setConfig(clone(global))
       setJsonDraftErrors(new Set())
       setDraftErrors(new Set())
       setEffective(nextEffective)
-      // v2 没有 provider 目录接口，这里留空（仅供 provider 元信息展示的旧路径）
-      setProviderCatalog({})
+      setProviderCatalog(catalog)
       setShells([
         { value: '', label: t('config.shellAuto') },
         ...shellList.map((shell: { path: string; name: string; acceptable: boolean }) => ({
@@ -275,16 +285,16 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
     setSaving(true)
     try {
       // v2 的 config.update 只接受 { shell }，任意字段的保存没有 API。
-      // 原生做法是直接把合并结果写回配置文档文件（见 api/config 的说明）。
-      const savedPath = await writeConfigDocument(snapshot, directory)
+      // 原生做法是直接把合并结果写回**全局**配置文档（见 api/config 的说明）。
+      const savedPath = await writeGlobalConfigDocument(snapshot)
       if (request !== saveRequestRef.current) return
       const saved = await getGlobalConfig().catch(() => snapshot)
       setOriginal(clone(saved))
       setConfig(current => (sameValue(current, snapshot) ? clone(saved) : current))
       setSchemaWarning(
         tx(
-          `Saved to ${savedPath}. Note: v2 has no field-level config API, so the file is rewritten as plain JSON — comments and original formatting are lost.`,
-          `已保存到 ${savedPath}。注意：v2 没有字段级配置接口，此操作会以纯 JSON 重写文件，注释与原始排版会丢失。`,
+          `Saved to ${savedPath}. Note: v2 has no field-level config API, so the global document is rewritten as plain JSON — comments and original formatting are lost.`,
+          `已保存到 ${savedPath}。注意：v2 没有字段级配置接口，此操作会以纯 JSON 重写全局配置文档，注释与原始排版会丢失。`,
           lang,
         ),
       )
@@ -311,8 +321,8 @@ function ConfigEditorDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () 
       'plan',
       'general',
       'explore',
-      ...Object.keys(getObject(config, 'agent')),
-      ...Object.keys(getObject(effective, 'agent')),
+      ...Object.keys(getObject(config, 'agents')),
+      ...Object.keys(getObject(effective, 'agents')),
     ])
     return Array.from(names)
       .sort()

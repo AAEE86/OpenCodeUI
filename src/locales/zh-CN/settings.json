@@ -434,10 +434,9 @@
   },
   "config": {
     "title": "配置",
-    "sourceTitle": "opencode.json 可视化配置",
-    "sourceDesc": "读取当前服务器上的用户全局配置和最终生效配置，并区分已配置、继承生效、未配置字段。",
-    "sdkOnlyWarning": "这个编辑器只调用 OpenCode 官方 SDK。可以新增和修改配置值，但当前官方接口不支持删除任意配置字段。",
-    "noDeleteHint": "官方 SDK：仅支持新增/修改，不支持删除。",
+    "sourceTitle": "OpenCode v2 配置",
+    "sourceDesc": "读取全局配置文档和当前服务器上的最终生效配置，并区分已配置、继承生效、未配置字段。",
+    "sdkOnlyWarning": "这个编辑器直接读写全局配置文档（opencode.json / opencode.jsonc）。保存会以纯 JSON 重写该文件，注释和原始排版会丢失。",
     "editorTitle": "配置编辑器",
     "openEditor": "打开配置编辑器",
     "unsaved": "有未保存修改",

@@ -16,77 +16,69 @@ const SENSITIVE_KEY =
   /(?:api.?key|access.?key|private.?key|auth|cookie|credential|pass(?:word)?|secret|session.?key|token)/i
 const SENSITIVE_CONTAINER = /^(?:headers?|environment|env)$/i
 
-const KNOWN_FIELD_PATHS = [
+/**
+ * v2 里「已知但可能还没配置」的字段路径。
+ *
+ * 只列叶子字段；有值的字段由 JSON 遍历自动索引，两者按落点去重。
+ */
+const KNOWN_FIELD_PATHS: string[][] = [
+  ['$schema'],
   ['model'],
-  ['small_model'],
   ['default_agent'],
-  ['subagent_depth'],
   ['shell'],
   ['username'],
-  ['logLevel'],
+  ['update'],
   ['share'],
-  ['autoupdate'],
-  ['snapshot'],
+  ['snapshots'],
   ['instructions'],
-  ['disabled_providers'],
-  ['enabled_providers'],
-  ['server', 'port'],
-  ['server', 'hostname'],
-  ['server', 'mdns'],
-  ['server', 'mdnsDomain'],
-  ['server', 'cors'],
-  ['skills', 'paths'],
-  ['skills', 'urls'],
-  ['attachment', 'image', 'auto_resize'],
-  ['attachment', 'image', 'max_width'],
-  ['attachment', 'image', 'max_height'],
-  ['attachment', 'image', 'max_base64_bytes'],
+  ['enterprise', 'url'],
+  ['commands'],
+  ['skills'],
+  ['references'],
+  ['plugins'],
+  ['providers'],
+  ['agents'],
+  ['mcp'],
+  ['permissions'],
+  ['formatter'],
+  ['lsp'],
+  ['media', 'image', 'auto_resize'],
+  ['media', 'image', 'max_width'],
+  ['media', 'image', 'max_height'],
+  ['media', 'image', 'max_base64_bytes'],
   ['tool_output', 'max_lines'],
   ['tool_output', 'max_bytes'],
   ['compaction', 'auto'],
-  ['compaction', 'prune'],
-  ['compaction', 'tail_turns'],
-  ['compaction', 'preserve_recent_tokens'],
-  ['compaction', 'reserved'],
+  ['compaction', 'keep', 'tokens'],
+  ['compaction', 'buffer'],
   ['watcher', 'ignore'],
-  ['enterprise', 'url'],
-  ['tools'],
-  ['experimental', 'batch_tool'],
-  ['experimental', 'openTelemetry'],
-  ['experimental', 'disable_paste_summary'],
-  ['experimental', 'continue_loop_on_deny'],
-  ['experimental', 'mcp_timeout'],
-  ['experimental', 'primary_tools'],
+  ['websearch'],
+  ['worktree', 'directory'],
+  ['warming'],
+  ['experimental', 'portable_shell_scanner'],
+  ['experimental', 'subagent_depth'],
   ['experimental', 'policies'],
-  ['$schema'],
-  ['autoshare'],
-  ['layout'],
-  ['mode'],
 ]
+
+const PROVIDER_DRILLS = new Set(['settings', 'headers', 'body'])
+const MODEL_DRILLS = new Set(['settings', 'headers', 'body', 'capabilities', 'cost', 'limit', 'compatibility'])
+const MCP_DRILLS = new Set(['environment', 'headers', 'oauth', 'timeout'])
+const RUNTIME_LEAF_KEYS = new Set(['tool_output', 'compaction', 'watcher', 'worktree'])
 
 export function sectionForConfigSegments(segments: string[]): SectionID {
   const root = segments[0]
-  if (root === 'server') return 'server'
-  if (root === 'command') return 'commands'
-  if (root === 'skills' || root === 'references' || root === 'reference') return 'skills'
-  if (root === 'plugin') return 'plugins'
+  if (root === 'commands') return 'commands'
+  if (root === 'skills' || root === 'references') return 'skills'
+  if (root === 'plugins') return 'plugins'
   if (root === 'providers') return 'providers'
   if (root === 'agents') return 'agents'
   if (root === 'mcp') return 'mcp'
-  if (root === 'permission') return 'permissions'
+  if (root === 'permissions') return 'permissions'
   if (root === 'formatter') return 'formatters'
   if (root === 'lsp') return 'lsp'
-  if (root === 'attachment') return 'attachments'
-  if (
-    root === 'tool_output' ||
-    root === 'compaction' ||
-    root === 'watcher' ||
-    root === 'enterprise' ||
-    root === 'tools'
-  )
-    return 'runtime'
+  if (root === 'media') return 'media'
+  if (RUNTIME_LEAF_KEYS.has(root ?? '') || root === 'websearch' || root === 'warming') return 'runtime'
   if (root === 'experimental') return 'experimental'
-  if (root === '$schema' || root === 'autoshare' || root === 'layout' || root === 'mode') return 'compatibility'
   if (root && !KNOWN_ROOT_KEYS.has(root)) return 'advanced'
   return 'general'
 }
@@ -100,49 +92,69 @@ export function navigationForConfigSegments(segments: string[]) {
   let fieldKey: string | undefined
   const [root, id, third, fourth, fifth, sixth, seventh] = segments
 
-  if (root === 'server') fieldKey = id
-  else if (root === 'command') {
+  if (root === 'commands') {
     push(id ? `command:${id}` : undefined, id)
+    if (third === 'model') fieldKey = 'model'
+    else fieldKey = third
+  } else if (root === 'references') {
+    push(id ? `reference:${id}` : undefined, id ? `@${id}` : undefined)
     fieldKey = third
-  } else if (root === 'references' || root === 'reference') {
-    push(
-      id ? `${root === 'references' ? 'reference' : 'legacy-reference'}:${id}` : undefined,
-      id ? `@${id}` : undefined,
-    )
-    fieldKey = third
-  } else if (root === 'skills') fieldKey = segments.slice(0, 2).join('.')
-  else if (root === 'plugin') {
+  } else if (root === 'skills') {
+    fieldKey = 'skills'
+  } else if (root === 'plugins') {
     push(id ? `plugin:${id}` : undefined, 'plugin')
-    if (third === '1') {
-      push('options', 'options')
-      fieldKey = 'options'
-    } else fieldKey = 'name'
-  } else if (root === 'providers') {
-    push(id ? `provider:${id}` : undefined, id)
     if (third === 'options') {
       push('options', 'options')
-      if (fourth === 'headers') push('headers', 'headers')
-      fieldKey = fourth === 'headers' ? 'headers' : (fourth ?? 'options')
-    } else if (third === 'models') {
+      fieldKey = 'options'
+    } else fieldKey = 'package'
+  } else if (root === 'providers') {
+    push(id ? `provider:${id}` : undefined, id)
+    if (third === 'models') {
       push('models', 'models')
       push(fourth ? `model:${fourth}` : undefined, fourth)
       if (fifth === 'variants') {
         push('variants', 'variants')
         push(sixth ? `variant:${sixth}` : undefined, sixth)
-        fieldKey = seventh ?? 'disabled'
-      } else if (['provider', 'headers', 'options'].includes(fifth)) {
+        if (seventh && MODEL_DRILLS.has(seventh)) push(seventh, seventh)
+        fieldKey = seventh ?? 'variants'
+      } else if (fifth && fifth !== 'id' && (MODEL_DRILLS.has(fifth) || fifth === 'cost')) {
         push(fifth, fifth)
-        fieldKey = fifth === 'provider' ? (sixth ?? 'provider') : fifth
+        fieldKey = fifth
       } else fieldKey = fifth
+    } else if (third && PROVIDER_DRILLS.has(third)) {
+      push(third, third)
+      fieldKey = third
     } else fieldKey = third
   } else if (root === 'agents') {
     push(id ? `agent:${id}` : undefined, id)
-    if (['permission', 'tools', 'options'].includes(third)) push(third, third)
-    fieldKey = third
+    if (third === 'model') fieldKey = 'model'
+    else if (third === 'request') {
+      push('request', 'request')
+      if (fourth === 'headers' || fourth === 'body') {
+        push(fourth, fourth)
+        fieldKey = fourth
+      } else fieldKey = 'request'
+    } else if (third === 'permissions') {
+      push('permissions', 'permissions')
+      fieldKey = 'permissions'
+    } else fieldKey = third
   } else if (root === 'mcp') {
-    push(id ? `mcp:${id}` : undefined, id)
-    if (['environment', 'headers', 'oauth'].includes(third)) push(third, third)
-    fieldKey = third
+    if (id === 'timeout') {
+      push('timeout', 'timeout')
+      fieldKey = third ? third : 'timeout'
+    } else if (id === 'servers') {
+      push(third ? `mcp:${third}` : undefined, third)
+      if (fourth && MCP_DRILLS.has(fourth)) {
+        push(fourth, fourth)
+        fieldKey = fifth ?? fourth
+      } else fieldKey = fourth
+    } else {
+      push(id ? `mcp:${id}` : undefined, id)
+      if (third && MCP_DRILLS.has(third)) {
+        push(third, third)
+        fieldKey = fourth ?? third
+      } else fieldKey = third
+    }
   } else if (root === 'formatter') {
     push(id ? `formatter:${id}` : undefined, id)
     if (third === 'environment') push('environment', 'environment')
@@ -151,15 +163,21 @@ export function navigationForConfigSegments(segments: string[]) {
     push(id ? `lsp:${id}` : undefined, id)
     if (third === 'env' || third === 'initialization') push(third, third)
     fieldKey = third
-  } else if (root === 'attachment') fieldKey = segments[2]
-  else if (section === 'runtime') fieldKey = root === 'tools' ? 'tools' : segments.slice(0, 2).join('.')
-  else if (root === 'experimental') fieldKey = id
-  else if (root === 'mode') {
-    push('mode', 'mode')
-    push(id ? `mode-agent:${id}` : undefined, id)
-    if (['permission', 'tools', 'options'].includes(third)) push(third, third)
-    fieldKey = third ?? 'mode'
-  } else if (section === 'general' || section === 'compatibility') fieldKey = root
+  } else if (root === 'media') {
+    fieldKey = segments[2]
+  } else if (root === 'permissions') {
+    fieldKey = 'permissions'
+  } else if (RUNTIME_LEAF_KEYS.has(root ?? '')) {
+    fieldKey = segments.join('.')
+  } else if (root === 'websearch' || root === 'warming') {
+    fieldKey = root
+  } else if (root === 'experimental') {
+    fieldKey = id
+  } else if (section === 'general') {
+    fieldKey = root === 'model' ? 'model' : segments.join('.')
+  } else {
+    fieldKey = root
+  }
 
   return { section, stack, fieldKey }
 }
@@ -217,13 +235,11 @@ export function buildConfigEditorSearchItems(config: JsonRecord, lang: Lang): Co
     const { value, segments, parent } = current
     if (segments.length > 0) {
       const navigation = navigationForConfigSegments(segments)
-      if (
-        (segments[0] === 'references' || segments[0] === 'reference') &&
-        segments.length === 2 &&
-        typeof value === 'string'
-      ) {
+      // 引用值是纯字符串时，编辑器用 'value' 承载它。
+      if (segments[0] === 'references' && segments.length === 2 && typeof value === 'string') {
         navigation.fieldKey = 'value'
       }
+      // LSP 的 disabled-only 形态（{ disabled: true }，无 command）由 mode 选择器承载。
       if (
         segments[0] === 'lsp' &&
         segments[2] === 'disabled' &&

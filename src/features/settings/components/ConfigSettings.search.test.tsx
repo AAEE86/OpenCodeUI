@@ -6,9 +6,10 @@ import { ConfigSettings } from './ConfigSettings'
 const api = vi.hoisted(() => ({
   getGlobalConfig: vi.fn(),
   getConfig: vi.fn(),
-  // v2：config.providers() 被 model.list() 取代；写配置改走文档写入
+  // v2：config.providers() 被 model.list() / provider.list() 取代；写配置改走全局文档写入
   getActiveModels: vi.fn(),
-  writeConfigDocument: vi.fn(),
+  getProviders: vi.fn(),
+  writeGlobalConfigDocument: vi.fn(),
   listAvailableShells: vi.fn(),
 }))
 
@@ -25,22 +26,19 @@ describe('ConfigSettings search', () => {
       // v2 的配置顶层键是 providers（复数）
       providers: {
         openai: {
-          options: { baseURL: 'https://gateway.example.com' },
+          name: 'Gateway OpenAI',
         },
       },
     })
     api.getConfig.mockResolvedValue({})
     api.getActiveModels.mockResolvedValue([])
-    api.writeConfigDocument.mockResolvedValue('/repo/opencode.json')
+    api.getProviders.mockResolvedValue([{ id: 'openai', name: 'OpenAI' }])
+    api.writeGlobalConfigDocument.mockResolvedValue('/repo/opencode.jsonc')
     api.listAvailableShells.mockResolvedValue([])
     Element.prototype.scrollIntoView = vi.fn()
     Element.prototype.scrollTo = vi.fn()
   })
 
-  // 阻塞：与 configEditorDrill 的 provider 用例同因——v2 的配置顶层键是
-  // `providers`（复数），而配置编辑器（ProvidersSection / configEditorValidation /
-  // 搜索索引）仍按 v1 的 `provider` 读取，因此搜不到 providers 下的字段。
-  // 待把该组顶层键改成 `providers` 后再启用（夹具已改为复数）。
   it('searches a raw JSON value and opens its nested field', async () => {
     render(<ConfigSettings />)
     fireEvent.click(screen.getByRole('button', { name: 'Open Config Editor' }))
@@ -48,12 +46,12 @@ describe('ConfigSettings search', () => {
 
     const input = screen.getByRole('combobox', { name: 'Search config fields...' })
     fireEvent.focus(input)
-    fireEvent.change(input, { target: { value: 'gateway.example.com' } })
-    const result = await screen.findByRole('option', { name: /providers\.openai\.options\.baseURL/ })
+    fireEvent.change(input, { target: { value: 'Gateway OpenAI' } })
+    const result = await screen.findByRole('option', { name: /providers\.openai\.name/ })
     fireEvent.click(result)
 
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Providers & Models' })).toHaveAttribute('aria-selected', 'true'))
-    const field = await screen.findByDisplayValue('https://gateway.example.com')
+    const field = await screen.findByDisplayValue('Gateway OpenAI')
     await waitFor(() => expect(field.closest('[data-config-field]')).toHaveClass('settings-search-highlight'))
     expect(field).toHaveFocus()
     // 单跑 0.5s 就过；但本文件要挂载完整 ConfigSettings + 配置编辑器弹窗（jsdom 冷启动最重的路径之一），

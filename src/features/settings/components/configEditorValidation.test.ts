@@ -3,13 +3,12 @@ import type { Config } from '../../../types/api/config'
 import { validateConfig, validationDrillTargetForError } from './configEditorValidation'
 
 describe('config editor validation', () => {
-  it('blocks git/local reference shape changes that deep merge cannot remove', () => {
-    const original = { references: { docs: { repository: 'owner/repo', branch: 'main' } } } as unknown as Config
-    const next = { references: { docs: { path: './docs' } } } as unknown as Config
+  it('rejects a model selection that is not provider/model', () => {
+    const errors = validateConfig({ model: 'no-slash' } as unknown as Config, 'en')
 
-    expect(validateConfig(next, 'en', original)).toContainEqual(expect.objectContaining({
-      path: 'references.docs.type',
-      segments: ['references', 'docs', 'type'],
+    expect(errors).toContainEqual(expect.objectContaining({
+      path: 'model',
+      segments: ['model'],
     }))
   })
 
@@ -20,10 +19,10 @@ describe('config editor validation', () => {
   })
 
   it('uses structured segments for ids containing dots', () => {
-    const errors = validateConfig({ command: { 'release.prod': {} } } as unknown as Config, 'en')
+    const errors = validateConfig({ commands: { 'release.prod': {} } } as unknown as Config, 'en')
     const target = validationDrillTargetForError(errors[0])
 
-    expect(errors[0].segments).toEqual(['command', 'release.prod', 'template'])
+    expect(errors[0].segments).toEqual(['commands', 'release.prod', 'template'])
     expect(target.stack[0]).toEqual({ id: 'command:release.prod', title: 'release.prod' })
   })
 
@@ -34,18 +33,16 @@ describe('config editor validation', () => {
   })
 
   it('keeps dotted provider ids intact in local validation errors', () => {
-    const errors = validateConfig({ providers: { 'acme.prod': { options: { timeout: 0 } } } } as unknown as Config, 'en')
+    const errors = validateConfig({ providers: { 'acme.prod': { settings: { timeout: 0 } } } } as unknown as Config, 'en')
     const target = validationDrillTargetForError(errors[0])
 
-    expect(errors[0].segments).toEqual(['providers', 'acme.prod', 'options', 'timeout'])
+    expect(errors[0].segments).toEqual(['providers', 'acme.prod', 'settings', 'timeout'])
     expect(target.stack[0]).toEqual({ id: 'provider:acme.prod', title: 'acme.prod' })
   })
 
-  it('rejects an empty custom formatter or LSP mode created from a scalar', () => {
-    const original = { formatter: false, lsp: true } as unknown as Config
-    const next = { formatter: {}, lsp: {} } as unknown as Config
-    const errors = validateConfig(next, 'en', original)
+  it('requires an MCP server type and its transport field', () => {
+    const errors = validateConfig({ mcp: { servers: { s: {} } } } as unknown as Config, 'en')
 
-    expect(errors.map(error => error.path)).toEqual(expect.arrayContaining(['formatter', 'lsp']))
+    expect(errors.map(error => error.path)).toContain('mcp.servers.s.type')
   })
 })

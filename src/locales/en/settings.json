@@ -434,10 +434,9 @@
   },
   "config": {
     "title": "Config",
-    "sourceTitle": "opencode.json Visual Config",
-    "sourceDesc": "Loads your global config and the effective config from the active server, then separates configured, inherited, and unconfigured fields.",
-    "sdkOnlyWarning": "This editor uses the official OpenCode SDK only. It can add and modify config values, but the current official API does not support deleting arbitrary config fields.",
-    "noDeleteHint": "Official SDK: add/modify only, delete is not supported.",
+    "sourceTitle": "OpenCode v2 config",
+    "sourceDesc": "Loads the global config document and the effective config from the active server, then separates configured, inherited, and unconfigured fields.",
+    "sdkOnlyWarning": "This editor reads and writes the global config document (opencode.json / opencode.jsonc). Saving rewrites that file as plain JSON, so comments and original formatting are lost.",
     "editorTitle": "Config Editor",
     "openEditor": "Open Config Editor",
     "unsaved": "Unsaved changes",

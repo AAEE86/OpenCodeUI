@@ -26,7 +26,7 @@
 
 import { getSDKClient } from './sdk'
 import { locationParam } from './location'
-import type { ConfigSource, ConfigInfo, ConfigShellsResponse } from './types'
+import type { ConfigDocument, ConfigSource, ConfigInfo, ConfigShellsResponse } from './types'
 
 /**
  * 获取配置来源清单。
@@ -49,19 +49,41 @@ export async function getConfig(directory?: string, serverId?: string): Promise<
   return mergeConfigInfo(sources)
 }
 
+/** 官方探测的可写文档名，按优先级从低到高（写存在的最后一个）。 */
+const CONFIG_DOCUMENT_NAMES = ['opencode.json', 'opencode.jsonc']
+
+function isDocument(source: ConfigSource): source is ConfigDocument {
+  return source.type === 'document'
+}
+
+/**
+ * 取全局来源（第一个 `type: 'directory'` 标记之前）。
+ *
+ * 不带 location 的 `config.get()` 也会返回默认 location 的项目级来源，
+ * 项目来源从那个 directory 条目开始（与官方 core 的 `Config.load` 一致）。
+ */
+function globalSources(sources: ConfigSource[]): ConfigSource[] {
+  const boundary = sources.findIndex(source => source.type === 'directory')
+  return boundary === -1 ? sources : sources.slice(0, boundary)
+}
+
+/** 拼一个配置文档路径，兼顾 Windows 与 POSIX 分隔符。 */
+function joinDocumentPath(directory: string, name: string): string {
+  const trimmed = directory.replace(/[\\/]+$/, '')
+  const separator = trimmed.includes('\\') ? '\\' : '/'
+  return `${trimmed}${separator}${name}`
+}
+
 /**
  * 获取全局（无 location）配置。
  *
- * 不带 location 的 `config.get()` 也会返回默认 location 的项目级来源，
- * 「全局配置」只是第一个 `type: 'directory'` 标记**之前**的条目
- * （与官方 app 的 general settings 控制器一致），否则项目级配置会
- * 混进全局视图，保存时还可能写错文件。
+ * 只合并**有 `path` 的全局文档**：wellknown 远程文档没有 `path`，
+ * 把它们的值当成可编辑基线会让用户不小心写进本地文件。
  */
 export async function getGlobalConfig(serverId?: string): Promise<ConfigInfo> {
   const sdk = getSDKClient(serverId)
   const sources = await sdk.config.get()
-  const boundary = sources.findIndex(source => source.type === 'directory')
-  return mergeConfigInfo(boundary === -1 ? sources : sources.slice(0, boundary))
+  return mergeConfigInfo(globalSources(sources).filter(source => isDocument(source) && Boolean(source.path)))
 }
 
 /**
@@ -92,47 +114,43 @@ export async function updateShell(shell: string | null, serverId?: string): Prom
 }
 
 /**
- * 定位可写的配置文档。
+ * 定位全局可写配置文档。
  *
- * v2 把可写配置收敛了：`config.update` 只接受 `{ shell }`，
- * 任意字段的保存没有 API。但 `config.get()` 会返回文档及其 `path`，
- * 因此「写配置」在 v2 里的原生做法是直接写那个文件。
+ * 官方 `Config.update` 的写入目标是**全局配置目录**里的
+ * `opencode.json` → `opencode.jsonc`，取其中存在的最后一个；
+ * 都不存在时新建 `opencode.jsonc`（见 core 的 `ConfigDiscovery.names` 与 `Config.update`）。
+ * 这里与官方保持一致——不写项目级文档，避免编辑器把全局设置落到项目里。
  *
- * @returns 文档路径；找不到文档时为 undefined
+ * @returns 待写路径
  */
-export async function findConfigDocumentPath(
-  directory?: string,
-  serverId?: string,
-): Promise<string | undefined> {
-  const sources = await getConfigSources(directory, serverId)
-  const documents = sources.filter(
-    (source): source is Extract<ConfigSource, { type: 'document' }> => source.type === 'document',
-  )
-  // 取最后一个文档：合并顺序里它优先级最高，写入它才不会被别的来源覆盖
-  return documents[documents.length - 1]?.path
+export async function findGlobalConfigDocumentPath(serverId?: string): Promise<string> {
+  const sdk = getSDKClient(serverId)
+  const sources = await sdk.config.get()
+  const global = globalSources(sources)
+  // 优先级顺序里最后一个存在的文档，写入它才不会被更低的来源覆盖
+  const target = global.filter(isDocument).filter(source => source.path).at(-1)
+  if (target?.path) return target.path
+
+  const directory = global.find(source => source.type === 'directory')
+  if (directory) return joinDocumentPath(directory.path, CONFIG_DOCUMENT_NAMES[CONFIG_DOCUMENT_NAMES.length - 1])
+
+  throw new Error('No global config directory found')
 }
 
 /**
- * 把配置对象写回其文档文件。
+ * 把配置对象写回**全局**配置文档。
  *
  * ⚠️ 这是整文件写入：会以标准 JSON 覆盖原文件，**JSONC 注释与原始排版会丢失**。
  * v2 没有字段级写入接口，这是唯一能真正持久化配置的途径。
  *
  * @returns 写入的路径
  */
-export async function writeConfigDocument(
-  config: ConfigInfo,
-  directory?: string,
-  serverId?: string,
-): Promise<string> {
-  const path = await findConfigDocumentPath(directory, serverId)
-  if (!path) {
-    throw new Error('No writable config document found')
-  }
+export async function writeGlobalConfigDocument(config: ConfigInfo, serverId?: string): Promise<string> {
+  const path = await findGlobalConfigDocumentPath(serverId)
 
   const sdk = getSDKClient(serverId)
   const payload = new TextEncoder().encode(`${JSON.stringify(config, null, 2)}\n`)
-  await sdk.file.write({ path, payload, location: locationParam(directory, serverId) })
+  await sdk.file.write({ path, payload })
   return path
 }
 

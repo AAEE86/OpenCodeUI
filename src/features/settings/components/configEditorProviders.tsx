@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { ChevronRightIcon, PlusIcon } from '../../../components/Icons'
-import { DrillChild, DrillRow } from './configEditorDrill'
+import { ChevronRightIcon, PlusIcon, TrashIcon } from '../../../components/Icons'
+import { DrillChild } from './configEditorDrill'
 import { useDrillContainer, useDrillState } from './configEditorDrillState'
-import { BoolField, fieldClass, KeyValueField, NumberField, NumberOrFalseField, PositiveIntegerField, Select, StringListField, StringMapField, TextField } from './configEditorControls'
-import { DrillFields, DuplicateIdField, EmptyHint, FieldRow, GroupedFields, GroupHeader, SectionShell, type FieldDef } from './configEditorFields'
-import { MODALITIES, MODEL_STATUS } from './configEditorMeta'
+import { BoolField, fieldClass, IntegerField, KeyValueField, NumberField, NumberOrFalseField, Select, StringListField, StringMapField, TextField } from './configEditorControls'
+import { DrillFields, DuplicateIdField, EmptyHint, FieldRow, GroupHeader, SectionShell, type FieldDef } from './configEditorFields'
+import { MODALITIES } from './configEditorMeta'
 import { enumChoices, type SectionProps } from './configEditorSectionTypes'
 import type { JsonRecord, Lang } from './configEditorTypes'
 import { asStringArray, clone, getObject, hasOwn, isRecord, previewValue, setNested, tx } from './configEditorUtils'
@@ -31,7 +31,7 @@ function ProvidersHome({ config, setConfig, lang, providerCatalog }: ProviderVie
 
   const addProvider = (id: string) => {
     if (!id || hasOwn(providerMap, id)) return
-    setConfig(setNested(config, ['providers', id], { id }))
+    setConfig(setNested(config, ['providers', id], {}))
     openProvider(id)
   }
 
@@ -100,13 +100,6 @@ function ProvidersHome({ config, setConfig, lang, providerCatalog }: ProviderVie
             {tx('Add', '添加', lang)}
           </button>
         </div>
-        <div className="mt-2 text-[length:var(--fs-xs)] leading-relaxed text-text-400">
-          {tx(
-            'Provider keys cannot be reliably deleted through the official merge API. Use enabled_providers/disabled_providers when you need to control availability.',
-            '官方 merge API 不能可靠删除已保存的 provider key。需要控制可用性时请使用 enabled_providers/disabled_providers。',
-            lang,
-          )}
-        </div>
       </section>
 
       <section>
@@ -121,17 +114,24 @@ function ProvidersHome({ config, setConfig, lang, providerCatalog }: ProviderVie
           {available
             .filter(id => !availQuery || id.toLowerCase().includes(availQuery.toLowerCase()))
             .slice(0, 80)
-            .map(id => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => addProvider(id)}
-                className="flex w-full items-center justify-between gap-3 py-2.5 text-left"
-              >
-                <span className="min-w-0 truncate text-[length:var(--fs-sm)] text-text-200">{id}</span>
-                <PlusIcon size={14} className="shrink-0 text-text-300" />
-              </button>
-            ))}
+            .map(id => {
+              const meta = getObject(providerCatalog, id)
+              const name = typeof meta.name === 'string' ? meta.name : ''
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => addProvider(id)}
+                  className="flex w-full items-center justify-between gap-3 py-2.5 text-left"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[length:var(--fs-sm)] text-text-200">
+                    {name || id}
+                    {name && name !== id && <span className="ml-2 font-mono text-[length:var(--fs-xs)] text-text-400">{id}</span>}
+                  </span>
+                  <PlusIcon size={14} className="shrink-0 text-text-300" />
+                </button>
+              )
+            })}
         </div>
       </section>
     </div>
@@ -145,74 +145,75 @@ function ProviderDetail({
   providerCatalog,
   providerId,
 }: ProviderViewProps & { providerId: string }) {
-  const { activeChildId, enter, depth } = useDrillContainer()
+  const { activeChildId } = useDrillContainer()
   const drill = useDrillState()
   const providerMap = getObject(config, 'providers')
   const providerValue = getObject(providerMap, providerId)
-  const catalog = getObject(providerCatalog, providerId)
-  const configuredModels = getObject(providerValue, 'models')
-  const catalogModelCount = Object.keys(getObject(catalog, 'models')).length
   const setProvider = (next: JsonRecord) => setConfig(setNested(config, ['providers', providerId], next))
+  const configuredModels = getObject(providerValue, 'models')
 
   const fields: FieldDef[] = [
     { key: 'name', label: 'name', desc: tx('Display name for this provider.', '此渠道的显示名称。', lang), control: <TextField value={providerValue.name} onChange={v => setProvider({ ...providerValue, name: v })} /> },
-    { key: 'npm', label: 'npm', desc: tx('npm package implementing the AI SDK provider.', '实现该 AI SDK provider 的 npm 包。', lang), control: <TextField value={providerValue.npm} onChange={v => setProvider({ ...providerValue, npm: v })} mono /> },
-    { key: 'api', label: 'api', desc: tx('API base identifier for this provider.', '该渠道的 API 标识。', lang), control: <TextField value={providerValue.api} onChange={v => setProvider({ ...providerValue, api: v })} mono /> },
-    { key: 'id', label: 'id', desc: tx('Provider id override.', '渠道 id 覆盖。', lang), control: <TextField value={providerValue.id} onChange={v => setProvider({ ...providerValue, id: v })} mono /> },
+    { key: 'canonical', label: 'canonical', desc: tx('Canonical provider id this one maps onto.', '该渠道映射到的规范 provider id。', lang), control: <TextField value={providerValue.canonical} onChange={v => setProvider({ ...providerValue, canonical: v })} mono /> },
+    { key: 'package', label: 'package', desc: tx('Package implementing the AI SDK provider (e.g. @ai-sdk/openai-compatible).', '实现该 AI SDK provider 的包（如 @ai-sdk/openai-compatible）。', lang), control: <TextField value={providerValue.package} onChange={v => setProvider({ ...providerValue, package: v })} mono /> },
     { key: 'env', label: 'env', desc: tx('Environment variables that hold the API key.', '存放 API key 的环境变量名。', lang), control: <StringListField value={providerValue.env} onChange={v => setProvider({ ...providerValue, env: v })} mono /> },
-    { key: 'whitelist', label: 'whitelist', desc: tx('Only expose these models from this provider.', '只暴露该渠道的这些模型。', lang), control: <StringListField value={providerValue.whitelist} onChange={v => setProvider({ ...providerValue, whitelist: v })} mono /> },
-    { key: 'blacklist', label: 'blacklist', desc: tx('Hide these models from this provider.', '隐藏该渠道的这些模型。', lang), control: <StringListField value={providerValue.blacklist} onChange={v => setProvider({ ...providerValue, blacklist: v })} mono /> },
-    { key: 'options', label: 'options', desc: tx('Connection options (API key, base URL, timeouts, headers).', '连接选项（API key、base URL、超时、请求头）。', lang), drill: { title: 'options', preview: previewValue(providerValue.options, lang), render: () => <ProviderOptionsEditor value={providerValue.options} onChange={v => setProvider({ ...providerValue, options: v })} lang={lang} /> } },
+    {
+      key: 'settings',
+      label: 'settings',
+      desc: tx('Connection settings (timeouts, transport, compaction).', '连接设置（超时、传输方式、压缩）。', lang),
+      drill: { title: 'settings', preview: previewValue(providerValue.settings, lang), render: () => <ProviderSettingsEditor value={providerValue.settings} onChange={v => setProvider({ ...providerValue, settings: v })} lang={lang} /> },
+    },
+    { key: 'headers', label: 'headers', desc: tx('Extra HTTP headers sent to the provider.', '发送给渠道的额外 HTTP 请求头。', lang), drill: { title: 'headers', preview: previewValue(providerValue.headers, lang), render: () => <StringMapField value={providerValue.headers} onChange={v => setProvider({ ...providerValue, headers: v })} /> } },
+    { key: 'body', label: 'body', desc: tx('Extra fields merged into every request body.', '合并进每个请求体的额外字段。', lang), drill: { title: 'body', preview: previewValue(providerValue.body, lang), render: () => <KeyValueField value={providerValue.body} onChange={v => setProvider({ ...providerValue, body: v })} /> } },
+    {
+      key: 'models',
+      label: 'models',
+      desc: tx(`${Object.keys(configuredModels).length} model override(s) configured.`, `已配置 ${Object.keys(configuredModels).length} 个模型覆盖。`, lang),
+      drill: { title: 'models', preview: previewValue(configuredModels, lang), render: () => <ProviderModels config={config} setConfig={setConfig} lang={lang} providerCatalog={providerCatalog} providerId={providerId} /> },
+    },
   ]
-
-  if (activeChildId === 'models') {
-    return (
-      <DrillChild depth={depth}>
-        <ProviderModels config={config} setConfig={setConfig} lang={lang} providerCatalog={providerCatalog} providerId={providerId} />
-      </DrillChild>
-    )
-  }
-  if (activeChildId) {
-    const active = fields.find(field => field.drill && field.key === activeChildId)
-    if (active?.drill) return <DrillChild depth={depth}>{active.drill.render()}</DrillChild>
-  }
 
   return (
     <div className="space-y-6">
-      <DuplicateIdField
-        sourceId={providerId}
-        existing={{ ...providerCatalog, ...providerMap }}
-        lang={lang}
-        onCopy={targetId => {
-          setConfig(setNested(config, ['providers', targetId], { ...clone(providerValue), id: providerValue.id ?? providerId }))
-          drill.replace(0, { id: `provider:${targetId}`, title: targetId })
-        }}
-      />
+      {!activeChildId && (
+        <DuplicateIdField
+          sourceId={providerId}
+          existing={{ ...providerCatalog, ...providerMap }}
+          lang={lang}
+          onCopy={targetId => {
+            setConfig(setNested(config, ['providers', targetId], clone(providerValue)))
+            drill.replace(0, { id: `provider:${targetId}`, title: targetId })
+          }}
+        />
+      )}
+      <DrillFields fields={fields} isConfigured={key => key in providerValue} lang={lang} />
+    </div>
+  )
+}
 
-      <button
-        type="button"
-        onClick={() => enter({ id: 'models', title: tx('models', '模型', lang) })}
-        className="group grid w-full grid-cols-[minmax(0,1fr)_14px] items-center gap-3 py-3 text-left"
-      >
-        <div className="min-w-0">
-          <div className="text-[length:var(--fs-sm)] font-medium text-text-100">models</div>
-          <div className="mt-0.5 text-[length:var(--fs-xs)] text-text-300">
-            {tx(
-              `${Object.keys(configuredModels).length} configured / ${catalogModelCount} available`,
-              `已配置 ${Object.keys(configuredModels).length} 个 / 可选 ${catalogModelCount} 个`,
-              lang,
-            )}
-          </div>
-        </div>
-        <ChevronRightIcon size={14} className="shrink-0 text-text-300" />
-      </button>
-
-      <GroupedFields
-        fields={fields}
-        isConfigured={key => key in providerValue}
-        lang={lang}
-        onEnter={field => field.drill && enter({ id: field.key, title: field.drill.title })}
-      />
+function ProviderSettingsEditor({ value, onChange, lang }: { value: unknown; onChange: (value: JsonRecord) => void; lang: Lang }) {
+  const rec = isRecord(value) ? value : {}
+  const known = ['timeout', 'headerTimeout', 'chunkTimeout', 'compaction', 'transport']
+  const compaction = getObject(rec, 'compaction')
+  const fields: FieldDef[] = [
+    { key: 'timeout', label: 'timeout', desc: tx('Request timeout in ms. Set false to disable.', '整个请求的超时（毫秒）。设为 false 可禁用。', lang), control: <NumberOrFalseField value={rec.timeout} onChange={v => onChange({ ...rec, timeout: v })} /> },
+    { key: 'headerTimeout', label: 'headerTimeout', desc: tx('Timeout in ms waiting for response headers. Set false to disable.', '等待响应头的超时（毫秒）。设为 false 可禁用。', lang), control: <NumberOrFalseField value={rec.headerTimeout} onChange={v => onChange({ ...rec, headerTimeout: v })} /> },
+    { key: 'chunkTimeout', label: 'chunkTimeout', desc: tx('Timeout in ms between streamed SSE chunks. Set false to disable.', 'SSE 流式分块之间的超时（毫秒）。设为 false 可禁用。', lang), control: <NumberOrFalseField value={rec.chunkTimeout} onChange={v => onChange({ ...rec, chunkTimeout: v })} /> },
+    { key: 'compaction', label: 'compaction', desc: tx("Compaction strategy: 'summary' or 'native'.", "压缩策略：summary 或 native。", lang), control: <Select value={compaction.type} options={enumChoices(['summary', 'native'])} onChange={v => onChange({ ...rec, compaction: { type: v } })} /> },
+    { key: 'transport', label: 'transport', desc: tx("Transport: 'http' or 'websocket'.", "传输方式：http 或 websocket。", lang), control: <Select value={rec.transport} options={enumChoices(['http', 'websocket'])} onChange={v => onChange({ ...rec, transport: v })} /> },
+  ]
+  const extra = Object.keys(rec).filter(key => !known.includes(key))
+  const knownPart = Object.fromEntries(Object.entries(rec).filter(([key]) => known.includes(key)))
+  return (
+    <div className="space-y-3">
+      <DrillFields fields={fields} isConfigured={key => key in rec} lang={lang} />
+      {extra.length > 0 && (
+        <FieldRow
+          label={tx('other settings', '其他设置', lang)}
+          block
+          control={<KeyValueField value={Object.fromEntries(extra.map(k => [k, rec[k]]))} onChange={next => onChange({ ...knownPart, ...next })} />}
+        />
+      )}
     </div>
   )
 }
@@ -221,17 +222,14 @@ function ProviderModels({
   config,
   setConfig,
   lang,
-  providerCatalog,
   providerId,
 }: ProviderViewProps & { providerId: string }) {
   const { activeChildId, enter, depth } = useDrillContainer()
   const drill = useDrillState()
   const providerMap = getObject(config, 'providers')
   const providerValue = getObject(providerMap, providerId)
-  const catalog = getObject(providerCatalog, providerId)
   const configuredModels = getObject(providerValue, 'models')
-  const catalogModels = getObject(catalog, 'models')
-  const modelIDs = Array.from(new Set([...Object.keys(configuredModels), ...Object.keys(catalogModels)])).sort()
+  const modelIDs = Object.keys(configuredModels).sort()
   const [newModel, setNewModel] = useState('')
   const [query, setQuery] = useState('')
 
@@ -239,7 +237,7 @@ function ProviderModels({
 
   const addModel = (id: string) => {
     if (!id || hasOwn(configuredModels, id)) return
-    setConfig(setNested(config, ['providers', providerId, 'models', id], { id }))
+    setConfig(setNested(config, ['providers', providerId, 'models', id], {}))
     openModel(id)
   }
 
@@ -256,7 +254,7 @@ function ProviderModels({
               existing={existingModels}
               lang={lang}
               onCopy={targetId => {
-                setConfig(setNested(config, ['providers', providerId, 'models', targetId], { ...clone(modelValue), id: modelValue.id ?? id }))
+                setConfig(setNested(config, ['providers', providerId, 'models', targetId], clone(modelValue)))
                 drill.replace(depth, { id: `model:${targetId}`, title: targetId })
               }}
             />
@@ -277,24 +275,18 @@ function ProviderModels({
     <div className="space-y-3">
       <input value={query} onChange={event => setQuery(event.target.value)} placeholder={tx('search models…', '搜索模型…', lang)} className={fieldClass} />
       <div className="max-h-[440px] divide-y divide-border-200/35 overflow-y-auto custom-scrollbar">
-        {filtered.length === 0 && <EmptyHint text={tx('No models. Add one below.', '没有模型，可在下方添加。', lang)} />}
-        {filtered.map(id => {
-          const isConfigured = hasOwn(configuredModels, id)
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => openModel(id)}
-              className="group grid w-full grid-cols-[minmax(0,1fr)_auto_14px] items-center gap-3 py-3 text-left"
-            >
-              <span className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-text-100">{id}</span>
-              <span className={`shrink-0 text-[length:var(--fs-xs)] ${isConfigured ? 'text-text-300' : 'text-text-400'}`}>
-                {isConfigured ? tx('configured', '已配置', lang) : tx('available', '可配置', lang)}
-              </span>
-              <ChevronRightIcon size={14} className="shrink-0 text-text-300" />
-            </button>
-          )
-        })}
+        {filtered.length === 0 && <EmptyHint text={tx('No model overrides. Add one below.', '没有模型覆盖，可在下方添加。', lang)} />}
+        {filtered.map(id => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => openModel(id)}
+            className="group grid w-full grid-cols-[minmax(0,1fr)_14px] items-center gap-3 py-3 text-left"
+          >
+            <span className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-text-100">{id}</span>
+            <ChevronRightIcon size={14} className="shrink-0 text-text-300" />
+          </button>
+        ))}
       </div>
       <div className="flex min-w-0 gap-2">
         <input
@@ -322,34 +314,64 @@ function ProviderModels({
           {tx('Add', '添加', lang)}
         </button>
       </div>
-      <div className="text-[length:var(--fs-xs)] leading-relaxed text-text-400">
-        {tx('Model override keys cannot be reliably deleted through the official merge API. Edit fields instead, or Reset before saving newly added model ids.', '官方 merge API 不能可靠删除已保存的模型覆盖 key。请改字段，刚新增的模型 id 可在保存前 Reset。', lang)}
-      </div>
     </div>
   )
 }
 
-function ProviderOptionsEditor({ value, onChange, lang }: { value: unknown; onChange: (value: JsonRecord) => void; lang: Lang }) {
-  const rec = isRecord(value) ? value : {}
-  const known = ['apiKey', 'baseURL', 'enterpriseUrl', 'setCacheKey', 'timeout', 'headerTimeout', 'chunkTimeout', 'headers']
+function ModelEditor({ value, onChange, lang }: { value: JsonRecord; onChange: (value: JsonRecord) => void; lang: Lang }) {
+  const set = (key: string, v: unknown) => onChange({ ...value, [key]: v })
+  const limit = getObject(value, 'limit')
   const fields: FieldDef[] = [
-    { key: 'apiKey', label: 'apiKey', desc: tx('API key for this provider.', '该渠道的 API key。', lang), control: <TextField value={rec.apiKey} onChange={v => onChange({ ...rec, apiKey: v })} mono /> },
-    { key: 'baseURL', label: 'baseURL', desc: tx('Custom API base URL.', '自定义 API base URL。', lang), control: <TextField value={rec.baseURL} onChange={v => onChange({ ...rec, baseURL: v })} mono /> },
-    { key: 'enterpriseUrl', label: 'enterpriseUrl', desc: tx('GitHub Enterprise URL for copilot auth.', '用于 copilot 认证的 GitHub Enterprise URL。', lang), control: <TextField value={rec.enterpriseUrl} onChange={v => onChange({ ...rec, enterpriseUrl: v })} mono /> },
-    { key: 'setCacheKey', label: 'setCacheKey', desc: tx('Enable promptCacheKey for this provider (default false).', '为该渠道启用 promptCacheKey（默认 false）。', lang), control: <BoolField value={rec.setCacheKey} onChange={v => onChange({ ...rec, setCacheKey: v })} /> },
-    { key: 'timeout', label: 'timeout', desc: tx('Request timeout in ms. Set false to disable timeout.', '整个请求的超时（毫秒）。设为 false 可禁用超时。', lang), control: <NumberOrFalseField value={rec.timeout} onChange={v => onChange({ ...rec, timeout: v })} /> },
-    { key: 'headerTimeout', label: 'headerTimeout', desc: tx('Timeout in ms waiting for response headers. Set false to disable timeout.', '等待响应头的超时（毫秒）。设为 false 可禁用超时。', lang), control: <NumberOrFalseField value={rec.headerTimeout} onChange={v => onChange({ ...rec, headerTimeout: v })} /> },
-    { key: 'chunkTimeout', label: 'chunkTimeout', desc: tx('Timeout in ms between streamed SSE chunks.', 'SSE 流式分块之间的超时（毫秒）。', lang), control: <PositiveIntegerField value={rec.chunkTimeout} onChange={v => onChange({ ...rec, chunkTimeout: v })} /> },
-    { key: 'headers', label: 'headers', desc: tx('Extra HTTP headers sent to the provider.', '发送给渠道的额外 HTTP 请求头。', lang), drill: { title: 'headers', preview: previewValue(rec.headers, lang), render: () => <StringMapField value={rec.headers} onChange={v => onChange({ ...rec, headers: v })} /> } },
+    { key: 'name', label: 'name', desc: tx('Display name for the model.', '模型显示名。', lang), control: <TextField value={value.name} onChange={v => set('name', v)} /> },
+    { key: 'modelID', label: 'modelID', desc: tx("Provider-native model id (when it differs from the config key).", '渠道原生模型 id（与配置 key 不同时使用）。', lang), control: <TextField value={value.modelID} onChange={v => set('modelID', v)} mono /> },
+    { key: 'family', label: 'family', desc: tx('Model family/series.', '模型系列。', lang), control: <TextField value={value.family} onChange={v => set('family', v)} /> },
+    { key: 'package', label: 'package', desc: tx('Per-model provider package override.', '该模型的渠道包覆盖。', lang), control: <TextField value={value.package} onChange={v => set('package', v)} mono /> },
+    { key: 'disabled', label: 'disabled', desc: tx('Disable this model.', '禁用该模型。', lang), control: <BoolField value={value.disabled} onChange={v => set('disabled', v)} /> },
+    { key: 'settings', label: 'settings', desc: tx('Model settings (compaction and provider-specific options).', '模型设置（压缩以及渠道专属选项）。', lang), drill: { title: 'settings', preview: previewValue(value.settings, lang), render: () => <ModelSettingsEditor value={value.settings} onChange={v => set('settings', v)} lang={lang} /> } },
+    { key: 'headers', label: 'headers', desc: tx('Per-model HTTP headers.', '该模型的 HTTP 请求头。', lang), drill: { title: 'headers', preview: previewValue(value.headers, lang), render: () => <StringMapField value={value.headers} onChange={v => set('headers', v)} /> } },
+    { key: 'body', label: 'body', desc: tx('Per-model request body fields.', '该模型的请求体字段。', lang), drill: { title: 'body', preview: previewValue(value.body, lang), render: () => <KeyValueField value={value.body} onChange={v => set('body', v)} /> } },
+    { key: 'capabilities', label: 'capabilities', desc: tx('Tool calling and supported input/output modalities.', '工具调用能力与支持的输入/输出模态。', lang), drill: { title: 'capabilities', preview: previewValue(value.capabilities, lang), render: () => <CapabilitiesEditor value={value.capabilities} onChange={v => set('capabilities', v)} lang={lang} /> } },
+    { key: 'compatibility', label: 'compatibility', desc: tx('Provider compatibility quirks (reasoning field, token field names, etc.).', '渠道兼容性细节（reasoning 字段、token 字段名等）。', lang), drill: { title: 'compatibility', preview: previewValue(value.compatibility, lang), render: () => <CompatibilityEditor value={value.compatibility} onChange={v => set('compatibility', v)} lang={lang} /> } },
+    { key: 'cost', label: 'cost', desc: tx('Token costs per 1M tokens.', '每百万 token 的费用。', lang), drill: { title: 'cost', preview: previewValue(value.cost, lang), render: () => <CostEditor value={value.cost} onChange={v => set('cost', v)} lang={lang} /> } },
+    {
+      key: 'limit',
+      label: 'limit',
+      desc: tx('Context / input / output token limits.', '上下文/输入/输出 token 限制。', lang),
+      drill: {
+        title: 'limit',
+        preview: previewValue(limit, lang),
+        render: () => (
+          <DrillFields
+            fields={[
+              { key: 'context', label: 'context', desc: tx('Total context window size.', '总上下文窗口大小。', lang), control: <IntegerField value={limit.context} min={0} onChange={v => set('limit', { ...limit, context: v })} /> },
+              { key: 'input', label: 'input', desc: tx('Maximum input tokens.', '最大输入 token 数。', lang), control: <IntegerField value={limit.input} min={0} onChange={v => set('limit', { ...limit, input: v })} /> },
+              { key: 'output', label: 'output', desc: tx('Maximum output tokens.', '最大输出 token 数。', lang), control: <IntegerField value={limit.output} min={0} onChange={v => set('limit', { ...limit, output: v })} /> },
+            ]}
+            isConfigured={key => key in limit}
+            lang={lang}
+          />
+        ),
+      },
+    },
+    { key: 'variants', label: 'variants', desc: tx('Named model variants (settings/headers/body overrides).', '命名模型变体（settings/headers/body 覆盖）。', lang), drill: { title: 'variants', preview: previewValue(value.variants, lang), render: () => <ModelVariantsEditor value={value.variants} onChange={v => set('variants', v)} lang={lang} /> } },
   ]
-  const extra = Object.keys(rec).filter(key => !known.includes(key))
-  const knownPart = Object.fromEntries(Object.entries(rec).filter(([key]) => known.includes(key)))
+  return <DrillFields fields={fields} isConfigured={key => key in value} lang={lang} />
+}
+
+function ModelSettingsEditor({ value, onChange, lang }: { value: unknown; onChange: (value: JsonRecord) => void; lang: Lang }) {
+  const rec = isRecord(value) ? value : {}
+  const compaction = getObject(rec, 'compaction')
+  const fields: FieldDef[] = [
+    { key: 'compaction', label: 'compaction', desc: tx("Compaction strategy: 'summary' or 'native'.", "压缩策略：summary 或 native。", lang), control: <Select value={compaction.type} options={enumChoices(['summary', 'native'])} onChange={v => onChange({ ...rec, compaction: { type: v } })} /> },
+  ]
+  const extra = Object.keys(rec).filter(key => key !== 'compaction')
+  const knownPart = Object.fromEntries(Object.entries(rec).filter(([key]) => key === 'compaction'))
   return (
     <div className="space-y-3">
       <DrillFields fields={fields} isConfigured={key => key in rec} lang={lang} />
       {extra.length > 0 && (
         <FieldRow
-          label={tx('other options', '其他选项', lang)}
+          label={tx('other settings', '其他设置', lang)}
           block
           control={<KeyValueField value={Object.fromEntries(extra.map(k => [k, rec[k]]))} onChange={next => onChange({ ...knownPart, ...next })} />}
         />
@@ -358,174 +380,197 @@ function ProviderOptionsEditor({ value, onChange, lang }: { value: unknown; onCh
   )
 }
 
-function ModelEditor({ value, onChange, lang }: { value: JsonRecord; onChange: (value: JsonRecord) => void; lang: Lang }) {
-  const cost = getObject(value, 'cost')
-  const contextOver200k = getObject(cost, 'context_over_200k')
-  const limit = getObject(value, 'limit')
-  const modalities = getObject(value, 'modalities')
-  const costMissing = ['input', 'output'].filter(key => cost[key] === undefined)
-  const contextOverMissing = Object.keys(contextOver200k).length > 0 ? ['input', 'output'].filter(key => contextOver200k[key] === undefined) : []
-  const limitMissing = ['context', 'output'].filter(key => limit[key] === undefined)
-  const set = (key: string, v: unknown) => onChange({ ...value, [key]: v })
-  const fields: FieldDef[] = [
-    { key: 'id', label: 'id', desc: tx('Provider-native model id override.', '渠道原生模型 id 覆盖。', lang), control: <TextField value={value.id} onChange={v => set('id', v)} mono /> },
-    { key: 'name', label: 'name', desc: tx('Display name for the model.', '模型显示名。', lang), control: <TextField value={value.name} onChange={v => set('name', v)} /> },
-    { key: 'family', label: 'family', desc: tx('Model family/series.', '模型系列。', lang), control: <TextField value={value.family} onChange={v => set('family', v)} /> },
-    { key: 'release_date', label: 'release_date', desc: tx('Release date (YYYY-MM-DD).', '发布日期（YYYY-MM-DD）。', lang), control: <TextField value={value.release_date} onChange={v => set('release_date', v)} placeholder="2025-01-01" /> },
-    { key: 'attachment', label: 'attachment', desc: tx('Model supports file attachments.', '模型支持文件附件。', lang), control: <BoolField value={value.attachment} onChange={v => set('attachment', v)} /> },
-    { key: 'reasoning', label: 'reasoning', desc: tx('Model supports reasoning / thinking.', '模型支持推理/思考。', lang), control: <BoolField value={value.reasoning} onChange={v => set('reasoning', v)} /> },
-    { key: 'temperature', label: 'temperature', desc: tx('Model supports a temperature parameter.', '模型支持 temperature 参数。', lang), control: <BoolField value={value.temperature} onChange={v => set('temperature', v)} /> },
-    { key: 'tool_call', label: 'tool_call', desc: tx('Model supports tool/function calling.', '模型支持工具/函数调用。', lang), control: <BoolField value={value.tool_call} onChange={v => set('tool_call', v)} /> },
-    { key: 'experimental', label: 'experimental', desc: tx('Mark this model as experimental.', '标记为实验性模型。', lang), control: <BoolField value={value.experimental} onChange={v => set('experimental', v)} /> },
-    { key: 'status', label: 'status', desc: tx('Lifecycle status.', '生命周期状态。', lang), control: <Select value={value.status} options={enumChoices(MODEL_STATUS)} onChange={v => set('status', v)} /> },
-    {
-      key: 'cost',
-      label: 'cost',
-      block: true,
-      desc: tx('Token costs (per 1M tokens).', 'token 费用（每百万 token）。', lang),
-      control: (
-        <div className="space-y-3">
-          {costMissing.length > 0 && (
-            <div className="rounded-lg border border-warning-100/30 bg-warning-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-warning-100">
-              {tx(`Required: ${costMissing.join(', ')}`, `必填：${costMissing.join(', ')}`, lang)}
-            </div>
-          )}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {(['input', 'output', 'cache_read', 'cache_write'] as const).map(k => (
-            <label key={k} className="text-[length:var(--fs-xs)] text-text-500">
-              {k}
-              <NumberField value={cost[k]} onChange={v => onChange({ ...value, cost: { ...cost, [k]: v } })} />
-            </label>
-          ))}
-          </div>
-          <div className="rounded-lg border border-border-200/40 p-2">
-            <div className="mb-2 text-[length:var(--fs-xs)] font-medium text-text-400">context_over_200k</div>
-            {contextOverMissing.length > 0 && (
-              <div className="mb-2 rounded-lg border border-warning-100/30 bg-warning-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-warning-100">
-                {tx(`Required when used: ${contextOverMissing.join(', ')}`, `使用时必填：${contextOverMissing.join(', ')}`, lang)}
-              </div>
-            )}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              {(['input', 'output', 'cache_read', 'cache_write'] as const).map(k => (
-                <label key={k} className="text-[length:var(--fs-xs)] text-text-500">
-                  {k}
-                  <NumberField value={contextOver200k[k]} onChange={v => onChange({ ...value, cost: { ...cost, context_over_200k: { ...contextOver200k, [k]: v } } })} />
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'limit',
-      label: 'limit',
-      block: true,
-      desc: tx('Context / input / output token limits.', '上下文/输入/输出 token 限制。', lang),
-      control: (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {limitMissing.length > 0 && (
-            <div className="sm:col-span-3 rounded-lg border border-warning-100/30 bg-warning-100/10 px-3 py-2 text-[length:var(--fs-xs)] text-warning-100">
-              {tx(`Required: ${limitMissing.join(', ')}`, `必填：${limitMissing.join(', ')}`, lang)}
-            </div>
-          )}
-          {(['context', 'input', 'output'] as const).map(k => (
-            <label key={k} className="text-[length:var(--fs-xs)] text-text-500">
-              {k}
-              <NumberField value={limit[k]} onChange={v => onChange({ ...value, limit: { ...limit, [k]: v } })} />
-            </label>
-          ))}
-        </div>
-      ),
-    },
-    {
-      key: 'modalities',
-      label: 'modalities',
-      block: true,
-      desc: tx('Supported input/output modalities.', '支持的输入/输出模态。', lang),
-      control: (
-        <div className="space-y-2">
-          <div className="text-[length:var(--fs-xs)] text-text-500">input</div>
-          <MultiToggle options={MODALITIES} value={asStringArray(modalities.input)} onChange={v => onChange({ ...value, modalities: { ...modalities, input: v } })} />
-          <div className="text-[length:var(--fs-xs)] text-text-500">output</div>
-          <MultiToggle options={MODALITIES} value={asStringArray(modalities.output)} onChange={v => onChange({ ...value, modalities: { ...modalities, output: v } })} />
-        </div>
-      ),
-    },
-    {
-      key: 'interleaved',
-      label: 'interleaved',
-      desc: tx('Interleaved reasoning: true, or pick a reasoning field.', '交错推理：true，或选择 reasoning 字段。', lang),
-      control: (
-        <Select
-          value={value.interleaved === true ? 'true' : isRecord(value.interleaved) ? String((value.interleaved as JsonRecord).field) : ''}
-          options={[
-            { value: 'true', label: 'true' },
-            { value: 'reasoning', label: 'field: reasoning' },
-            { value: 'reasoning_content', label: 'field: reasoning_content' },
-            { value: 'reasoning_details', label: 'field: reasoning_details' },
-          ]}
-          onChange={v => set('interleaved', v === 'true' ? true : { field: v })}
-        />
-      ),
-    },
-    { key: 'provider', label: 'provider', desc: tx('Provider implementation override for this model (npm/api).', '该模型的渠道实现覆盖（npm/api）。', lang), drill: { title: 'provider', preview: previewValue(value.provider, lang), render: () => <ModelProviderOverride value={value.provider} onChange={v => set('provider', v)} lang={lang} /> } },
-    { key: 'headers', label: 'headers', desc: tx('Per-model HTTP headers.', '该模型的 HTTP 请求头。', lang), drill: { title: 'headers', preview: previewValue(value.headers, lang), render: () => <StringMapField value={value.headers} onChange={v => set('headers', v)} /> } },
-    { key: 'options', label: 'options', desc: tx('Provider-specific model options.', '渠道相关的模型选项。', lang), drill: { title: 'options', preview: previewValue(value.options, lang), render: () => <KeyValueField value={value.options} onChange={v => set('options', v)} /> } },
-    { key: 'variants', label: 'variants', desc: tx('Variant-specific configuration (for example disabled=true).', '模型 variant 级别配置（例如 disabled=true）。', lang), drill: { title: 'variants', preview: previewValue(value.variants, lang), render: () => <ModelVariantsEditor value={value.variants} onChange={v => set('variants', v)} lang={lang} /> } },
-  ]
-  return <DrillFields fields={fields} isConfigured={key => key in value} lang={lang} />
-}
-
-function ModelProviderOverride({ value, onChange, lang }: { value: unknown; onChange: (value: JsonRecord) => void; lang: Lang }) {
+function CapabilitiesEditor({ value, onChange, lang }: { value: unknown; onChange: (value: JsonRecord) => void; lang: Lang }) {
   const rec = isRecord(value) ? value : {}
   const fields: FieldDef[] = [
-    { key: 'npm', label: 'npm', desc: tx('Provider npm package override.', '渠道 npm 包覆盖。', lang), control: <TextField value={rec.npm} onChange={v => onChange({ ...rec, npm: v })} mono /> },
-    { key: 'api', label: 'api', desc: tx('Provider API name override.', '渠道 API 名称覆盖。', lang), control: <TextField value={rec.api} onChange={v => onChange({ ...rec, api: v })} mono /> },
+    { key: 'tools', label: 'tools', desc: tx('Model supports tool/function calling.', '模型支持工具/函数调用。', lang), control: <BoolField value={rec.tools} onChange={v => onChange({ ...rec, tools: v })} /> },
+    {
+      key: 'input',
+      label: 'input',
+      block: true,
+      desc: tx('Accepted input modalities.', '可接受的输入模态。', lang),
+      control: <MultiToggle options={MODALITIES} value={asStringArray(rec.input)} onChange={v => onChange({ ...rec, input: v })} />,
+    },
+    {
+      key: 'output',
+      label: 'output',
+      block: true,
+      desc: tx('Produced output modalities.', '可产生的输出模态。', lang),
+      control: <MultiToggle options={MODALITIES} value={asStringArray(rec.output)} onChange={v => onChange({ ...rec, output: v })} />,
+    },
   ]
   return <DrillFields fields={fields} isConfigured={key => key in rec} lang={lang} />
 }
 
-function ModelVariantsEditor({ value, onChange, lang }: { value: unknown; onChange: (value: JsonRecord) => void; lang: Lang }) {
-  const { activeChildId, enter, depth } = useDrillContainer()
-  const drill = useDrillState()
+function CompatibilityEditor({ value, onChange, lang }: { value: unknown; onChange: (value: JsonRecord) => void; lang: Lang }) {
   const rec = isRecord(value) ? value : {}
+  const set = (key: string, v: unknown) => onChange({ ...rec, [key]: v })
+  const fields: FieldDef[] = [
+    { key: 'reasoningField', label: 'reasoningField', desc: tx('Field name carrying reasoning content (e.g. reasoning_content).', '承载推理内容的字段名（如 reasoning_content）。', lang), control: <TextField value={rec.reasoningField} onChange={v => set('reasoningField', v)} mono /> },
+    { key: 'maxTokensField', label: 'maxTokensField', desc: tx("Which max-token field the model expects: 'max_tokens' or 'max_completion_tokens'.", "模型期望的 max token 字段：max_tokens 或 max_completion_tokens。", lang), control: <Select editable value={rec.maxTokensField} options={enumChoices(['max_completion_tokens', 'max_tokens'])} onChange={v => set('maxTokensField', v)} /> },
+    { key: 'requireReasoning', label: 'requireReasoning', desc: tx('Require every assistant message to include its reasoning field.', '要求每条 assistant 消息都带 reasoning 字段。', lang), control: <BoolField value={rec.requireReasoning} onChange={v => set('requireReasoning', v)} /> },
+    { key: 'requireFinishReason', label: 'requireFinishReason', desc: tx('Require a finish_reason on every response.', '要求每个响应都带 finish_reason。', lang), control: <BoolField value={rec.requireFinishReason} onChange={v => set('requireFinishReason', v)} /> },
+    { key: 'requireAssistantAfterTool', label: 'requireAssistantAfterTool', desc: tx('Require an assistant message after tool results.', '工具结果之后必须跟一条 assistant 消息。', lang), control: <BoolField value={rec.requireAssistantAfterTool} onChange={v => set('requireAssistantAfterTool', v)} /> },
+    { key: 'supportsPromptCacheKey', label: 'supportsPromptCacheKey', desc: tx('Provider supports promptCacheKey.', '渠道支持 promptCacheKey。', lang), control: <BoolField value={rec.supportsPromptCacheKey} onChange={v => set('supportsPromptCacheKey', v)} /> },
+    { key: 'supportsThinkingBlockBinding', label: 'supportsThinkingBlockBinding', desc: tx('Supports Anthropic thinking-prefix mismatch controls.', '支持 Anthropic thinking-prefix 匹配控制。', lang), control: <BoolField value={rec.supportsThinkingBlockBinding} onChange={v => set('supportsThinkingBlockBinding', v)} /> },
+    { key: 'supportsEffortUpdates', label: 'supportsEffortUpdates', desc: tx('Supports per-message effort updates.', '支持逐消息的 effort 更新。', lang), control: <BoolField value={rec.supportsEffortUpdates} onChange={v => set('supportsEffortUpdates', v)} /> },
+  ]
+  return <DrillFields fields={fields} isConfigured={key => key in rec} lang={lang} />
+}
+
+function CostEditor({ value, onChange, lang }: { value: unknown; onChange: (value: unknown) => void; lang: Lang }) {
+  const isArray = Array.isArray(value)
+  const entries: unknown[] = isArray ? value : [isRecord(value) ? value : {}]
+  const commit = (next: unknown[]) => onChange(isArray ? next : next[0] ?? {})
+  const setEntry = (index: number, entry: JsonRecord) => commit(entries.map((item, i) => (i === index ? entry : item)))
+
+  return (
+    <div className="space-y-3">
+      <FieldRow
+        label={tx('shape', '形态', lang)}
+        desc={tx('A single cost entry, or a tiered list of entries.', '单条费用，或按 tier 分层的多条费用。', lang)}
+        control={
+          <Select
+            value={isArray ? 'array' : 'single'}
+            options={[
+              { value: 'single', label: tx('single cost', '单条费用', lang) },
+              { value: 'array', label: tx('tiered list', '分层列表', lang) },
+            ]}
+            onChange={next => onChange(next === 'array' ? entries : entries[0] ?? {})}
+          />
+        }
+      />
+      {entries.map((entryValue, index) => {
+        const entry = isRecord(entryValue) ? entryValue : {}
+        const cache = getObject(entry, 'cache')
+        const tier = getObject(entry, 'tier')
+        return (
+          <div key={index} className="space-y-3 rounded-lg border border-border-200/40 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[length:var(--fs-xs)] font-medium text-text-300">{isArray ? tx(`entry ${index + 1}`, `第 ${index + 1} 条`, lang) : 'cost'}</span>
+              {isArray && entries.length > 1 && (
+                <button
+                  type="button"
+                  aria-label={tx('Remove cost entry', '删除费用条目', lang)}
+                  onClick={() => commit(entries.filter((_, i) => i !== index))}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-300 transition-colors hover:bg-bg-200/40 hover:text-error-100"
+                >
+                  <TrashIcon size={13} />
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <label className="text-[length:var(--fs-xs)] text-text-500">
+                input
+                <NumberField value={entry.input} onChange={v => setEntry(index, { ...entry, input: v })} />
+              </label>
+              <label className="text-[length:var(--fs-xs)] text-text-500">
+                output
+                <NumberField value={entry.output} onChange={v => setEntry(index, { ...entry, output: v })} />
+              </label>
+              <label className="text-[length:var(--fs-xs)] text-text-500">
+                cache.read
+                <NumberField value={cache.read} onChange={v => setEntry(index, { ...entry, cache: { ...cache, read: v } })} />
+              </label>
+              <label className="text-[length:var(--fs-xs)] text-text-500">
+                cache.write
+                <NumberField value={cache.write} onChange={v => setEntry(index, { ...entry, cache: { ...cache, write: v } })} />
+              </label>
+              <label className="text-[length:var(--fs-xs)] text-text-500">
+                tier.size (context)
+                <IntegerField value={tier.size} min={0} onChange={v => setEntry(index, { ...entry, tier: { type: 'context', size: v } })} />
+              </label>
+            </div>
+          </div>
+        )
+      })}
+      {isArray && (
+        <button
+          type="button"
+          onClick={() => onChange([...entries, {}])}
+          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-border-200 px-2.5 text-[length:var(--fs-sm)] font-medium text-text-100 transition-colors hover:border-border-300"
+        >
+          <PlusIcon size={13} />
+          {tx('Add cost entry', '添加费用条目', lang)}
+        </button>
+      )}
+      <div className="text-[length:var(--fs-xs)] leading-relaxed text-text-400">
+        {tx('input and output are required; cache and tier are optional.', 'input 与 output 必填；cache 与 tier 可选。', lang)}
+      </div>
+    </div>
+  )
+}
+
+function ModelVariantsEditor({ value, onChange, lang }: { value: unknown; onChange: (value: unknown[]) => void; lang: Lang }) {
+  const { activeChildId, enter, depth } = useDrillContainer()
+  const list = Array.isArray(value) ? value : []
   const [newName, setNewName] = useState('')
+
   if (activeChildId?.startsWith('variant:')) {
-    const name = activeChildId.slice('variant:'.length)
-    const variant = getObject(rec, name)
+    const index = Number(activeChildId.slice('variant:'.length))
+    const variant = isRecord(list[index]) ? (list[index] as JsonRecord) : {}
+    const setVariant = (next: JsonRecord) => onChange(list.map((item, i) => (i === index ? next : item)))
+    const set = (key: string, v: unknown) => setVariant({ ...variant, [key]: v })
     const fields: FieldDef[] = [
-      { key: 'disabled', label: 'disabled', desc: tx('Disable this variant for the model.', '禁用该模型的这个 variant。', lang), control: <BoolField value={variant.disabled} onChange={v => onChange({ ...rec, [name]: { ...variant, disabled: v } })} /> },
+      { key: 'id', label: 'id', desc: tx('Variant identifier.', '变体标识。', lang), control: <TextField value={variant.id} onChange={v => set('id', v)} mono /> },
+      { key: 'settings', label: 'settings', desc: tx('Variant settings overrides.', '变体的 settings 覆盖。', lang), drill: { title: 'settings', preview: previewValue(variant.settings, lang), render: () => <ModelSettingsEditor value={variant.settings} onChange={v => set('settings', v)} lang={lang} /> } },
+      { key: 'headers', label: 'headers', desc: tx('Variant HTTP headers.', '变体的 HTTP 请求头。', lang), drill: { title: 'headers', preview: previewValue(variant.headers, lang), render: () => <StringMapField value={variant.headers} onChange={v => set('headers', v)} /> } },
+      { key: 'body', label: 'body', desc: tx('Variant request body fields.', '变体的请求体字段。', lang), drill: { title: 'body', preview: previewValue(variant.body, lang), render: () => <KeyValueField value={variant.body} onChange={v => set('body', v)} /> } },
     ]
     return (
       <DrillChild depth={depth}>
-        <div className="space-y-6">
-          <DuplicateIdField
-            sourceId={name}
-            existing={rec}
-            lang={lang}
-            onCopy={targetId => {
-              onChange({ ...rec, [targetId]: clone(variant) })
-              drill.replace(depth, { id: `variant:${targetId}`, title: targetId })
-            }}
-          />
-          <DrillFields fields={fields} isConfigured={key => key in variant} lang={lang} />
-        </div>
+        <DrillFields fields={fields} isConfigured={key => key in variant} lang={lang} />
       </DrillChild>
     )
   }
+
+  const addVariant = () => {
+    const name = newName.trim()
+    if (!name || list.some(item => isRecord(item) && item.id === name)) return
+    onChange([...list, { id: name }])
+    setNewName('')
+  }
+
   return (
     <div className="space-y-3">
-      {Object.keys(rec).length === 0 ? <EmptyHint text={tx('No variants configured.', '还没有配置 variant。', lang)} /> : (
-        <div className="space-y-0.5">
-          {Object.keys(rec).sort().map(name => (
-            <DrillRow key={name} label={name} preview={previewValue(rec[name], lang)} onClick={() => enter({ id: `variant:${name}`, title: name })} />
-          ))}
+      {list.length === 0 ? (
+        <EmptyHint text={tx('No variants configured.', '还没有配置变体。', lang)} />
+      ) : (
+        <div className="divide-y divide-border-200/35">
+          {list.map((item, index) => {
+            const variant = isRecord(item) ? item : {}
+            const title = typeof variant.id === 'string' && variant.id ? variant.id : String(index)
+            return (
+              <button
+                key={index}
+                type="button"
+                onClick={() => enter({ id: `variant:${index}`, title })}
+                className="group grid w-full grid-cols-[minmax(0,1fr)_auto_14px] items-center gap-3 py-3 text-left"
+              >
+                <span className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-text-100">{title}</span>
+                <span className="shrink-0 truncate text-[length:var(--fs-xs)] text-text-400">{previewValue(item, lang)}</span>
+                <ChevronRightIcon size={14} className="shrink-0 text-text-300" />
+              </button>
+            )
+          })}
         </div>
       )}
       <div className="flex min-w-0 gap-2">
-        <input value={newName} onChange={event => setNewName(event.target.value)} placeholder={tx('variant name', 'variant 名称', lang)} className={`${fieldClass} min-w-0 flex-1 font-mono`} />
-        <button type="button" disabled={!newName.trim() || hasOwn(rec, newName.trim())} onClick={() => { onChange({ ...rec, [newName.trim()]: { disabled: false } }); setNewName('') }} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-200/60 px-3 py-2 text-[length:var(--fs-xs)] text-text-300 hover:bg-bg-100 disabled:opacity-40">
+        <input
+          value={newName}
+          onChange={event => setNewName(event.target.value)}
+          placeholder={tx('variant id', '变体 id', lang)}
+          onKeyDown={event => {
+            if (event.key === 'Enter') addVariant()
+          }}
+          className={`${fieldClass} min-w-0 flex-1 font-mono`}
+        />
+        <button
+          type="button"
+          disabled={!newName.trim()}
+          onClick={addVariant}
+          className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border-200 px-2.5 text-[length:var(--fs-sm)] font-medium text-text-100 transition-colors hover:border-border-300 disabled:opacity-40"
+        >
           <PlusIcon size={13} />
           {tx('Add', '添加', lang)}
         </button>

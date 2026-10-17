@@ -4,14 +4,8 @@ export const SECTION_META: Record<SectionID, { en: string; zh: string; descEn: s
   general: {
     en: 'General',
     zh: '通用',
-    descEn: 'Core settings: default model, agent, shell, sharing and updates.',
-    descZh: '核心设置：默认模型、默认 agent、shell、分享与自动更新。',
-  },
-  server: {
-    en: 'Server',
-    zh: '服务',
-    descEn: 'Options for the opencode serve and web commands.',
-    descZh: 'opencode serve 和 web 命令的服务端选项。',
+    descEn: 'Core settings: default model, agent, shell, sharing, updates and enterprise.',
+    descZh: '核心设置：默认模型、默认 agent、shell、分享、自动更新与企业配置。',
   },
   commands: {
     en: 'Commands',
@@ -40,8 +34,8 @@ export const SECTION_META: Record<SectionID, { en: string; zh: string; descEn: s
   agents: {
     en: 'Agents',
     zh: 'Agent',
-    descEn: 'Built-in and custom agent overrides (model, prompt, permissions).',
-    descZh: '内置与自定义 agent 的覆盖（模型、提示词、权限等）。',
+    descEn: 'Built-in and custom agent overrides (model, system prompt, request body, permissions).',
+    descZh: '内置与自定义 agent 的覆盖（模型、系统提示词、请求体、权限等）。',
   },
   mcp: {
     en: 'MCP Servers',
@@ -52,8 +46,8 @@ export const SECTION_META: Record<SectionID, { en: string; zh: string; descEn: s
   permissions: {
     en: 'Permissions',
     zh: '权限',
-    descEn: 'Default action (ask/allow/deny) per tool, with optional pattern rules.',
-    descZh: '每个工具的默认动作（询问/允许/拒绝），可按 pattern 细分。',
+    descEn: 'Ordered permission rules applied to agent tool use.',
+    descZh: '按顺序应用的工具权限规则。',
   },
   formatters: {
     en: 'Formatters',
@@ -67,29 +61,23 @@ export const SECTION_META: Record<SectionID, { en: string; zh: string; descEn: s
     descEn: 'Enable built-in language servers or define custom ones.',
     descZh: '启用内置语言服务器，或定义自定义 LSP。',
   },
-  attachments: {
-    en: 'Attachments',
-    zh: '附件',
-    descEn: 'Image attachment limits and auto-resize behavior.',
-    descZh: '图片附件的尺寸限制与自动缩放行为。',
+  media: {
+    en: 'Media',
+    zh: '媒体',
+    descEn: 'Image processing limits and auto-resize behavior.',
+    descZh: '图片处理的尺寸限制与自动缩放行为。',
   },
   runtime: {
     en: 'Runtime',
     zh: '运行时',
-    descEn: 'Tool output limits, context compaction, watcher and enterprise.',
-    descZh: '工具输出限制、上下文压缩、文件监听和企业设置。',
+    descEn: 'Tool output limits, compaction, watcher, web search, worktree and warming.',
+    descZh: '工具输出限制、上下文压缩、文件监听、联网搜索、worktree 与预热。',
   },
   experimental: {
     en: 'Experimental',
     zh: '实验性',
     descEn: 'Experimental flags that may change or be removed in future versions.',
     descZh: '实验性开关，未来版本可能变化或移除。',
-  },
-  compatibility: {
-    en: 'Compatibility',
-    zh: '兼容',
-    descEn: 'Deprecated or compatibility fields that still exist in opencode.json.',
-    descZh: '仍存在于 opencode.json 中的废弃字段或兼容字段。',
   },
   advanced: {
     en: 'Unknown / Future',
@@ -101,7 +89,6 @@ export const SECTION_META: Record<SectionID, { en: string; zh: string; descEn: s
 
 export const SECTION_IDS: SectionID[] = [
   'general',
-  'server',
   'commands',
   'skills',
   'plugins',
@@ -111,69 +98,75 @@ export const SECTION_IDS: SectionID[] = [
   'permissions',
   'formatters',
   'lsp',
-  'attachments',
+  'media',
   'runtime',
   'experimental',
-  'compatibility',
   'advanced',
 ]
 
+/** OpenCode v2 顶层配置键（对应 `packages/schema/src/config.ts` 的 `Info`）。 */
 export const KNOWN_ROOT_KEYS = new Set([
   '$schema',
   'shell',
-  'logLevel',
-  'server',
-  'command',
-  'skills',
-  'references',
-  'reference',
-  'watcher',
-  'snapshot',
-  'plugin',
-  'share',
-  'autoshare',
-  'autoupdate',
-  'disabled_providers',
-  'enabled_providers',
   'model',
-  'small_model',
   'default_agent',
-  'subagent_depth',
+  'update',
+  'share',
+  'enterprise',
   'username',
-  'mode',
-  'agent',
-  'providers',
-  'mcp',
+  'permissions',
+  'agents',
+  'snapshots',
+  'watcher',
   'formatter',
   'lsp',
-  'instructions',
-  'layout',
-  'permission',
-  'tools',
-  'attachment',
-  'enterprise',
+  'media',
   'tool_output',
+  'mcp',
   'compaction',
+  'skills',
+  'commands',
+  'instructions',
+  'references',
+  'websearch',
+  'plugins',
+  'worktree',
+  'warming',
+  'providers',
   'experimental',
 ])
 
-export const PERMISSION_TOOLS: { tool: string; pattern: boolean; en: string; zh: string }[] = [
-  { tool: 'read', pattern: true, en: 'Read files', zh: '读取文件' },
-  { tool: 'edit', pattern: true, en: 'Edit / write files', zh: '编辑/写入文件' },
-  { tool: 'glob', pattern: true, en: 'Find files by glob', zh: '按通配符查找文件' },
-  { tool: 'grep', pattern: true, en: 'Search file contents', zh: '搜索文件内容' },
-  { tool: 'list', pattern: true, en: 'List directories', zh: '列出目录' },
-  { tool: 'bash', pattern: true, en: 'Run shell commands', zh: '执行 shell 命令' },
-  { tool: 'task', pattern: true, en: 'Spawn sub-agents', zh: '启动子 agent' },
-  { tool: 'external_directory', pattern: true, en: 'Access dirs outside workspace', zh: '访问工作区外目录' },
-  { tool: 'lsp', pattern: true, en: 'Language server actions', zh: '语言服务器操作' },
-  { tool: 'skill', pattern: true, en: 'Load skills', zh: '加载技能' },
-  { tool: 'question', pattern: false, en: 'Ask the user questions', zh: '向用户提问' },
-  { tool: 'webfetch', pattern: false, en: 'Fetch web pages', zh: '抓取网页' },
-  { tool: 'websearch', pattern: false, en: 'Search the web', zh: '联网搜索' },
-  { tool: 'doom_loop', pattern: false, en: 'Doom loop guard', zh: '死循环保护' },
+/**
+ * v2 权限规则的建议 action 列表。
+ *
+ * v2 把 `bash`/`task` 分别改名为 `shell`/`subagent`，`write`/`patch` 合并为 `edit`。
+ * 规则本身是字符串，这里只是给下拉框的建议值，用户仍可手填任意 action。
+ */
+export const PERMISSION_ACTIONS: { action: string; en: string; zh: string }[] = [
+  { action: '*', en: 'Everything', zh: '全部' },
+  { action: 'read', en: 'Read files', zh: '读取文件' },
+  { action: 'edit', en: 'Edit / write files', zh: '编辑/写入文件' },
+  { action: 'glob', en: 'Find files by glob', zh: '按通配符查找文件' },
+  { action: 'grep', en: 'Search file contents', zh: '搜索文件内容' },
+  { action: 'list', en: 'List directories', zh: '列出目录' },
+  { action: 'shell', en: 'Run shell commands', zh: '执行 shell 命令' },
+  { action: 'subagent', en: 'Spawn sub-agents', zh: '启动子 agent' },
+  { action: 'external_directory', en: 'Access dirs outside workspace', zh: '访问工作区外目录' },
+  { action: 'lsp', en: 'Language server actions', zh: '语言服务器操作' },
+  { action: 'skill', en: 'Load skills', zh: '加载技能' },
+  { action: 'question', en: 'Ask the user questions', zh: '向用户提问' },
+  { action: 'webfetch', en: 'Fetch web pages', zh: '抓取网页' },
+  { action: 'websearch', en: 'Search the web', zh: '联网搜索' },
 ]
 
-export const PERMISSION_ACTIONS = ['ask', 'allow', 'deny']
-export const MODEL_STATUS = ['active', 'alpha', 'beta', 'deprecated']
+export const PERMISSION_ACTION_NAMES = PERMISSION_ACTIONS.map(item => item.action)
+
+/** v2 权限规则的效果取值。 */
+export const PERMISSION_EFFECTS = ['allow', 'deny', 'ask']
+
+/** v2 策略（experimental.policies）的 action 取值。 */
+export const POLICY_ACTIONS = ['provider.use', 'tool.use', 'integration.use']
+
+export const POLICY_EFFECTS = ['allow', 'deny']
+
 export const MODALITIES = ['text', 'audio', 'image', 'video', 'pdf']

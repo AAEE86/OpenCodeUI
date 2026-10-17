@@ -83,15 +83,10 @@ describe('Config editor drill path', () => {
     expect(screen.getByRole('navigation', { name: 'Config path' })).toHaveTextContent('openai')
   })
 
-  // 阻塞：v2 的配置顶层键是 `providers`（复数，已用 tsc 探针核实），
-  // 但 ProvidersSection / configEditorValidation 仍按 v1 的 `provider`（单数）读写。
-  // 这不只是显示问题——保存时会把错误的 `provider` 键写进用户的配置文件。
-  // 待把该组件的顶层键改成 `providers`（注意 configEditorProviders 里模型级的
-  // `provider` 覆盖字段是嵌套键，必须保留单数）后，把 .skip 去掉。
   it('keeps the full provider path when copying a model', () => {
     function ProviderHarness() {
       const [config, setConfig] = useState<Config>({
-        // v2 的正确顶层键（复数）
+        // v2 的顶层键是 providers（复数）
         providers: { openai: { models: { gpt: { name: 'GPT' } } } },
       })
       return (
@@ -119,7 +114,7 @@ describe('Config editor drill path', () => {
     expect(path).toHaveTextContent('gpt-copy')
     expect(screen.getByLabelText('Copy as…')).toHaveValue('gpt-copy-2')
 
-    fireEvent.click(screen.getByRole('button', { name: /headers/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^headers/ }))
     expect(screen.queryByLabelText('Copy as…')).not.toBeInTheDocument()
   })
 })
@@ -249,8 +244,8 @@ describe('Config editor object updates', () => {
   })
 
   it('writes __proto__ as an own config id without changing prototypes', () => {
-    const next = setNested({} as Config, ['agent', '__proto__'], { description: 'safe' }) as unknown as Record<string, unknown>
-    const agents = next.agent as Record<string, unknown>
+    const next = setNested({} as Config, ['agents', '__proto__'], { description: 'safe' }) as unknown as Record<string, unknown>
+    const agents = next.agents as Record<string, unknown>
 
     expect(Object.prototype.hasOwnProperty.call(agents, '__proto__')).toBe(true)
     expect((agents.__proto__ as Record<string, unknown>).description).toBe('safe')

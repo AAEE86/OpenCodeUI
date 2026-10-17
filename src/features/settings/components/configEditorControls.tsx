@@ -671,6 +671,18 @@ export function KeyValueField({
               <div className="w-full sm:w-40">
                 <Select value={type} options={typeOptions} onChange={next => onChange({ ...record, [key]: emptyJsonValue(next as JsonValueType) })} />
               </div>
+              <button
+                type="button"
+                aria-label={tx(`Remove key ${key}`, `删除键 ${key}`, lang)}
+                onClick={() => {
+                  const next = { ...record }
+                  delete next[key]
+                  onChange(next)
+                }}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-300 transition-colors hover:bg-bg-200/40 hover:text-error-100"
+              >
+                <TrashIcon size={14} />
+              </button>
             </div>
             <JsonValueEditor value={item} onChange={next => onChange({ ...record, [key]: next })} placeholder={valuePlaceholder} />
           </div>
@@ -700,7 +712,7 @@ export function KeyValueField({
         </div>
       </div>
       <div className="text-[length:var(--fs-xs)] leading-relaxed text-text-400">
-        {tx('Existing object keys cannot be reliably deleted through the official merge API; change values instead, or reset before saving newly added keys.', '官方 merge API 不能可靠删除已保存的 object key；请改值，刚新增但不想保存的键可以在保存前 Reset。', lang)}
+        {tx('Keys are written as-is; remove one with the trash button.', '键按原样写入，用垃圾桶按钮删除。', lang)}
       </div>
     </div>
   )
@@ -753,7 +765,18 @@ export function StringMapField({
           </div>
           <span aria-hidden="true" className="text-center font-mono text-[length:var(--fs-sm)] text-text-400">=</span>
           <TextField value={item} onChange={next => onChange({ ...record, [key]: next })} placeholder={valuePlaceholder ?? tx('value', '值', lang)} mono />
-          <span aria-hidden="true" />
+          <button
+            type="button"
+            aria-label={tx(`Remove key ${key}`, `删除键 ${key}`, lang)}
+            onClick={() => {
+              const next = { ...record }
+              delete next[key]
+              onChange(next)
+            }}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-300 transition-colors hover:bg-bg-200/40 hover:text-error-100"
+          >
+            <TrashIcon size={13} />
+          </button>
         </div>
       ))}
       <div
@@ -796,7 +819,7 @@ export function StringMapField({
         </button>
       </div>
       <div className="text-[length:var(--fs-xs)] leading-relaxed text-text-400">
-        {tx('This map only accepts string values. Existing keys cannot be reliably deleted through the official merge API.', '这个 map 只接受字符串值。官方 merge API 不能可靠删除已保存的 key。', lang)}
+        {tx('This map only accepts string values. Remove a key with the trash button.', '这个 map 只接受字符串值，用垃圾桶按钮删除键。', lang)}
       </div>
     </div>
   )

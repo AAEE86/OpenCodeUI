@@ -49,6 +49,13 @@ export function setRoot(config: Config, key: string, value: unknown): Config {
   return { ...(config as JsonRecord), [key]: value } as Config
 }
 
+/** 删除一个顶层键（用于「未设置」的可选字段，避免留下 undefined）。 */
+export function unsetRoot(config: Config, key: string): Config {
+  const next = { ...(config as JsonRecord) }
+  delete next[key]
+  return next as Config
+}
+
 export function setNested(config: Config, path: string[], value: unknown): Config {
   const next = clone(config) as JsonRecord
   let current = next
@@ -87,6 +94,30 @@ export function createMergePatch(before: unknown, after: unknown): JsonRecord {
 
 export function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+/**
+ * 把 v2 的 `Config.ModelSelection` 归一成 `provider/model#variant` 文本。
+ *
+ * 该字段允许两种形态：短串 `"provider/model#variant"` 与显式对象
+ * `{ providerID, model, variant? }`。`config.get()` 返回的是**归一后的显式对象**，
+ * 而 UI 里统一用短串展示。
+ */
+export function modelSelectionText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (isRecord(value)) {
+    const providerID = typeof value.providerID === 'string' ? value.providerID : ''
+    const model = typeof value.model === 'string' ? value.model : ''
+    const variant = typeof value.variant === 'string' && value.variant ? `#${value.variant}` : ''
+    if (providerID && model) return `${providerID}/${model}${variant}`
+    return model || providerID
+  }
+  return ''
+}
+
+/** 判断一个模型选择值是否为空（避免写入非法的空串）。 */
+export function isModelSelectionEmpty(value: unknown): boolean {
+  return modelSelectionText(value).trim() === ''
 }
 
 export function previewValue(value: unknown, lang: Lang): string {

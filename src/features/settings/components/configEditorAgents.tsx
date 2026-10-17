@@ -24,8 +24,7 @@ function AgentsHome({ config, setConfig, lang, models }: SectionProps) {
   const item = getObject(config, 'agents')[selected]
   const value = isRecord(item) ? item : {}
   const set = (next: JsonRecord) => setConfig(setNested(config, ['agents', selected], next))
-  const setField = (key: string, v: unknown) => set({ ...value, [key]: v })
-  const fields = selected ? buildAgentConfigFields({ value, setField, lang, models }) : []
+  const fields = selected ? buildAgentConfigFields({ value, onChange: set, lang, models }) : []
   if (selected) {
     return (
       <DrillChild depth={depth}>

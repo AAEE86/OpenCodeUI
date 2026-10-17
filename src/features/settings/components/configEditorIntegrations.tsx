@@ -1,5 +1,5 @@
 import type { Config } from '../../../types/api/config'
-import { DrillChild } from './configEditorDrill'
+import { DrillChild, DrillRow } from './configEditorDrill'
 import { useDrillContainer, useDrillState } from './configEditorDrillState'
 import { BoolField, KeyValueField, PortField, PositiveIntegerField, Select, StringListField, StringMapField, TextField } from './configEditorControls'
 import { DrillFields, DuplicateIdField, FieldRow, NamedDrillList, SectionShell, type FieldDef } from './configEditorFields'
@@ -17,9 +17,22 @@ export function McpSection(props: SectionProps) {
 
 function McpHome({ config, setConfig, lang }: SectionProps) {
   const { activeChildId, enter, depth } = useDrillContainer()
-  const map = getObject(config, 'mcp')
-  const names = Object.keys(map).sort()
+  const mcp = getObject(config, 'mcp')
+  const servers = getObject(mcp, 'servers')
+  const names = Object.keys(servers).sort()
   const selected = activeChildId?.startsWith('mcp:') ? activeChildId.slice('mcp:'.length) : ''
+
+  if (activeChildId === 'timeout') {
+    return (
+      <DrillChild depth={depth}>
+        <McpTimeoutEditor
+          value={mcp.timeout}
+          onChange={v => setConfig(setNested(config, ['mcp', 'timeout'], v))}
+          lang={lang}
+        />
+      </DrillChild>
+    )
+  }
 
   if (selected) {
     return (
@@ -30,54 +43,67 @@ function McpHome({ config, setConfig, lang }: SectionProps) {
   }
 
   return (
-    <NamedDrillList
-      lang={lang}
-      items={names}
-      addPlaceholder={tx('server name', '服务名', lang)}
-      onOpen={name => enter({ id: `mcp:${name}`, title: name })}
-      onAdd={name => setConfig(setNested(config, ['mcp', name], { type: 'local', command: [] }))}
-      renderPreview={name => {
-        const entry = isRecord(map[name]) ? (map[name] as JsonRecord) : {}
-        return String(entry.type ?? ('enabled' in entry ? 'enabled-only' : 'local'))
-      }}
-      emptyText={tx('Add an MCP server to configure it.', '添加一个 MCP 服务进行配置。', lang)}
-    />
+    <div className="space-y-3">
+      <DrillRow
+        label="timeout"
+        desc={tx('Startup, catalog and execution timeouts applied to all MCP servers.', '应用到所有 MCP 服务的启动、目录与执行超时。', lang)}
+        preview={previewValue(mcp.timeout, lang)}
+        onClick={() => enter({ id: 'timeout', title: 'timeout' })}
+      />
+      <NamedDrillList
+        lang={lang}
+        items={names}
+        addPlaceholder={tx('server name', '服务名', lang)}
+        onOpen={name => enter({ id: `mcp:${name}`, title: name })}
+        onAdd={name => setConfig(setNested(config, ['mcp', 'servers', name], { type: 'local', command: [] }))}
+        renderPreview={name => {
+          const entry = isRecord(servers[name]) ? (servers[name] as JsonRecord) : {}
+          return String(entry.type ?? 'local')
+        }}
+        emptyText={tx('Add an MCP server to configure it.', '添加一个 MCP 服务进行配置。', lang)}
+      />
+    </div>
   )
+}
+
+function McpTimeoutEditor({ value, onChange, lang }: { value: unknown; onChange: (value: JsonRecord) => void; lang: Lang }) {
+  const rec = isRecord(value) ? value : {}
+  const set = (key: string, v: unknown) => onChange({ ...rec, [key]: v })
+  const fields: FieldDef[] = [
+    { key: 'startup', label: 'startup', desc: tx('Max time in ms to establish and initialize the server.', '建立并初始化服务的最大毫秒数。', lang), control: <PositiveIntegerField value={rec.startup} onChange={v => set('startup', v)} /> },
+    { key: 'catalog', label: 'catalog', desc: tx('Max time in ms for discovery requests such as tools/list.', '发现请求（如 tools/list）的最大毫秒数。', lang), control: <PositiveIntegerField value={rec.catalog} onChange={v => set('catalog', v)} /> },
+    { key: 'execution', label: 'execution', desc: tx('Max time in ms for tool and prompt execution.', '工具与 prompt 执行的最大毫秒数。', lang), control: <PositiveIntegerField value={rec.execution} onChange={v => set('execution', v)} /> },
+  ]
+  return <DrillFields fields={fields} isConfigured={key => key in rec} lang={lang} />
 }
 
 function McpDetail({ config, setConfig, lang, name }: { config: Config; setConfig: (config: Config) => void; lang: Lang; name: string }) {
   const drill = useDrillState()
   const { activeChildId } = useDrillContainer()
-  const map = getObject(config, 'mcp')
-  const item = map[name]
+  const servers = getObject(getObject(config, 'mcp'), 'servers')
+  const item = servers[name]
   const value = isRecord(item) ? item : {}
-  const set = (next: JsonRecord) => setConfig(setNested(config, ['mcp', name], next))
-  const type = value.type === 'remote' ? 'remote' : value.type === 'local' ? 'local' : 'enabled-only'
+  const set = (next: JsonRecord) => setConfig(setNested(config, ['mcp', 'servers', name], next))
+  const type = value.type === 'remote' ? 'remote' : 'local'
   const oauth = isRecord(value.oauth) ? value.oauth : {}
+
   const fields: FieldDef[] = [
     {
       key: 'type',
       label: 'type',
-      desc: tx('Choose a local command, remote URL, or a built-in server toggle.', '选择本地命令、远程 URL 或内置服务开关。', lang),
+      desc: tx('Local command or remote URL server.', '本地命令或远程 URL 服务。', lang),
       control: (
         <Select
           value={type}
           options={[
             { value: 'local', label: tx('local (command)', 'local（命令）', lang) },
             { value: 'remote', label: tx('remote (url)', 'remote（URL）', lang) },
-            { value: 'enabled-only', label: tx('enabled-only', '仅启用状态', lang) },
           ]}
-          onChange={next => {
-            if (next === 'remote') set({ type: 'remote', url: '' })
-            else if (next === 'local') set({ type: 'local', command: [] })
-            else set({ enabled: true })
-          }}
+          onChange={next => set(next === 'remote' ? { type: 'remote', url: '' } : { type: 'local', command: [] })}
         />
       ),
     },
-    ...(type === 'enabled-only'
-      ? []
-      : type === 'local'
+    ...(type === 'local'
       ? [
           { key: 'command', label: 'command', badge: tx('required', '必填', lang), block: true, desc: tx('Command and arguments, one per line.', '命令和参数，每行一个。', lang), control: <StringListField value={value.command} onChange={v => set({ ...value, command: v })} mono placeholder="npx" /> },
           { key: 'cwd', label: 'cwd', desc: tx('Working directory for the MCP process.', 'MCP 进程的工作目录。', lang), control: <TextField value={value.cwd} onChange={v => set({ ...value, cwd: v })} mono /> },
@@ -94,7 +120,7 @@ function McpDetail({ config, setConfig, lang, name }: { config: Config; setConfi
               title: 'oauth',
               preview: value.oauth === false ? 'false' : previewValue(value.oauth, lang),
               render: () => (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Select
                     value={value.oauth === false ? 'false' : 'object'}
                     options={[
@@ -104,23 +130,28 @@ function McpDetail({ config, setConfig, lang, name }: { config: Config; setConfi
                     onChange={next => set({ ...value, oauth: next === 'false' ? false : {} })}
                   />
                   {value.oauth !== false && (
-                    <div className="space-y-2 rounded-lg border border-border-200/40 p-2">
-                      <TextField value={oauth.clientId} onChange={v => set({ ...value, oauth: { ...oauth, clientId: v } })} placeholder="clientId" mono />
-                      <TextField value={oauth.clientSecret} onChange={v => set({ ...value, oauth: { ...oauth, clientSecret: v } })} placeholder="clientSecret" mono />
-                      <TextField value={oauth.scope} onChange={v => set({ ...value, oauth: { ...oauth, scope: v } })} placeholder="scope" />
-                      <PortField value={oauth.callbackPort} onChange={v => set({ ...value, oauth: { ...oauth, callbackPort: v } })} />
-                      <TextField value={oauth.redirectUri} onChange={v => set({ ...value, oauth: { ...oauth, redirectUri: v } })} placeholder="redirectUri" mono />
-                    </div>
+                    <DrillFields
+                      fields={[
+                        { key: 'client_id', label: 'client_id', desc: tx('OAuth client id.', 'OAuth client id。', lang), control: <TextField value={oauth.client_id} onChange={v => set({ ...value, oauth: { ...oauth, client_id: v } })} mono /> },
+                        { key: 'client_secret', label: 'client_secret', desc: tx('OAuth client secret.', 'OAuth client secret。', lang), control: <TextField value={oauth.client_secret} onChange={v => set({ ...value, oauth: { ...oauth, client_secret: v } })} mono /> },
+                        { key: 'scope', label: 'scope', desc: tx('Requested OAuth scopes.', '请求的 OAuth scope。', lang), control: <TextField value={oauth.scope} onChange={v => set({ ...value, oauth: { ...oauth, scope: v } })} /> },
+                        { key: 'callback_port', label: 'callback_port', desc: tx('Local callback port (1-65535).', '本地回调端口（1-65535）。', lang), control: <PortField value={oauth.callback_port} onChange={v => set({ ...value, oauth: { ...oauth, callback_port: v } })} /> },
+                        { key: 'redirect_uri', label: 'redirect_uri', desc: tx('OAuth redirect URI.', 'OAuth 重定向 URI。', lang), control: <TextField value={oauth.redirect_uri} onChange={v => set({ ...value, oauth: { ...oauth, redirect_uri: v } })} mono /> },
+                        { key: 'auth_server_metadata_url', label: 'auth_server_metadata_url', desc: tx('Authorization server metadata URL, when the server does not publish it.', '授权服务器元数据 URL，服务端未发布时使用。', lang), control: <TextField value={oauth.auth_server_metadata_url} onChange={v => set({ ...value, oauth: { ...oauth, auth_server_metadata_url: v } })} mono /> },
+                      ]}
+                      isConfigured={key => key in oauth}
+                      lang={lang}
+                    />
                   )}
                 </div>
               ),
             },
           },
         ]),
-    { key: 'enabled', label: 'enabled', desc: tx('Enable or disable this server on startup.', '启动时启用或禁用该服务。', lang), control: <BoolField value={value.enabled !== false} onChange={v => set({ ...value, enabled: v })} /> },
-    ...(type === 'enabled-only'
-      ? []
-      : [{ key: 'timeout', label: 'timeout', desc: tx('Request timeout in ms (default 5000).', '请求超时（毫秒，默认 5000）。', lang), control: <PositiveIntegerField value={value.timeout} onChange={v => set({ ...value, timeout: v })} /> }]),
+    { key: 'disabled', label: 'disabled', desc: tx('Disable this server on startup.', '启动时禁用该服务。', lang), control: <BoolField value={value.disabled} onChange={v => set({ ...value, disabled: v })} /> },
+    { key: 'codemode', label: 'codemode', desc: tx("Expose this server's tools through Code Mode (default true).", '通过 Code Mode 暴露该服务的工具（默认 true）。', lang), control: <BoolField value={value.codemode} onChange={v => set({ ...value, codemode: v })} /> },
+    { key: 'timeout', label: 'timeout', desc: tx('Per-server timeouts (startup/catalog/execution).', '该服务的超时（startup/catalog/execution）。', lang), drill: { title: 'timeout', preview: previewValue(value.timeout, lang), render: () => <McpTimeoutEditor value={value.timeout} onChange={v => set({ ...value, timeout: v })} lang={lang} /> } },
+    { key: 'protocol', label: 'protocol', desc: tx('MCP protocol negotiation mode.', 'MCP 协议协商模式。', lang), control: <Select value={value.protocol} options={[{ value: 'legacy', label: 'legacy' }, { value: 'auto', label: 'auto' }, { value: '2026-07-28', label: '2026-07-28' }]} onChange={v => set({ ...value, protocol: v })} /> },
   ]
 
   return (
@@ -128,10 +159,10 @@ function McpDetail({ config, setConfig, lang, name }: { config: Config; setConfi
       {!activeChildId && (
         <DuplicateIdField
           sourceId={name}
-          existing={map}
+          existing={servers}
           lang={lang}
           onCopy={targetId => {
-            setConfig(setNested(config, ['mcp', targetId], clone(value)))
+            setConfig(setNested(config, ['mcp', 'servers', targetId], clone(value)))
             drill.replace(0, { id: `mcp:${targetId}`, title: targetId })
           }}
         />

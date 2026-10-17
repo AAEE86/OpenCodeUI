@@ -1,135 +1,99 @@
 import { useState } from 'react'
 import { ChevronRightIcon, PlusIcon, TrashIcon } from '../../../components/Icons'
-import { buildAgentConfigFields } from './configEditorAgentFields'
 import { AgentsSection } from './configEditorAgents'
-import { DrillChild, DrillRow } from './configEditorDrill'
+import { DrillChild } from './configEditorDrill'
 import { useDrillContainer, useDrillState } from './configEditorDrillState'
-import { BoolField, fieldClass, IntegerField, JsonStructuredEditor, KeyValueField, NumberField, PortField, PositiveIntegerField, Select, StringListField, TextArea, TextField } from './configEditorControls'
+import { BoolField, fieldClass, IntegerField, JsonStructuredEditor, KeyValueField, NumberField, PositiveIntegerField, Select, StringListField, TextArea, TextField } from './configEditorControls'
 import { DrillFields, DuplicateIdField, EmptyHint, FieldRow, GroupHeader, NamedDrillList, SectionShell, type FieldDef } from './configEditorFields'
 import { FormatterSection, LspSection, McpSection } from './configEditorIntegrations'
-import { KNOWN_ROOT_KEYS } from './configEditorMeta'
-import { PermissionsSection, ToolToggleMap } from './configEditorPermissions'
+import { KNOWN_ROOT_KEYS, POLICY_ACTIONS, POLICY_EFFECTS } from './configEditorMeta'
+import { PermissionsSection } from './configEditorPermissions'
 import { ProvidersSection } from './configEditorProviders'
 import { enumChoices, type SectionProps } from './configEditorSectionTypes'
-import type { Choice, JsonRecord, Lang, SectionID } from './configEditorTypes'
-import { clone, getObject, hasNested, hasOwn, hasRoot, isRecord, previewValue, setNested, setRoot, tx } from './configEditorUtils'
+import type { JsonRecord, Lang, SectionID } from './configEditorTypes'
+import { clone, getObject, hasNested, hasOwn, hasRoot, isRecord, modelSelectionText, previewValue, setNested, setRoot, unsetRoot, tx } from './configEditorUtils'
+
+/** 复制一份对象并删掉某个键，用于「未设置」的可选字段。 */
+function omitKey(record: JsonRecord, key: string): JsonRecord {
+  const next = { ...record }
+  delete next[key]
+  return next
+}
 
 function GeneralSection({ config, setConfig, lang, shells, models, agents }: SectionProps) {
   const root = config as JsonRecord
   const set = (key: string, value: unknown) => setConfig(setRoot(config, key, value))
+  const enterprise = getObject(config, 'enterprise')
   const fields: FieldDef[] = [
+    {
+      key: '$schema',
+      label: '$schema',
+      desc: tx('JSON schema reference used by editors and validators.', '供编辑器与校验工具使用的 JSON schema 引用。', lang),
+      control: <TextField value={root.$schema} onChange={v => set('$schema', v)} mono />,
+    },
     {
       key: 'model',
       label: 'model',
-      desc: tx('Default model, in provider/model format (e.g. anthropic/claude-sonnet-4).', '默认模型，格式 provider/model（如 anthropic/claude-sonnet-4）。', lang),
-      control: <Select editable value={root.model} options={models} onChange={v => set('model', v)} placeholder="provider/model" />,
-    },
-    {
-      key: 'small_model',
-      label: 'small_model',
-      desc: tx('Small model for light tasks like title generation.', '用于标题生成等轻量任务的小模型。', lang),
-      control: <Select editable value={root.small_model} options={models} onChange={v => set('small_model', v)} placeholder="provider/model" />,
+      desc: tx('Default model, in provider/model format (append #variant to pin one).', '默认模型，格式 provider/model（末尾可加 #variant）。', lang),
+      control: <Select editable value={modelSelectionText(root.model)} options={models} onChange={v => (v.trim() ? set('model', v) : setConfig(unsetRoot(config, 'model')))} placeholder="provider/model" />,
     },
     {
       key: 'default_agent',
       label: 'default_agent',
-      desc: tx("Primary agent used when none is specified. Falls back to 'build'.", "未指定时使用的主 agent，默认回退到 'build'。", lang),
-      control: <Select editable value={root.default_agent} options={agents} onChange={v => set('default_agent', v)} />,
-    },
-    {
-      key: 'subagent_depth',
-      label: 'subagent_depth',
-      desc: tx('Maximum subagent nesting depth (default: 1).', '子 agent 最大嵌套深度（默认 1）。', lang),
-      control: <IntegerField value={root.subagent_depth} min={0} onChange={v => set('subagent_depth', v)} />,
+      desc: tx('Default primary agent used when a session does not pick one.', '会话未指定时使用的默认主 agent。', lang),
+      control: <Select editable value={root.default_agent} options={agents} onChange={v => (v.trim() ? set('default_agent', v) : setConfig(unsetRoot(config, 'default_agent')))} />,
     },
     {
       key: 'shell',
       label: 'shell',
-      desc: tx('Default shell for the terminal and bash tool.', '终端和 bash 工具默认使用的 shell。', lang),
-      control: <Select editable value={root.shell} options={shells} onChange={v => set('shell', v)} />,
+      desc: tx('Default shell for the terminal and shell tool.', '终端和 shell 工具默认使用的 shell。', lang),
+      control: <Select editable value={root.shell} options={shells} onChange={v => (v.trim() ? set('shell', v) : setConfig(unsetRoot(config, 'shell')))} />,
     },
     {
       key: 'username',
       label: 'username',
-      desc: tx('Custom username shown in conversations instead of the system username.', '对话中显示的自定义用户名，替代系统用户名。', lang),
+      desc: tx('Username shown in conversations and used for telemetry identity.', '对话中显示的用户名，也用于遥测身份。', lang),
       control: <TextField value={root.username} onChange={v => set('username', v)} />,
     },
     {
-      key: 'logLevel',
-      label: 'logLevel',
-      desc: tx('Logging verbosity.', '日志详细程度。', lang),
-      control: <Select value={root.logLevel} options={enumChoices(['DEBUG', 'INFO', 'WARN', 'ERROR'])} onChange={v => set('logLevel', v)} />,
+      key: 'update',
+      label: 'update',
+      desc: tx("Update behavior: 'disable', 'notify', or 'auto'.", "更新行为：disable 关闭、notify 仅提示、auto 自动更新。", lang),
+      control: <Select value={root.update} options={enumChoices(['disable', 'notify', 'auto'])} onChange={v => set('update', v)} />,
     },
     {
       key: 'share',
       label: 'share',
-      desc: tx("Sharing behavior: 'manual', 'auto', or 'disabled'.", "分享行为：手动 manual、自动 auto 或禁用 disabled。", lang),
+      desc: tx("Sharing: 'manual', 'auto', or 'disabled'.", "分享：manual 手动、auto 自动、disabled 禁用。", lang),
       control: <Select value={root.share} options={enumChoices(['manual', 'auto', 'disabled'])} onChange={v => set('share', v)} />,
     },
     {
-      key: 'autoupdate',
-      label: 'autoupdate',
-      desc: tx("Auto-update: true to update, false to disable, 'notify' to only notify.", "自动更新：true 自动更新，false 关闭，'notify' 仅提示。", lang),
-      control: (
-        <Select
-          value={typeof root.autoupdate === 'boolean' ? String(root.autoupdate) : root.autoupdate}
-          options={[
-            { value: 'true', label: 'true' },
-            { value: 'false', label: 'false' },
-            { value: 'notify', label: 'notify' },
-          ]}
-          onChange={v => set('autoupdate', v === 'true' ? true : v === 'false' ? false : v)}
-        />
-      ),
-    },
-    {
-      key: 'snapshot',
-      label: 'snapshot',
-      desc: tx('Record filesystem snapshots so changes can be undone/reverted (default: true).', '记录文件系统快照以支持撤销/回退（默认 true）。', lang),
-      control: <BoolField value={root.snapshot !== false} onChange={v => set('snapshot', v)} />,
+      key: 'snapshots',
+      label: 'snapshots',
+      desc: tx('Record filesystem snapshots so changes can be undone or reverted (default: true).', '记录文件系统快照以支持撤销/回退（默认 true）。', lang),
+      control: <BoolField value={root.snapshots !== false} onChange={v => set('snapshots', v)} />,
     },
     {
       key: 'instructions',
       label: 'instructions',
       block: true,
-      desc: tx('Extra instruction files or glob patterns to include.', '额外要加载的 instruction 文件或通配符。', lang),
+      desc: tx('Extra instruction files or glob patterns to load.', '额外加载的 instruction 文件或通配符。', lang),
       control: <StringListField value={root.instructions} onChange={v => set('instructions', v)} mono placeholder="AGENTS.md" />,
     },
     {
-      key: 'disabled_providers',
-      label: 'disabled_providers',
-      block: true,
-      desc: tx('Providers that are loaded automatically but should be disabled.', '禁用那些会被自动加载的渠道。', lang),
-      control: <StringListField value={root.disabled_providers} onChange={v => set('disabled_providers', v)} mono />,
-    },
-    {
-      key: 'enabled_providers',
-      label: 'enabled_providers',
-      block: true,
-      desc: tx('When set, ONLY these providers are enabled; all others are ignored.', '设置后只有这些渠道启用，其余全部忽略。', lang),
-      control: <StringListField value={root.enabled_providers} onChange={v => set('enabled_providers', v)} mono />,
+      key: 'enterprise.url',
+      label: 'enterprise.url',
+      desc: tx('Enterprise sharing service URL.', '企业分享服务的 URL。', lang),
+      control: <TextField value={enterprise.url} onChange={v => setConfig(setNested(config, ['enterprise', 'url'], v))} mono />,
     },
   ]
   return (
     <SectionShell id="general" lang={lang}>
-      <DrillFields fields={fields} isConfigured={key => hasRoot(config, key)} lang={lang} />
-    </SectionShell>
-  )
-}
-
-function ServerSection({ config, setConfig, lang }: SectionProps) {
-  const server = getObject(config, 'server')
-  const set = (key: string, value: unknown) => setConfig(setNested(config, ['server', key], value))
-  const fields: FieldDef[] = [
-    { key: 'port', label: 'port', desc: tx('Port to listen on.', '监听端口。', lang), control: <PortField value={server.port} onChange={v => set('port', v)} /> },
-    { key: 'hostname', label: 'hostname', desc: tx('Hostname to listen on.', '监听主机名。', lang), control: <TextField value={server.hostname} onChange={v => set('hostname', v)} placeholder="127.0.0.1" /> },
-    { key: 'mdns', label: 'mdns', desc: tx('Enable mDNS service discovery.', '启用 mDNS 服务发现。', lang), control: <BoolField value={server.mdns} onChange={v => set('mdns', v)} /> },
-    { key: 'mdnsDomain', label: 'mdnsDomain', desc: tx('Custom mDNS domain (default: opencode.local).', '自定义 mDNS 域名（默认 opencode.local）。', lang), control: <TextField value={server.mdnsDomain} onChange={v => set('mdnsDomain', v)} /> },
-    { key: 'cors', label: 'cors', desc: tx('Additional domains allowed for CORS.', '额外允许跨域（CORS）的域名。', lang), control: <StringListField value={server.cors} onChange={v => set('cors', v)} mono /> },
-  ]
-  return (
-    <SectionShell id="server" lang={lang}>
-      <DrillFields fields={fields} isConfigured={key => hasNested(config, ['server', key])} lang={lang} />
+      <DrillFields
+        fields={fields}
+        isConfigured={key => (key === 'enterprise.url' ? hasNested(config, ['enterprise', 'url']) : hasRoot(config, key))}
+        lang={lang}
+      />
     </SectionShell>
   )
 }
@@ -145,20 +109,20 @@ function CommandsSection(props: SectionProps) {
 function CommandHome({ config, setConfig, lang, models, agents }: SectionProps) {
   const { activeChildId, enter, depth } = useDrillContainer()
   const drill = useDrillState()
-  const map = getObject(config, 'command')
+  const map = getObject(config, 'commands')
   const names = Object.keys(map).sort()
   const selected = activeChildId?.startsWith('command:') ? activeChildId.slice('command:'.length) : ''
-  const value = getObject(config, 'command')[selected]
+  const value = getObject(config, 'commands')[selected]
   const item = isRecord(value) ? value : {}
-  const setItem = (next: JsonRecord) => setConfig(setNested(config, ['command', selected], next))
+  const setItem = (next: JsonRecord) => setConfig(setNested(config, ['commands', selected], next))
   const fields: FieldDef[] = selected
     ? [
         { key: 'template', label: 'template', badge: tx('required', '必填', lang), block: true, desc: tx('Prompt template sent when the command runs. Use $ARGUMENTS for input.', '命令运行时发送的 prompt 模板，可用 $ARGUMENTS 接收输入。', lang), control: <TextArea value={item.template} onChange={v => setItem({ ...item, template: v })} /> },
         { key: 'description', label: 'description', desc: tx('Short description shown in the command menu.', '命令菜单中显示的简短描述。', lang), control: <TextField value={item.description} onChange={v => setItem({ ...item, description: v })} /> },
-        { key: 'agent', label: 'agent', desc: tx('Agent to run this command with.', '运行此命令使用的 agent。', lang), control: <Select editable value={item.agent} options={agents} onChange={v => setItem({ ...item, agent: v })} /> },
-        { key: 'model', label: 'model', desc: tx('Model override for this command.', '此命令使用的模型覆盖。', lang), control: <Select editable value={item.model} options={models} onChange={v => setItem({ ...item, model: v })} /> },
-        { key: 'variant', label: 'variant', desc: tx('Model variant for this command.', '此命令使用的模型 variant。', lang), control: <TextField value={item.variant} onChange={v => setItem({ ...item, variant: v })} /> },
-        { key: 'subtask', label: 'subtask', desc: tx('Run the command as a subtask.', '以子任务方式运行命令。', lang), control: <BoolField value={item.subtask} onChange={v => setItem({ ...item, subtask: v })} /> },
+        { key: 'agent', label: 'agent', desc: tx('Agent used to run this command.', '运行此命令使用的 agent。', lang), control: <Select editable value={item.agent} options={agents} onChange={v => setItem(v.trim() ? { ...item, agent: v } : omitKey(item, 'agent'))} /> },
+        { key: 'model', label: 'model', desc: tx('Model override, in provider/model format.', '模型覆盖，格式 provider/model。', lang), control: <Select editable value={modelSelectionText(item.model)} options={models} onChange={v => setItem(v.trim() ? { ...item, model: v } : omitKey(item, 'model'))} placeholder="provider/model" /> },
+        { key: 'subagent', label: 'subagent', desc: tx('Run this command inside a subagent.', '在子 agent 中运行该命令。', lang), control: <BoolField value={item.subagent} onChange={v => setItem({ ...item, subagent: v })} /> },
+        { key: 'subtask', label: 'subtask', badge: tx('deprecated', '已废弃', lang), desc: tx('Deprecated alias of subagent.', 'subagent 的废弃别名。', lang), control: <BoolField value={item.subtask} onChange={v => setItem({ ...item, subtask: v })} /> },
       ]
     : []
   if (selected) {
@@ -170,7 +134,7 @@ function CommandHome({ config, setConfig, lang, models, agents }: SectionProps) 
             existing={map}
             lang={lang}
             onCopy={targetId => {
-              setConfig(setNested(config, ['command', targetId], clone(item)))
+              setConfig(setNested(config, ['commands', targetId], clone(item)))
               drill.replace(0, { id: `command:${targetId}`, title: targetId })
             }}
           />
@@ -186,7 +150,7 @@ function CommandHome({ config, setConfig, lang, models, agents }: SectionProps) 
       items={names}
       addPlaceholder={tx('command name', '命令名', lang)}
       onOpen={name => enter({ id: `command:${name}`, title: name })}
-      onAdd={name => setConfig(setNested(config, ['command', name], { template: '' }))}
+      onAdd={name => setConfig(setNested(config, ['commands', name], { template: '' }))}
       renderPreview={name => (isRecord(map[name]) ? String((map[name] as JsonRecord).description ?? '') : '')}
       emptyText={tx('Add a command, then configure its template.', '先添加命令，再配置它的 template。', lang)}
     />
@@ -203,37 +167,34 @@ function SkillsSection({ config, setConfig, lang }: SectionProps) {
 
 function SkillsContent({ config, setConfig, lang }: Pick<SectionProps, 'config' | 'setConfig' | 'lang'>) {
   const { activeChildId } = useDrillContainer()
-  const skills = getObject(config, 'skills')
   const references = getObject(config, 'references')
-  const legacyReferences = getObject(config, 'reference')
-  const editingCurrent = activeChildId?.startsWith('reference:')
-  const editingLegacy = activeChildId?.startsWith('legacy-reference:')
+  const editingReference = Boolean(activeChildId?.startsWith('reference:'))
   const skillFields: FieldDef[] = [
-    { key: 'skills.paths', label: 'skills.paths', desc: tx('Additional paths to skill folders.', '额外的技能文件夹路径。', lang), control: <StringListField value={skills.paths} onChange={v => setConfig(setNested(config, ['skills', 'paths'], v))} mono /> },
-    { key: 'skills.urls', label: 'skills.urls', desc: tx('URLs to fetch skills from (e.g. /.well-known/skills/).', '从这些 URL 获取技能（如 /.well-known/skills/）。', lang), control: <StringListField value={skills.urls} onChange={v => setConfig(setNested(config, ['skills', 'urls'], v))} mono /> },
+    {
+      key: 'skills',
+      label: 'skills',
+      block: true,
+      desc: tx('Additional paths or URLs to discover skills from.', '额外发现技能的路径或 URL。', lang),
+      control: <StringListField value={(config as JsonRecord).skills} onChange={v => setConfig(setRoot(config, 'skills', v))} mono placeholder="./skills" />,
+    },
   ]
   return (
-      <div className="space-y-6">
-        {!editingCurrent && !editingLegacy && <DrillFields fields={skillFields} isConfigured={key => hasNested(config, key.split('.'))} lang={lang} />}
-        {!editingLegacy && <div>
+    <div className="space-y-6">
+      {!editingReference && <DrillFields fields={skillFields} isConfigured={() => hasRoot(config, 'skills')} lang={lang} />}
+      {!editingReference && (
+        <div>
           <GroupHeader text={tx('References (@alias)', '引用（@alias）', lang)} count={Object.keys(references).length} />
           <p className="mb-2 text-[length:var(--fs-xs)] leading-relaxed text-text-400">
-            {tx('Named git or local directory references mentioned as @alias or @alias/path.', '命名的 git 或本地目录引用，可用 @alias 或 @alias/path 提及。', lang)}
+            {tx('Named git repositories or local directories mentioned as @alias or @alias/path.', '命名的 git 仓库或本地目录，可用 @alias 或 @alias/path 提及。', lang)}
           </p>
-          <ReferenceEditor value={references} onChange={v => setConfig(setRoot(config, 'references', v))} lang={lang} drillPrefix="reference" />
-        </div>}
-        {hasRoot(config, 'reference') && !editingCurrent && <div>
-          <GroupHeader text={tx('Legacy references (@alias)', '旧版引用（@alias）', lang)} count={Object.keys(legacyReferences).length} />
-          <p className="mb-2 text-[length:var(--fs-xs)] leading-relaxed text-text-400">
-            {tx("Deprecated 'reference' entries. New aliases should be added above.", "已废弃的 'reference' 条目，新 alias 请添加到上方。", lang)}
-          </p>
-          <ReferenceEditor value={legacyReferences} onChange={v => setConfig(setRoot(config, 'reference', v))} lang={lang} drillPrefix="legacy-reference" />
-        </div>}
-      </div>
+          <ReferenceEditor value={references} onChange={v => setConfig(setRoot(config, 'references', v))} lang={lang} />
+        </div>
+      )}
+    </div>
   )
 }
 
-function ReferenceEditor({ value, onChange, lang, drillPrefix }: { value: JsonRecord; onChange: (value: JsonRecord) => void; lang: Lang; drillPrefix: 'reference' | 'legacy-reference' }) {
+function ReferenceEditor({ value, onChange, lang }: { value: JsonRecord; onChange: (value: JsonRecord) => void; lang: Lang }) {
   const { activeChildId, enter, depth } = useDrillContainer()
   const drill = useDrillState()
   const [newAlias, setNewAlias] = useState('')
@@ -245,8 +206,8 @@ function ReferenceEditor({ value, onChange, lang, drillPrefix }: { value: JsonRe
     return 'git'
   }
 
-  if (activeChildId?.startsWith(`${drillPrefix}:`)) {
-    const alias = activeChildId.slice(`${drillPrefix}:`.length)
+  if (activeChildId?.startsWith('reference:')) {
+    const alias = activeChildId.slice('reference:'.length)
     if (hasOwn(value, alias)) {
       return (
         <DrillChild depth={depth}>
@@ -257,7 +218,7 @@ function ReferenceEditor({ value, onChange, lang, drillPrefix }: { value: JsonRe
               lang={lang}
               onCopy={targetId => {
                 onChange({ ...value, [targetId]: clone(value[alias]) })
-                drill.replace(depth, { id: `${drillPrefix}:${targetId}`, title: `@${targetId}` })
+                drill.replace(depth, { id: `reference:${targetId}`, title: `@${targetId}` })
               }}
             />
             <ReferenceEntry alias={alias} entry={value[alias]} setEntry={setEntry} lang={lang} />
@@ -275,12 +236,15 @@ function ReferenceEditor({ value, onChange, lang, drillPrefix }: { value: JsonRe
         const type = typeOf(entry)
         return (
           <div key={alias} className="group flex items-center gap-2 rounded-lg px-2.5 transition-colors hover:bg-bg-100/50">
-            <button type="button" onClick={() => enter({ id: `${drillPrefix}:${alias}`, title: `@${alias}` })} className="flex min-w-0 flex-1 items-center gap-3 py-2.5 text-left">
+            <button type="button" onClick={() => enter({ id: `reference:${alias}`, title: `@${alias}` })} className="flex min-w-0 flex-1 items-center gap-3 py-2.5 text-left">
               <div className="min-w-0 flex-1">
                 <div className="truncate font-mono text-[length:var(--fs-sm)] font-medium text-text-100">@{alias}</div>
                 <div className="truncate text-[length:var(--fs-xs)] text-text-400">{type} · {previewValue(entry, lang)}</div>
               </div>
               <ChevronRightIcon size={14} className="shrink-0 text-text-300" />
+            </button>
+            <button type="button" aria-label={tx(`Remove reference ${alias}`, `删除引用 ${alias}`, lang)} onClick={() => onChange(omitKey(value, alias))} className="shrink-0 rounded-md p-1.5 text-text-400 opacity-0 transition-opacity hover:text-error-100 group-hover:opacity-100">
+              <TrashIcon size={13} />
             </button>
           </div>
         )
@@ -300,9 +264,6 @@ function ReferenceEditor({ value, onChange, lang, drillPrefix }: { value: JsonRe
           <PlusIcon size={13} />
           {tx('Add reference', '添加引用', lang)}
         </button>
-      </div>
-      <div className="text-[length:var(--fs-xs)] leading-relaxed text-text-500">
-        {tx('Deleting saved reference keys is not supported by the official merge API. Edit the value instead, or Reset before saving newly added references.', '官方 merge API 不支持可靠删除已保存的 reference key。请改值，刚新增的引用可在保存前 Reset。', lang)}
       </div>
     </div>
   )
@@ -360,8 +321,8 @@ function PluginsSection(props: SectionProps) {
 
 function PluginsHome({ config, setConfig, lang }: SectionProps) {
   const { activeChildId, enter, depth } = useDrillContainer()
-  const list = Array.isArray((config as JsonRecord).plugin) ? ((config as JsonRecord).plugin as unknown[]) : []
-  const set = (next: unknown[]) => setConfig(setRoot(config, 'plugin', next))
+  const list = Array.isArray((config as JsonRecord).plugins) ? ((config as JsonRecord).plugins as unknown[]) : []
+  const set = (next: unknown[]) => setConfig(setRoot(config, 'plugins', next))
 
   if (activeChildId?.startsWith('plugin:')) {
     const index = Number(activeChildId.slice('plugin:'.length))
@@ -381,19 +342,19 @@ function PluginsHome({ config, setConfig, lang }: SectionProps) {
       ) : (
         <div className="space-y-0.5">
           {list.map((entry, index) => {
-            const isTuple = Array.isArray(entry)
-            const name = isTuple ? String(entry[0] ?? '') : String(entry ?? '')
-            const options = isTuple && isRecord(entry[1]) ? (entry[1] as JsonRecord) : {}
+            const isObject = isRecord(entry)
+            const name = isObject ? String(entry.package ?? '') : String(entry ?? '')
+            const options = isObject && isRecord(entry.options) ? entry.options : {}
             return (
               <div key={index} className="group flex items-center gap-2 rounded-lg px-2.5 transition-colors hover:bg-bg-100/50">
                 <button type="button" onClick={() => enter({ id: `plugin:${index}`, title: name || tx('plugin', '插件', lang) })} className="flex min-w-0 flex-1 items-center gap-3 py-2.5 text-left">
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-mono text-[length:var(--fs-sm)] font-medium text-text-100">{name || tx('(empty)', '（空）', lang)}</div>
-                    <div className="truncate text-[length:var(--fs-xs)] text-text-400">{isTuple ? previewValue(options, lang) : tx('no options', '无配置项', lang)}</div>
+                    <div className="truncate text-[length:var(--fs-xs)] text-text-400">{isObject ? previewValue(options, lang) : tx('no options', '无配置项', lang)}</div>
                   </div>
                   <ChevronRightIcon size={14} className="shrink-0 text-text-300" />
                 </button>
-                <button type="button" onClick={() => set(list.filter((_, i) => i !== index))} className="shrink-0 rounded-md p-1.5 text-text-400 opacity-0 transition-opacity hover:text-error-100 group-hover:opacity-100">
+                <button type="button" aria-label={tx(`Remove plugin ${index + 1}`, `删除第 ${index + 1} 个插件`, lang)} onClick={() => set(list.filter((_, i) => i !== index))} className="shrink-0 rounded-md p-1.5 text-text-400 opacity-0 transition-opacity hover:text-error-100 group-hover:opacity-100">
                   <TrashIcon size={13} />
                 </button>
               </div>
@@ -411,15 +372,26 @@ function PluginsHome({ config, setConfig, lang }: SectionProps) {
 
 function PluginEntry({ list, set, index, lang }: { list: unknown[]; set: (next: unknown[]) => void; index: number; lang: Lang }) {
   const entry = list[index]
-  const isTuple = Array.isArray(entry)
-  const name = isTuple ? String(entry[0] ?? '') : String(entry ?? '')
-  const options = isTuple && isRecord(entry[1]) ? (entry[1] as JsonRecord) : {}
+  const isObject = isRecord(entry)
+  const name = isObject ? String(entry.package ?? '') : String(entry ?? '')
+  const options = isObject && isRecord(entry.options) ? entry.options : {}
   const fields: FieldDef[] = [
     {
-      key: 'name',
-      label: 'name',
+      key: 'package',
+      label: 'package',
       desc: tx('Plugin package spec or local plugin file.', '插件包名或本地插件文件。', lang),
-      control: <TextField value={name} onChange={value => { const next = [...list]; next[index] = isTuple ? [value, options] : value; set(next) }} mono placeholder={tx('package name or ./local-plugin.js', '包名或 ./local-plugin.js', lang)} />,
+      control: (
+        <TextField
+          value={name}
+          onChange={value => {
+            const next = [...list]
+            next[index] = isObject ? { ...(entry as JsonRecord), package: value } : value
+            set(next)
+          }}
+          mono
+          placeholder={tx('package name or ./local-plugin.js', '包名或 ./local-plugin.js', lang)}
+        />
+      ),
     },
     {
       key: 'options',
@@ -427,22 +399,26 @@ function PluginEntry({ list, set, index, lang }: { list: unknown[]; set: (next: 
       desc: tx('Optional plugin options object.', '可选的插件配置对象。', lang),
       drill: {
         title: 'options',
-        preview: isTuple ? previewValue(options, lang) : tx('disabled', '未启用', lang),
+        preview: isObject ? previewValue(entry.options, lang) : tx('not set', '未设置', lang),
         render: () => (
           <KeyValueField
             value={options}
-            onChange={value => { const next = [...list]; next[index] = [name, value]; set(next) }}
+            onChange={value => {
+              const next = [...list]
+              next[index] = { package: name, options: value }
+              set(next)
+            }}
           />
         ),
       },
     },
   ]
-  return <DrillFields fields={fields} isConfigured={key => key === 'name' || (key === 'options' && isTuple)} lang={lang} />
+  return <DrillFields fields={fields} isConfigured={key => (key === 'package' ? name !== '' : isObject && hasOwn(entry, 'options'))} lang={lang} />
 }
 
-function AttachmentsSection({ config, setConfig, lang }: SectionProps) {
-  const image = getObject(getObject(config, 'attachment'), 'image')
-  const set = (key: string, v: unknown) => setConfig(setNested(config, ['attachment', 'image', key], v))
+function MediaSection({ config, setConfig, lang }: SectionProps) {
+  const image = getObject(getObject(config, 'media'), 'image')
+  const set = (key: string, v: unknown) => setConfig(setNested(config, ['media', 'image', key], v))
   const fields: FieldDef[] = [
     { key: 'auto_resize', label: 'image.auto_resize', desc: tx('Resize oversized images before sending (default: true).', '发送前缩放超限图片（默认 true）。', lang), control: <BoolField value={image.auto_resize !== false} onChange={v => set('auto_resize', v)} /> },
     { key: 'max_width', label: 'image.max_width', desc: tx('Max image width before resize/reject (default: 2000).', '缩放/拒绝前的最大宽度（默认 2000）。', lang), control: <PositiveIntegerField value={image.max_width} onChange={v => set('max_width', v)} /> },
@@ -450,33 +426,111 @@ function AttachmentsSection({ config, setConfig, lang }: SectionProps) {
     { key: 'max_base64_bytes', label: 'image.max_base64_bytes', desc: tx('Max base64 payload bytes (default: 5242880).', 'base64 最大字节数（默认 5242880）。', lang), control: <PositiveIntegerField value={image.max_base64_bytes} onChange={v => set('max_base64_bytes', v)} /> },
   ]
   return (
-    <SectionShell id="attachments" lang={lang}>
-      <DrillFields fields={fields} isConfigured={key => hasNested(config, ['attachment', 'image', key])} lang={lang} />
+    <SectionShell id="media" lang={lang}>
+      <DrillFields fields={fields} isConfigured={key => hasNested(config, ['media', 'image', key])} lang={lang} />
     </SectionShell>
   )
 }
 
 function RuntimeSection({ config, setConfig, lang }: SectionProps) {
+  const root = config as JsonRecord
   const toolOutput = getObject(config, 'tool_output')
   const compaction = getObject(config, 'compaction')
+  const keep = getObject(compaction, 'keep')
   const watcher = getObject(config, 'watcher')
-  const enterprise = getObject(config, 'enterprise')
+  const worktree = getObject(config, 'worktree')
   const fields: FieldDef[] = [
     { key: 'tool_output.max_lines', label: 'tool_output.max_lines', desc: tx('Max lines of tool output before truncation (default: 2000).', '工具输出截断前的最大行数（默认 2000）。', lang), control: <PositiveIntegerField value={toolOutput.max_lines} onChange={v => setConfig(setNested(config, ['tool_output', 'max_lines'], v))} /> },
     { key: 'tool_output.max_bytes', label: 'tool_output.max_bytes', desc: tx('Max bytes of tool output before truncation (default: 51200).', '工具输出截断前的最大字节（默认 51200）。', lang), control: <PositiveIntegerField value={toolOutput.max_bytes} onChange={v => setConfig(setNested(config, ['tool_output', 'max_bytes'], v))} /> },
-    { key: 'compaction.auto', label: 'compaction.auto', desc: tx('Auto-compact context when full (default: true).', '上下文满时自动压缩（默认 true）。', lang), control: <BoolField value={compaction.auto !== false} onChange={v => setConfig(setNested(config, ['compaction', 'auto'], v))} /> },
-    { key: 'compaction.prune', label: 'compaction.prune', desc: tx('Prune old tool outputs (default: false).', '修剪旧的工具输出（默认 false）。', lang), control: <BoolField value={compaction.prune} onChange={v => setConfig(setNested(config, ['compaction', 'prune'], v))} /> },
-    { key: 'compaction.tail_turns', label: 'compaction.tail_turns', desc: tx('Recent user turns kept verbatim during compaction (default: 2).', '压缩时原样保留的最近用户轮次数（默认 2）。', lang), control: <IntegerField value={compaction.tail_turns} min={0} onChange={v => setConfig(setNested(config, ['compaction', 'tail_turns'], v))} /> },
-    { key: 'compaction.preserve_recent_tokens', label: 'compaction.preserve_recent_tokens', desc: tx('Max tokens from recent turns to preserve verbatim.', '原样保留的最近轮次最大 token 数。', lang), control: <IntegerField value={compaction.preserve_recent_tokens} min={0} onChange={v => setConfig(setNested(config, ['compaction', 'preserve_recent_tokens'], v))} /> },
-    { key: 'compaction.reserved', label: 'compaction.reserved', desc: tx('Token buffer reserved to avoid overflow during compaction.', '压缩时预留的 token 缓冲，避免溢出。', lang), control: <IntegerField value={compaction.reserved} min={0} onChange={v => setConfig(setNested(config, ['compaction', 'reserved'], v))} /> },
+    { key: 'compaction.auto', label: 'compaction.auto', desc: tx('Auto-compact the context when it fills up (default: true).', '上下文填满时自动压缩（默认 true）。', lang), control: <BoolField value={compaction.auto !== false} onChange={v => setConfig(setNested(config, ['compaction', 'auto'], v))} /> },
+    { key: 'compaction.keep.tokens', label: 'compaction.keep.tokens', desc: tx('Tokens from recent turns kept verbatim during compaction.', '压缩时原样保留的最近轮次 token 数。', lang), control: <IntegerField value={keep.tokens} min={0} onChange={v => setConfig(setNested(config, ['compaction', 'keep', 'tokens'], v))} /> },
+    { key: 'compaction.buffer', label: 'compaction.buffer', desc: tx('Token buffer reserved to avoid overflow during compaction.', '压缩时预留的 token 缓冲，避免溢出。', lang), control: <IntegerField value={compaction.buffer} min={0} onChange={v => setConfig(setNested(config, ['compaction', 'buffer'], v))} /> },
     { key: 'watcher.ignore', label: 'watcher.ignore', block: true, desc: tx('Glob patterns the file watcher should ignore.', '文件监听忽略的通配符。', lang), control: <StringListField value={watcher.ignore} onChange={v => setConfig(setNested(config, ['watcher', 'ignore'], v))} mono /> },
-    { key: 'enterprise.url', label: 'enterprise.url', desc: tx('Enterprise server URL.', '企业服务器 URL。', lang), control: <TextField value={enterprise.url} onChange={v => setConfig(setNested(config, ['enterprise', 'url'], v))} mono /> },
-    { key: 'tools', label: 'tools', desc: tx('Globally enable/disable individual tools.', '全局启用/禁用单个工具。', lang), drill: { title: 'tools', preview: previewValue((config as JsonRecord).tools, lang), render: () => <ToolToggleMap value={(config as JsonRecord).tools} onChange={v => setConfig(setRoot(config, 'tools', v))} /> } },
+    {
+      key: 'websearch',
+      label: 'websearch',
+      desc: tx("Web search provider selection: false to disable, or 'random' / a provider id.", "联网搜索的渠道选择：false 禁用，或 'random' / 具体 provider id。", lang),
+      control: <WebsearchField value={root.websearch} onChange={v => setConfig(setRoot(config, 'websearch', v))} onClear={() => setConfig(unsetRoot(config, 'websearch'))} lang={lang} />,
+    },
+    { key: 'worktree.directory', label: 'worktree.directory', desc: tx("Parent directory for new worktrees, relative to the project's primary checkout when not absolute.", '新建 worktree 的父目录，非绝对路径时相对项目主检出目录。', lang), control: <TextField value={worktree.directory} onChange={v => setConfig(setNested(config, ['worktree', 'directory'], v))} mono /> },
+    {
+      key: 'warming',
+      label: 'warming',
+      desc: tx('Keep recently active sessions warm with transient requests (default: false).', '用瞬时请求保持最近活跃会话预热（默认 false）。', lang),
+      control: <WarmingField value={root.warming} onChange={v => setConfig(setRoot(config, 'warming', v))} onClear={() => setConfig(unsetRoot(config, 'warming'))} lang={lang} />,
+    },
   ]
   return (
     <SectionShell id="runtime" lang={lang}>
-      <DrillFields fields={fields} isConfigured={key => (key === 'tools' ? hasRoot(config, 'tools') : hasNested(config, key.split('.')))} lang={lang} />
+      <DrillFields
+        fields={fields}
+        isConfigured={key => (key === 'websearch' || key === 'warming' ? hasRoot(config, key) : hasNested(config, key.split('.')))}
+        lang={lang}
+      />
     </SectionShell>
+  )
+}
+
+function WebsearchField({ value, onChange, onClear, lang }: { value: unknown; onChange: (value: unknown) => void; onClear: () => void; lang: Lang }) {
+  const mode = value === false ? 'false' : isRecord(value) ? 'provider' : 'unset'
+  const provider = isRecord(value) && typeof value.provider === 'string' ? value.provider : ''
+  return (
+    <div className="space-y-2">
+      <Select
+        value={mode}
+        options={[
+          ...(mode === 'unset' ? [{ value: 'unset', label: tx('not set', '未设置', lang) }] : []),
+          { value: 'false', label: tx('disabled (false)', '禁用（false）', lang) },
+          { value: 'provider', label: tx('use a provider', '指定渠道', lang) },
+        ]}
+        onChange={next => {
+          if (next === 'false') onChange(false)
+          else if (next === 'provider') onChange({ provider: provider || 'random' })
+          else onClear()
+        }}
+      />
+      {mode === 'provider' && (
+        <Select
+          editable
+          value={provider}
+          options={[{ value: 'random', label: tx('random', '随机', lang) }]}
+          onChange={v => onChange({ provider: v })}
+          placeholder={tx('provider id or random', 'provider id 或 random', lang)}
+        />
+      )}
+    </div>
+  )
+}
+
+function WarmingField({ value, onChange, onClear, lang }: { value: unknown; onChange: (value: unknown) => void; onClear: () => void; lang: Lang }) {
+  const mode = typeof value === 'boolean' ? (value ? 'on' : 'off') : isRecord(value) ? 'custom' : 'unset'
+  const record = isRecord(value) ? value : {}
+  const set = (key: string, v: unknown) => onChange({ ...record, [key]: v })
+  return (
+    <div className="space-y-3">
+      <Select
+        value={mode}
+        options={[
+          ...(mode === 'unset' ? [{ value: 'unset', label: tx('not set', '未设置', lang) }] : []),
+          { value: 'on', label: tx('on (defaults)', '开启（默认值）', lang) },
+          { value: 'off', label: tx('off (false)', '关闭（false）', lang) },
+          { value: 'custom', label: tx('custom settings', '自定义设置', lang) },
+        ]}
+        onChange={next => {
+          if (next === 'on') onChange(true)
+          else if (next === 'off') onChange(false)
+          else if (next === 'custom') onChange({})
+          else onClear()
+        }}
+      />
+      {mode === 'custom' && (
+        <div className="divide-y divide-border-200/35">
+          <FieldRow label="prompt" desc={tx('Prompt sent for keep-alive requests.', '保持活跃请求发送的 prompt。', lang)} control={<TextField value={record.prompt} onChange={v => set('prompt', v)} />} />
+          <FieldRow label="interval" desc={tx('Idle time between keep-alive requests (e.g. "4 minutes").', '保持活跃请求之间的空闲时间（如 "4 minutes"）。', lang)} control={<TextField value={record.interval} onChange={v => set('interval', v)} mono placeholder="4 minutes" />} />
+          <FieldRow label="duration" desc={tx('How long to keep a session warm after its last request (e.g. "30 minutes").', '最后一次请求后继续预热会话的时长（如 "30 minutes"）。', lang)} control={<TextField value={record.duration} onChange={v => set('duration', v)} mono placeholder="30 minutes" />} />
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -484,16 +538,12 @@ function ExperimentalSection({ config, setConfig, lang }: SectionProps) {
   const exp = getObject(config, 'experimental')
   const set = (key: string, v: unknown) => setConfig(setNested(config, ['experimental', key], v))
   const fields: FieldDef[] = [
-    { key: 'batch_tool', label: 'batch_tool', desc: tx('Enable the batch tool.', '启用批处理工具。', lang), control: <BoolField value={exp.batch_tool} onChange={v => set('batch_tool', v)} /> },
-    { key: 'openTelemetry', label: 'openTelemetry', desc: tx('Emit OpenTelemetry spans for AI SDK calls.', '为 AI SDK 调用发送 OpenTelemetry 链路。', lang), control: <BoolField value={exp.openTelemetry} onChange={v => set('openTelemetry', v)} /> },
-    { key: 'disable_paste_summary', label: 'disable_paste_summary', desc: tx('Disable the pasted-content summary.', '关闭粘贴内容摘要。', lang), control: <BoolField value={exp.disable_paste_summary} onChange={v => set('disable_paste_summary', v)} /> },
-    { key: 'continue_loop_on_deny', label: 'continue_loop_on_deny', desc: tx('Continue the agent loop when a tool call is denied.', '工具调用被拒绝时继续 agent 循环。', lang), control: <BoolField value={exp.continue_loop_on_deny} onChange={v => set('continue_loop_on_deny', v)} /> },
-    { key: 'mcp_timeout', label: 'mcp_timeout', desc: tx('Timeout in ms for MCP requests.', 'MCP 请求超时（毫秒）。', lang), control: <PositiveIntegerField value={exp.mcp_timeout} onChange={v => set('mcp_timeout', v)} /> },
-    { key: 'primary_tools', label: 'primary_tools', block: true, desc: tx('Tools available only to primary agents.', '仅对主 agent 可用的工具。', lang), control: <StringListField value={exp.primary_tools} onChange={v => set('primary_tools', v)} mono /> },
+    { key: 'portable_shell_scanner', label: 'portable_shell_scanner', desc: tx('Enable the portable shell permission scanner (default: false).', '启用可移植的 shell 权限扫描器（默认 false）。', lang), control: <BoolField value={exp.portable_shell_scanner} onChange={v => set('portable_shell_scanner', v)} /> },
+    { key: 'subagent_depth', label: 'subagent_depth', desc: tx('Maximum subagent nesting depth (default: 1).', '子 agent 最大嵌套深度（默认 1）。', lang), control: <IntegerField value={exp.subagent_depth} min={0} onChange={v => set('subagent_depth', v)} /> },
     {
       key: 'policies',
       label: 'policies',
-      desc: tx('Policy statements applied to resources like provider access.', '应用于资源（如 provider 访问）的策略声明。', lang),
+      desc: tx('Ordered policies controlling access to configured resources.', '控制已配置资源访问的有序策略。', lang),
       drill: { title: 'policies', preview: previewValue(exp.policies, lang), render: () => <PolicyEditor value={exp.policies} onChange={v => set('policies', v)} lang={lang} /> },
     },
   ]
@@ -516,32 +566,17 @@ function PolicyEditor({ value, onChange, lang }: { value: unknown; onChange: (va
       <div className="divide-y divide-border-200/35">
         {list.map((entry, index) => {
           const rec = isRecord(entry) ? entry : {}
+          const setRule = (next: JsonRecord) => onChange(list.map((item, i) => (i === index ? next : item)))
           return (
             <div key={index} className="space-y-2.5 py-3">
               <div className="flex min-w-0 items-center gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="mb-1 text-[length:var(--fs-xs)] text-text-400">{tx('Action', '动作', lang)}</div>
-                  <Select
-                    value={rec.action}
-                    options={[{ value: 'provider.use', label: 'provider.use' }]}
-                    onChange={v => {
-                      const next = [...list]
-                      next[index] = { ...rec, action: v }
-                      onChange(next)
-                    }}
-                  />
+                  <Select value={rec.action} options={enumChoices(POLICY_ACTIONS)} onChange={v => setRule({ ...rec, action: v })} />
                 </div>
                 <div className="w-[120px] shrink-0">
                   <div className="mb-1 text-[length:var(--fs-xs)] text-text-400">{tx('Effect', '效果', lang)}</div>
-                  <Select
-                    value={rec.effect}
-                    options={enumChoices(['allow', 'deny'])}
-                    onChange={v => {
-                      const next = [...list]
-                      next[index] = { ...rec, effect: v }
-                      onChange(next)
-                    }}
-                  />
+                  <Select value={rec.effect} options={enumChoices(POLICY_EFFECTS)} onChange={v => setRule({ ...rec, effect: v })} />
                 </div>
                 <button
                   type="button"
@@ -554,16 +589,7 @@ function PolicyEditor({ value, onChange, lang }: { value: unknown; onChange: (va
               </div>
               <div>
                 <div className="mb-1 text-[length:var(--fs-xs)] text-text-400">{tx('Resource', '资源', lang)}</div>
-                <TextField
-                  value={rec.resource}
-                  onChange={v => {
-                    const next = [...list]
-                    next[index] = { ...rec, resource: v }
-                    onChange(next)
-                  }}
-                  placeholder={tx('e.g. anthropic/*', '例如 anthropic/*', lang)}
-                  mono
-                />
+                <TextField value={rec.resource} onChange={v => setRule({ ...rec, resource: v })} placeholder={tx('e.g. anthropic/*', '例如 anthropic/*', lang)} mono />
               </div>
             </div>
           )
@@ -571,7 +597,7 @@ function PolicyEditor({ value, onChange, lang }: { value: unknown; onChange: (va
       </div>
       <button
         type="button"
-        onClick={() => onChange([...list, { action: 'provider.use', effect: 'allow', resource: '' }])}
+        onClick={() => onChange([...list, { action: POLICY_ACTIONS[0], effect: POLICY_EFFECTS[0], resource: '' }])}
         className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-border-200 px-2.5 text-[length:var(--fs-sm)] font-medium text-text-100 transition-colors hover:border-border-300"
       >
         <PlusIcon size={13} />
@@ -579,87 +605,6 @@ function PolicyEditor({ value, onChange, lang }: { value: unknown; onChange: (va
       </button>
     </div>
   )
-}
-
-function CompatibilitySection({ config, setConfig, lang, models }: SectionProps) {
-  const root = config as JsonRecord
-  const mode = getObject(config, 'mode')
-  const fields: FieldDef[] = [
-    { key: '$schema', label: '$schema', desc: tx('JSON schema reference for editor/validator tooling.', '供编辑器/验证工具使用的 JSON schema 引用。', lang), control: <TextField value={root.$schema} onChange={v => setConfig(setRoot(config, '$schema', v))} mono /> },
-    { key: 'autoshare', label: 'autoshare', badge: tx('deprecated', '已废弃', lang), desc: tx("Deprecated. Use 'share' instead.", "已废弃，请改用 'share'。", lang), control: <BoolField value={root.autoshare} onChange={v => setConfig(setRoot(config, 'autoshare', v))} /> },
-    { key: 'layout', label: 'layout', badge: tx('deprecated', '已废弃', lang), desc: tx('Deprecated. opencode always uses stretch layout.', '已废弃，opencode 始终使用 stretch layout。', lang), control: <Select value={root.layout} options={enumChoices(['auto', 'stretch'])} onChange={v => setConfig(setRoot(config, 'layout', v))} /> },
-    {
-      key: 'mode',
-      label: 'mode',
-      badge: tx('deprecated', '已废弃', lang),
-      desc: tx("Deprecated. Use 'agent' instead. Kept here for old configs.", "已废弃，请改用 'agent'。这里仅用于旧配置兼容。", lang),
-      drill: { title: 'mode', preview: previewValue(mode, lang), render: () => <ModeCompatEditor value={mode} onChange={v => setConfig(setRoot(config, 'mode', v))} lang={lang} models={models} /> },
-    },
-  ]
-  return (
-    <SectionShell id="compatibility" lang={lang}>
-      <DrillFields fields={fields} isConfigured={key => hasRoot(config, key)} lang={lang} />
-    </SectionShell>
-  )
-}
-
-function ModeCompatEditor({ value, onChange, lang, models }: { value: unknown; onChange: (value: JsonRecord) => void; lang: Lang; models: Choice[] }) {
-  const { activeChildId, enter, depth } = useDrillContainer()
-  const drill = useDrillState()
-  const rec = isRecord(value) ? value : {}
-  const names = Object.keys(rec).sort()
-  const [newName, setNewName] = useState('')
-  if (activeChildId?.startsWith('mode-agent:')) {
-    const name = activeChildId.slice('mode-agent:'.length)
-    const agent = getObject(rec, name)
-    return (
-      <DrillChild depth={depth}>
-        <div className="space-y-6">
-          {drill.stack.length === depth + 1 && (
-            <DuplicateIdField
-              sourceId={name}
-              existing={rec}
-              lang={lang}
-              onCopy={targetId => {
-                onChange({ ...rec, [targetId]: clone(agent) })
-                drill.replace(depth, { id: `mode-agent:${targetId}`, title: targetId })
-              }}
-            />
-          )}
-          <AgentCompatEditor value={agent} onChange={next => onChange({ ...rec, [name]: next })} lang={lang} models={models} />
-        </div>
-      </DrillChild>
-    )
-  }
-  return (
-    <div className="space-y-3">
-      {names.length === 0 ? <EmptyHint text={tx('No deprecated mode entries.', '没有旧 mode 条目。', lang)} /> : (
-        <div className="space-y-0.5">
-          {names.map(name => <DrillRow key={name} label={name} preview={previewValue(rec[name], lang)} onClick={() => enter({ id: `mode-agent:${name}`, title: name })} />)}
-        </div>
-      )}
-      <div className="flex min-w-0 gap-2">
-        <input value={newName} onChange={event => setNewName(event.target.value)} placeholder={tx('mode name', 'mode 名称', lang)} className={`${fieldClass} min-w-0 flex-1 font-mono`} />
-        <button
-          type="button"
-          disabled={!newName.trim() || hasOwn(rec, newName.trim())}
-          onClick={() => {
-            onChange({ ...rec, [newName.trim()]: { description: '' } })
-            setNewName('')
-          }}
-          className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 text-[length:var(--fs-sm)] font-medium text-accent-main-100 transition-colors hover:bg-accent-main-100/10 disabled:opacity-40"
-        >
-          <PlusIcon size={13} />
-          {tx('Add', '添加', lang)}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function AgentCompatEditor({ value, onChange, lang, models }: { value: JsonRecord; onChange: (value: JsonRecord) => void; lang: Lang; models: Choice[] }) {
-  const fields = buildAgentConfigFields({ value, setField: (key, v) => onChange({ ...value, [key]: v }), lang, models })
-  return <DrillFields fields={fields} isConfigured={key => key in value} lang={lang} />
 }
 
 function AdvancedSection({ config, setConfig, lang }: SectionProps) {
@@ -713,8 +658,6 @@ export function SectionRouter(props: SectionProps & { section: SectionID }) {
   switch (props.section) {
     case 'general':
       return <GeneralSection {...props} />
-    case 'server':
-      return <ServerSection {...props} />
     case 'commands':
       return <CommandsSection {...props} />
     case 'skills':
@@ -733,14 +676,12 @@ export function SectionRouter(props: SectionProps & { section: SectionID }) {
       return <FormatterSection {...props} />
     case 'lsp':
       return <LspSection {...props} />
-    case 'attachments':
-      return <AttachmentsSection {...props} />
+    case 'media':
+      return <MediaSection {...props} />
     case 'runtime':
       return <RuntimeSection {...props} />
     case 'experimental':
       return <ExperimentalSection {...props} />
-    case 'compatibility':
-      return <CompatibilitySection {...props} />
     case 'advanced':
       return <AdvancedSection {...props} />
   }

@@ -3,14 +3,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { InputBox } from './InputBox'
 
 let selectedFiles: File[] = []
+/** 桌面端选择器返回的本机路径 */
+let selectedPaths: string[] = []
 
 const uploadAttachmentMock = vi.fn()
 const createUploadIdMock = vi.fn(() => `upload-${uploadAttachmentMock.mock.calls.length}`)
 const notifyPushMock = vi.fn()
+const getDroppedPathsInfoMock = vi.fn(async (paths: string[]) =>
+  paths.map(path => ({ type: 'file' as const, path, name: path.split(/[/\\]/).pop() || 'file' })),
+)
+
+vi.mock('../../lib/tauriDragDrop', () => ({
+  getDroppedPathsInfo: (paths: string[]) => getDroppedPathsInfoMock(paths),
+  isTauriDropPointInsideElement: () => false,
+  subscribeTauriDragDrop: () => () => {},
+}))
 
 vi.mock('../../api/file', () => ({
   uploadAttachment: (...args: unknown[]) => uploadAttachmentMock(...args),
   createUploadId: () => createUploadIdMock(),
+  probeServerPath: vi.fn(async () => true),
 }))
 
 vi.mock('../../store/notificationStore', () => ({
@@ -72,15 +84,34 @@ vi.mock('../slash-command', () => ({
 }))
 
 vi.mock('./input/InputToolbar', () => ({
-  InputToolbar: ({ onFilesSelected }: { onFilesSelected: (files: File[]) => void }) => (
-    <button type="button" onClick={() => onFilesSelected(selectedFiles)}>
-      attach file
-    </button>
+  InputToolbar: ({
+    onFilesSelected,
+    onPickedPaths,
+  }: {
+    onFilesSelected: (files: File[]) => void
+    onPickedPaths?: (paths: string[]) => void
+  }) => (
+    <>
+      <button type="button" onClick={() => onFilesSelected(selectedFiles)}>
+        attach file
+      </button>
+      <button type="button" onClick={() => onPickedPaths?.(selectedPaths)}>
+        pick paths
+      </button>
+    </>
   ),
 }))
 
 vi.mock('./input/InputFooter', () => ({
   InputFooter: () => null,
+}))
+
+const statMock = vi.fn(async (_path: string) => ({ size: 262 }))
+const readFileMock = vi.fn(async (_path: string) => new Uint8Array([1, 2, 3]))
+
+vi.mock('@tauri-apps/plugin-fs', () => ({
+  stat: (path: string) => statMock(path),
+  readFile: (path: string) => readFileMock(path),
 }))
 
 vi.mock('./input/UndoStatus', () => ({
@@ -108,9 +139,13 @@ vi.mock('../../store/keybindingStore', () => ({
 describe('InputBox attachment handling', () => {
   beforeEach(() => {
     selectedFiles = []
+    selectedPaths = []
     uploadAttachmentMock.mockReset()
     createUploadIdMock.mockClear()
     notifyPushMock.mockReset()
+    getDroppedPathsInfoMock.mockClear()
+    statMock.mockClear()
+    readFileMock.mockClear()
   })
 
   it('accepts files whose mime is inferred from the filename extension', async () => {
@@ -218,5 +253,45 @@ describe('InputBox attachment handling', () => {
     })
     expect(uploadAttachmentMock).not.toHaveBeenCalled()
     expect(screen.getByTestId('attachment-count')).toHaveTextContent('0')
+  })
+
+  // ==========================================
+  // 桌面端点回形针选文件（Issue #182）：与拖入共用同一条判定链
+  // ==========================================
+
+  it('本机实例选文件 → @ 引用，不上传', async () => {
+    selectedPaths = ['C:/dl/piui-source.zip']
+
+    // 不传 serverId：缺省用活动服务器（测试环境下就是内置的 local，必然同机）
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} rootPath="E:/proj" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'pick paths' }))
+
+    await waitFor(() => {
+      const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+      expect(textarea.value).toContain('@C:/dl/piui-source.zip')
+    })
+
+    // 项目外的文件用绝对路径做引用；整条链路不碰上传
+    expect(uploadAttachmentMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId('attachment-count')).toHaveTextContent('1')
+  })
+
+  it('非本机实例选文件 → 上传（本机路径对远端服务端无意义）', async () => {
+    selectedPaths = ['C:/dl/piui-source.zip']
+    uploadAttachmentMock.mockResolvedValue({ path: '/srv/tmp/uploads/u9/piui-source.zip', size: 3 })
+
+    const { serverStore } = await import('../../store/serverStore')
+    const remote = serverStore.addServer({ name: 'lan', url: 'http://192.168.1.20:4096' })
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} serverId={remote.id} rootPath="E:/proj" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'pick paths' }))
+
+    await waitFor(() => {
+      expect(uploadAttachmentMock).toHaveBeenCalledTimes(1)
+    })
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).not.toContain('@')
+    expect(screen.getByTestId('attachment-meta')).toHaveTextContent('file:///srv/tmp/uploads/u9/piui-source.zip')
   })
 })

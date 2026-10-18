@@ -23,6 +23,13 @@ interface InputToolbarProps {
   /** @deprecated 选择器不再按能力过滤（Issue #182）；内联判定在 InputBox 里做 */
   fileCapabilities?: FileCapabilities
   onFilesSelected: (files: File[]) => void
+  /**
+   * 桌面端原生选择器选中的**本机路径**。
+   *
+   * 与拖入共用一条判定链（本机实例 → `@` 引用，远端 → 上传）。浏览器里拿不到
+   * `File` 的真实路径，所以只有 Tauri 下会走这里；给了它就不再读字节拼 `File`。
+   */
+  onPickedPaths?: (paths: string[]) => void
 
   isStreaming?: boolean
   isSending?: boolean
@@ -55,6 +62,7 @@ export function InputToolbar({
   selectedVariant,
   onVariantChange,
   onFilesSelected,
+  onPickedPaths,
   isStreaming,
   isSending = false,
   onAbort,
@@ -205,10 +213,7 @@ export function InputToolbar({
     }
 
     try {
-      const [{ open }, { readFile }] = await Promise.all([
-        import('@tauri-apps/plugin-dialog'),
-        import('@tauri-apps/plugin-fs'),
-      ])
+      const { open } = await import('@tauri-apps/plugin-dialog')
 
       const selected = await open({
         multiple: true,
@@ -220,6 +225,14 @@ export function InputToolbar({
       const paths = Array.isArray(selected) ? selected : [selected]
       if (paths.length === 0) return
 
+      // 有原生路径就交给上层，与拖入共用同一条判定（本机 → @ 引用 / 远端 → 上传）；
+      // 读字节拼 File 会丢掉路径，那条只作为没有上层的兜底
+      if (onPickedPaths) {
+        onPickedPaths(paths)
+        return
+      }
+
+      const { readFile } = await import('@tauri-apps/plugin-fs')
       const files: File[] = []
       for (const path of paths) {
         const fileName = path.split(/[\\/]/).pop() || 'file'
@@ -237,7 +250,7 @@ export function InputToolbar({
     } catch (err) {
       console.warn('[InputToolbar] File picker error:', err)
     }
-  }, [onFilesSelected, useBrowserFileInput])
+  }, [onFilesSelected, onPickedPaths, useBrowserFileInput])
 
   // Click outside logic
   useEffect(() => {

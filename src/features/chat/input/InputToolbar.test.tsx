@@ -180,7 +180,37 @@ describe('InputToolbar file selection', () => {
     expect(files[0].type).toBe('image/png')
   })
 
-  it('moves focus into the opened agent menu and exposes menu semantics', async () => {    render(
+  it('hands native paths to onPickedPaths instead of reading bytes', async () => {
+    isTauriMock.mockReturnValue(true)
+    isTauriMobileMock.mockReturnValue(false)
+    openMock.mockResolvedValue(['C:\\dl\\piui-source.zip', 'C:\\dl\\notes.txt'])
+
+    // Issue #182：桌面端选择器与拖入共用一条判定链（本机 → @ 引用 / 远端 → 上传），
+    // 所以要把路径原样交上去；读字节拼 File 会丢掉路径
+    const onPickedPaths = vi.fn()
+    const onFilesSelected = vi.fn()
+
+    render(
+      <InputToolbar
+        agents={[]}
+        onFilesSelected={onFilesSelected}
+        onPickedPaths={onPickedPaths}
+        canSend={false}
+        onSend={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Attach file' }))
+
+    await waitFor(() => {
+      expect(onPickedPaths).toHaveBeenCalledWith(['C:\\dl\\piui-source.zip', 'C:\\dl\\notes.txt'])
+    })
+    expect(readFileMock).not.toHaveBeenCalled()
+    expect(onFilesSelected).not.toHaveBeenCalled()
+  })
+
+  it('moves focus into the opened agent menu and exposes menu semantics', async () => {
+    render(
       <InputToolbar
         agents={agents}
         selectedAgent="build"

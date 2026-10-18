@@ -1552,22 +1552,29 @@ function InputBoxComponent({
     [fileCaps, notifyAttachmentError, pinnedLocalServer, serverIsLocal, t, uploadFailureBody, uploadTarget],
   )
 
-  const handleTauriExternalDrop = useCallback(
-    async (paths: string[]) => {
+  /**
+   * 桌面端「拿到本机路径」的统一入口：拖入与点回形针选文件共用同一条判定链
+   * （原生媒体内联 / 本机实例 `@` 引用 / 远端上传）。
+   *
+   * `respectMentionMode`：只有拖入响应「拖入文件始终使用 @」设置；选择器是显式
+   * 动作，一律按判定链走。
+   */
+  const addTauriPaths = useCallback(
+    async (paths: string[], options: { respectMentionMode: boolean }) => {
       if (paths.length === 0) return
 
       try {
-        const droppedPaths = await getDroppedPathsInfo(paths)
+        const infos = await getDroppedPathsInfo(paths)
         const uploadAttachments: Attachment[] = []
         const mentionFiles: DraggedFileInfo[] = []
 
-        for (const droppedPath of droppedPaths) {
-          if (externalFileDropMode === 'mention') {
-            mentionFiles.push(buildDraggedFileInfo(droppedPath))
+        for (const info of infos) {
+          if (options.respectMentionMode && externalFileDropMode === 'mention') {
+            mentionFiles.push(buildDraggedFileInfo(info))
             continue
           }
 
-          const result = await createUploadAttachmentFromDroppedPath(droppedPath)
+          const result = await createUploadAttachmentFromDroppedPath(info)
           if (result === 'skip') {
             // 已处理但无附件可加（超限 / 上传失败）：已弹过可见提示，
             // 不能再退化成 @mention —— 服务端在远端时那个本机路径读不到
@@ -1576,7 +1583,8 @@ function InputBoxComponent({
           if (result) {
             uploadAttachments.push(result)
           } else {
-            mentionFiles.push(buildDraggedFileInfo(droppedPath))
+            // 目录，或服务端读不到该路径：退化为 @ 引用
+            mentionFiles.push(buildDraggedFileInfo(info))
           }
         }
 
@@ -1586,10 +1594,21 @@ function InputBoxComponent({
 
         insertDraggedFiles(mentionFiles)
       } catch (err) {
-        console.warn('[InputBox] Failed to process Tauri dropped paths:', err)
+        console.warn('[InputBox] Failed to process dropped paths:', err)
       }
     },
     [buildDraggedFileInfo, createUploadAttachmentFromDroppedPath, externalFileDropMode, insertDraggedFiles],
+  )
+
+  const handleTauriExternalDrop = useCallback(
+    (paths: string[]) => addTauriPaths(paths, { respectMentionMode: true }),
+    [addTauriPaths],
+  )
+
+  /** 桌面端点回形针选中的文件：与拖入同一条链路 */
+  const handlePickedPaths = useCallback(
+    (paths: string[]) => addTauriPaths(paths, { respectMentionMode: false }),
+    [addTauriPaths],
   )
 
   const handleTauriDragDropEvent = useCallback(
@@ -1877,6 +1896,7 @@ function InputBoxComponent({
                       onVariantChange={onVariantChange}
                       fileCapabilities={fileCaps}
                       onFilesSelected={handleFilesSelected}
+                      onPickedPaths={handlePickedPaths}
                       isStreaming={isStreaming}
                       busyDelivery={busyDelivery}
                       onBusyDeliveryChange={onBusyDeliveryChange}

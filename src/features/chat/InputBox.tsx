@@ -35,6 +35,7 @@ import {
 import { formatFileSize } from '../../utils/formatUtils'
 import {
   canReferenceLocalPath,
+  splitDroppedItems,
   uploadFileAsAttachment,
   uploadPathAsAttachment,
   decideNativeFileRoute,
@@ -1659,8 +1660,25 @@ function InputBoxComponent({
           }
           if (result) {
             uploadAttachments.push(result)
+          } else if (info.type === "folder") {
+            // 文件夹：不上传。只有服务端真能读到这个路径（本机实例）才退化为 @ 引用；
+            // 连远端实例时本机目录对它没有意义，明确拒绝，别塞一个没用的路径引用过去
+            const readable = await canReferenceLocalPath({
+              path: info.path,
+              pinnedLocal: serverIsLocal,
+              directory: uploadTarget.directory,
+              serverId: uploadTarget.serverId,
+            })
+            if (readable) {
+              mentionFiles.push(buildDraggedFileInfo(info))
+            } else {
+              notifyAttachmentError(
+                t('attachment.folderUnsupported.title'),
+                t('attachment.folderUnsupported.body', { names: info.name }),
+              )
+            }
           } else {
-            // 目录，或服务端读不到该路径：退化为 @ 引用
+            // 服务端读不到该路径：退化为 @ 引用
             mentionFiles.push(buildDraggedFileInfo(info))
           }
         }
@@ -1674,7 +1692,16 @@ function InputBoxComponent({
         console.warn('[InputBox] Failed to process dropped paths:', err)
       }
     },
-    [buildDraggedFileInfo, createUploadAttachmentFromDroppedPath, externalFileDropMode, insertDraggedFiles],
+    [
+      buildDraggedFileInfo,
+      createUploadAttachmentFromDroppedPath,
+      externalFileDropMode,
+      insertDraggedFiles,
+      notifyAttachmentError,
+      serverIsLocal,
+      t,
+      uploadTarget,
+    ],
   )
 
   const handleTauriExternalDrop = useCallback(
@@ -1723,12 +1750,24 @@ function InputBoxComponent({
       setIsDragging(false)
 
       // 原生文件拖拽（从操作系统拖入）
-      if (e.dataTransfer.files.length > 0) {
+      // 先按 entry 分流：文件夹（浏览器里表现为 size 0 的假 File）必须在上传前拦掉，
+      // 否则会得到一个空附件，请求还会被浏览器安全策略挡掉（ERR_ACCESS_DENIED）
+      const dropped = splitDroppedItems(Array.from(e.dataTransfer.items ?? []))
+      const files = dropped.files.length > 0 ? dropped.files : Array.from(e.dataTransfer.files)
+
+      if (dropped.folderNames.length > 0) {
+        notifyAttachmentError(
+          t('attachment.folderUnsupported.title'),
+          t('attachment.folderUnsupported.body', { names: dropped.folderNames.join(', ') }),
+        )
+      }
+
+      if (files.length > 0) {
         if (Date.now() - lastTauriDropAtRef.current < 750) return
-        void handleFilesSelected(Array.from(e.dataTransfer.files))
+        void handleFilesSelected(files)
       }
     },
-    [handleFilesSelected],
+    [handleFilesSelected, notifyAttachmentError, t],
   )
 
   // 滚动同步（备用，overlay 内部也监听了 scroll）

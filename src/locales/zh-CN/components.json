@@ -213,5 +213,9 @@
   },
   "diffView": {
     "fullscreenView": "全屏查看"
+  },
+  "attachment": {
+    "folderUnsupported.title": "暂不支持拖入文件夹",
+    "folderUnsupported.body": "{{names}} 是文件夹；请拖入文件，或先压缩成 zip 再拖入"
   }
 }

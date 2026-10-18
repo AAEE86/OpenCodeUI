@@ -214,3 +214,33 @@ export async function uploadPathAsAttachment(
     return { failure: classifyUploadFailure(error) }
   }
 }
+
+/**
+ * DataTransferItem 的最小结构（便于单测传假对象）。
+ *
+ * 为什么要按 entry 判断而不能看 dataTransfer.files：浏览器把拖入的文件夹也塞进
+ * files，表现为一个 size 0、type 空的 File —— 直接上传会得到一个空附件，请求还
+ * 常被浏览器安全策略挡掉（net::ERR_ACCESS_DENIED）。所以文件夹必须靠
+ * webkitGetAsEntry().isDirectory 认出来，也不能用"大小为 0"来猜（空文件是合法的）。
+ */
+export interface DroppedItemLike {
+  kind: string
+  webkitGetAsEntry?: () => { isDirectory: boolean; name: string } | null
+  getAsFile?: () => File | null
+}
+
+export function splitDroppedItems(items: DroppedItemLike[]): { files: File[]; folderNames: string[] } {
+  const files: File[] = []
+  const folderNames: string[] = []
+  for (const item of items) {
+    if (item.kind !== 'file') continue
+    const entry = item.webkitGetAsEntry?.()
+    if (entry?.isDirectory) {
+      folderNames.push(entry.name)
+      continue
+    }
+    const file = item.getAsFile?.()
+    if (file) files.push(file)
+  }
+  return { files, folderNames }
+}

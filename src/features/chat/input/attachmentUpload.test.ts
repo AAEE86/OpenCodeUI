@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildPathAttachment, canReferenceLocalPath, decideNativeFileRoute } from './attachmentUpload'
+import { buildPathAttachment, canReferenceLocalPath, decideNativeFileRoute, splitDroppedItems } from './attachmentUpload'
 
 // ============================================
 // 桌面端拖入的本机文件该走哪条路（需求二）
@@ -182,5 +182,59 @@ describe('canReferenceLocalPath', () => {
       throw new Error('Failed to fetch')
     })
     await expect(canReferenceLocalPath({ path: 'C:/x/a.zip', pinnedLocal: false, probe })).resolves.toBe(false)
+  })
+})
+
+// ============================================
+// 网页版拖入：文件夹必须在上传前被认出来
+//
+// 浏览器把拖入的文件夹也塞进 dataTransfer.files，表现为 size 0、type 空的 File。
+// 直接上传会得到一个空附件，请求还会被安全策略挡掉（net::ERR_ACCESS_DENIED），
+// 所以分流只能靠 webkitGetAsEntry().isDirectory。
+// ============================================
+
+describe('splitDroppedItems', () => {
+  const file = (name: string) => new File(['x'], name, { type: 'text/plain' })
+  const fileItem = (f: File | null) => ({ kind: 'file', webkitGetAsEntry: () => null, getAsFile: () => f })
+  const folderItem = (name: string) => ({
+    kind: 'file',
+    webkitGetAsEntry: () => ({ isDirectory: true, name }),
+    getAsFile: () => null,
+  })
+
+  it('文件夹被单独挑出来，不进 files（否则会传上空附件）', () => {
+    const result = splitDroppedItems([fileItem(file('a.txt')), folderItem('新建文件夹')])
+
+    expect(result.folderNames).toEqual(['新建文件夹'])
+    expect(result.files.map(f => f.name)).toEqual(['a.txt'])
+  })
+
+  it('混着拖：真文件照常收下', () => {
+    const result = splitDroppedItems([folderItem('dir'), fileItem(file('a.txt')), fileItem(file('b.zip'))])
+
+    expect(result.folderNames).toEqual(['dir'])
+    expect(result.files.map(f => f.name)).toEqual(['a.txt', 'b.zip'])
+  })
+
+  it('空文件是合法文件，不能被当成文件夹漏掉', () => {
+    const empty = new File([], 'empty.txt', { type: 'text/plain' })
+    const result = splitDroppedItems([fileItem(empty)])
+
+    expect(result.folderNames).toEqual([])
+    expect(result.files).toHaveLength(1)
+  })
+
+  it('没有 webkitGetAsEntry 的环境退回 getAsFile（老浏览器 / 非拖拽来源）', () => {
+    const result = splitDroppedItems([{ kind: 'file', getAsFile: () => file('a.txt') }])
+
+    expect(result.folderNames).toEqual([])
+    expect(result.files.map(f => f.name)).toEqual(['a.txt'])
+  })
+
+  it('非文件条目（如拖入文本）忽略', () => {
+    const result = splitDroppedItems([{ kind: 'string', getAsFile: () => null }])
+
+    expect(result.folderNames).toEqual([])
+    expect(result.files).toEqual([])
   })
 })

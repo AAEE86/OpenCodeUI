@@ -1,5 +1,19 @@
 # Changelog
 
+## [v0.7.18] - 2026-10-18
+
+- feat(desktop): 桌面端附件改由 Rust 流式上传，桌面也拿到真实进度 (a3ff755f)
+- feat(chat): 上传进度（浏览器走 XHR），整个胶囊当进度条 (7965fb93)
+- test(chat): 补桌面端选择器内联媒体与模型不支持时的用例 (0ca88969)
+- feat(chat): 桌面端「选文件」与拖入共用同一条附件判定 (d70bed82)
+- feat(chat): 直引本机路径前先问服务端读不读得到 (888f379b)
+- feat(chat): 本机实例拖入文件不再走上传（需求二） (662c56bd)
+- fix(message): 气泡与回填不再显示附件的路径引用行 (e3ef17f5)
+- feat(chat): 拖入任意文件走上传，失败可见可重试（Issue #182） (d758b3fa)
+- feat(message): 路径型附件注入文本引用与 metadata.attachments（Issue #182） (8e321888)
+- feat(api): 任意文件上传与附件三路分发（Issue #182） (f4f4d84f)
+- feat(settings): 配置编辑器改为 OpenCode v2 配置 schema (7ae730d8)
+
 ## [v0.7.17] - 2026-10-16
 
 - fix(chat): 会话还 busy 时过程壳不再提前收成「已处理」 (6596015f)

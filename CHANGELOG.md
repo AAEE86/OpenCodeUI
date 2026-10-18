@@ -1,5 +1,36 @@
 # Changelog
 
+## [v0.7.19] - 2026-10-18
+
+- style(markdown): 内联代码改用 flex 居中 + 细描边的紧凑 chip (8032ff23)
+- style(markdown): 内联代码改成传统 chip 样式（等宽 + 淡底 + 内边距） (7120317f)
+- style(markdown): 内联代码改成传统样式（等宽 + 淡底 chip，颜色继承正文） (236c65f9)
+- fix(chat): 修掉文件夹拦截的两个漏洞（i18n 键位置 + 兜底把文件夹捞回来） (9e49a4cb)
+- fix(chat): 拖入文件夹一律拦下，不再发起上传 (24956292)
+- change(settings): HTML 渲染默认改为关闭 (ea9750d9)
+- refactor(preview): 确认弹层去掉体积兜底，diff 永远照常渲染 (996ce0a9)
+- refactor(preview): 确认弹层去掉「保存/放弃」的说明文案 (14b6118f)
+- refactor(preview): 删掉编辑态的保存状态栏 (8b3af9f2)
+- refactor(preview): 确认弹层改用工具卡片那套 DiffView（文件名/统计/全屏） (36e31e54)
+- style(panels): 统一右侧面板标签头部动作图标的配色 (934818b2)
+- fix(hooks): useAutoRefresh 真的调用 onFilesystemChanged（B4 之前是死代码） (8e24a6a3)
+- test(preview): 补保存事务的自动化测试（需求三 F14 第一批） (627da35c)
+- feat(preview): 写入安全边界 + 混合行尾兜底（需求三 E12/13、D10） (6a5b25cf)
+- feat(preview): 关闭拦截 + 保存状态栏（需求三 C7/C8） (372a506f)
+- feat(preview): 外部改动落到界面 + 写后校验（需求三 B4/B6） (601e24d0)
+- feat(preview): 外部改动捕获 + 自写抑制（需求三 B4/B5 数据通路） (79f27baf)
+- feat(preview): 保存 / 放弃改动都走带 diff 的二次确认 (2b662d17)
+- fix(preview): 编辑态优先于预览类型分发，md/html 也能编辑保存 (38f9f897)
+- feat(preview): 覆盖前备份 + tab 上的脏/冲突标记 (19bb128c)
+- feat(preview): 文件预览编辑模式对齐 PiUI（显式编辑态 + 保存事务） (1d89e9c3)
+- feat(preview): 文本预览改成可编辑（需求三 P2.1，保存事务未接入） (f6e8744d)
+- refactor(codemirror): 拆出只读/可编辑共用的扩展工厂（行为不变） (fec41484)
+- fix(chat): 请求区卡片的头部横线两端留空，与项目面板分隔线一致 (0340252a)
+- fix(chat): 网页搜索的选择器补齐展开态细节，控件样式对齐设置页 (99c47a06)
+- refactor(chat): 网页搜索源改用项目统一的 DropdownMenu，去掉原生 select (44fad2a6)
+- fix(chat): 网页搜索表单改用与权限/提问同款 dock，可收起为胶囊 (c59af43e)
+- fix(chat): 网页搜索表单与提问/权限同一个请求区，不再压在输入框上 (7744b014)
+
 ## [v0.7.18] - 2026-10-18
 
 - feat(desktop): 桌面端附件改由 Rust 流式上传，桌面也拿到真实进度 (a3ff755f)

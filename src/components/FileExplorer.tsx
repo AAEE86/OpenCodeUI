@@ -803,8 +803,7 @@ function FilePreview({
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveConflict, setSaveConflict] = useState(false)
-  /** 上次保存成功的时间（状态栏「已保存于 …」） */
-  const [savedAt, setSavedAt] = useState<number | null>(null)
+
   /** 上次保存因混合行尾被拒（显示"按多数行尾统一"兜底按钮） */
   const [mixEolFallback, setMixEolFallback] = useState(false)
   /** 进入编辑时的基线指纹：保存前用它判断磁盘是否被别人改过 */
@@ -838,7 +837,6 @@ function FilePreview({
         setIsEditing(false)
         setSaveConflict(false)
         setMixEolFallback(false)
-        setSavedAt(Date.now())
       } catch (failure) {
         setSaveError(failure instanceof Error ? failure.message : t('fileExplorer.saveFailed'))
         setMixEolFallback(Boolean(failure && typeof failure === 'object' && 'code' in failure && failure.code === 'MIXED_EOL'))
@@ -1231,7 +1229,7 @@ function FilePreview({
         ) : isEditing ? (
           // 编辑态优先于"预览类型"分发：md / html / svg 这类带预览的文件，
           // 进编辑态要直接切到源码编辑（而不是继续渲染预览）
-          <div className="min-h-full flex flex-col">
+          <div className="h-full min-h-0 flex flex-col">
             {saveError && (
               <div className="px-3 py-2 text-danger-100 text-[length:var(--fs-xs)] flex items-center justify-between gap-3">
                 <span>{saveError}</span>
@@ -1263,21 +1261,15 @@ function FilePreview({
                 )}
               </div>
             )}
-            {/* 保存状态栏：保存中 / 上次保存时间 */}
-            <div className="flex items-center justify-end px-3 py-1 text-[length:var(--fs-xs)] text-text-400">
-              {isSaving
-                ? t('fileExplorer.saving')
-                : savedAt
-                  ? t('fileExplorer.savedAt', { time: new Date(savedAt).toLocaleTimeString() })
-                  : null}
+            <div className="flex-1 min-h-0">
+              <CodePreview
+                code={draft}
+                language={language || 'text'}
+                isResizing={isResizing}
+                readOnly={false}
+                onChange={setDraft}
+              />
             </div>
-            <CodePreview
-              code={draft}
-              language={language || 'text'}
-              isResizing={isResizing}
-              readOnly={false}
-              onChange={setDraft}
-            />
           </div>
         ) : displayContent?.type === 'media' ? (
           <MediaPreview

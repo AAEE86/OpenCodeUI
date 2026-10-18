@@ -40,6 +40,9 @@ function providerField(form: ApiFormInfo): FormStringField | undefined {
   )
 }
 
+/** 搜索源菜单 id（触发器 aria-controls 指向它） */
+const PROVIDER_MENU_ID = 'websearch-provider-menu'
+
 /**
  * 两段式链路的跨挂载状态（sessionID → 选中的 provider）。
  *
@@ -285,11 +288,18 @@ export function WebsearchDock({
                     disabled={busy || unavailable}
                     aria-haspopup="menu"
                     aria-expanded={providerMenuOpen}
+                    aria-controls={providerMenuOpen ? PROVIDER_MENU_ID : undefined}
                     aria-label={t('chat:websearch.provider')}
-                    className="flex w-full items-center justify-between gap-1.5 px-2.5 py-2 text-[length:var(--fs-base)] rounded-lg border border-border-200 bg-bg-000 transition-all duration-150 hover:bg-bg-200 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex h-8 w-full items-center justify-between gap-2 px-2.5 text-[length:var(--fs-sm)] rounded-md bg-transparent text-text-100 outline-none border border-border-200 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <span className="truncate text-text-200">{currentOptionLabel}</span>
-                    <span className="text-text-400 shrink-0">
+                    <span className="truncate">{currentOptionLabel}</span>
+                    {/* 展开时箭头翻转（与 ComposerSeatMenu / ModelSelector 同款细节） */}
+                    <span
+                      data-testid="websearch-provider-chevron"
+                      className={`text-text-400 shrink-0 transition-transform duration-200 ${
+                        providerMenuOpen ? 'rotate-180' : ''
+                      }`}
+                    >
                       <ChevronDownIcon />
                     </span>
                   </button>
@@ -302,6 +312,7 @@ export function WebsearchDock({
                     minWidth="min(320px, 80vw)"
                   >
                     <div
+                      id={PROVIDER_MENU_ID}
                       ref={providerMenuRef}
                       role="menu"
                       aria-label={t('chat:websearch.provider')}

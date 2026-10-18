@@ -86,6 +86,26 @@ describe('WebsearchDock', () => {
     expect(screen.getByRole('menuitemradio', { name: /Brave/ })).toBeTruthy()
   })
 
+  it('展开时箭头翻转（ComposerSeatMenu / ModelSelector 同款细节）', async () => {
+    render(<WebsearchDock form={form()} onReply={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Search provider' })).toBeTruthy()
+    })
+
+    const chevron = screen.getByTestId('websearch-provider-chevron')
+    expect(chevron.className).not.toContain('rotate-180')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search provider' }))
+    expect(screen.getByTestId('websearch-provider-chevron').className).toContain('rotate-180')
+
+    // 关闭后转回来
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.getByTestId('websearch-provider-chevron').className).not.toContain('rotate-180')
+    })
+  })
+
   it('选「任意」启用 → 回 {choice: allow}', async () => {
     const onReply = vi.fn(async () => true)
     render(<WebsearchDock form={form()} onReply={onReply} />)

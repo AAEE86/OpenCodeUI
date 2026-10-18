@@ -117,6 +117,8 @@
   },
   "attachment": {
     "removeAttachment": "Remove attachment",
+    "uploading": "Uploading",
+    "retryUpload": "Retry upload",
     "category": "Category",
     "context": "Context",
     "source": "Source",

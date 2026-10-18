@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef, useEffect, memo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CloseIcon, ChevronDownIcon, CopyIcon, CheckIcon, DownloadIcon, ExpandIcon } from '../../components/Icons'
+import { CloseIcon, ChevronDownIcon, CopyIcon, CheckIcon, DownloadIcon, ExpandIcon, RetryIcon } from '../../components/Icons'
 import { getAttachmentIcon, hasExpandableContent } from './utils'
+import { formatFileSize } from '../../utils/formatUtils'
 import { getMaterialIconUrl } from '../../utils/materialIcons'
 import { useDelayedRender } from '../../hooks/useDelayedRender'
 import { AttachmentDetailModal } from './AttachmentDetailModal'
@@ -12,6 +13,8 @@ import type { Attachment } from './types'
 interface AttachmentItemProps {
   attachment: Attachment
   onRemove?: (id: string) => void
+  /** 上传失败后的重试入口（Issue #182） */
+  onRetry?: (id: string) => void
   size?: 'sm' | 'md'
   expandable?: boolean
   className?: string
@@ -20,6 +23,7 @@ interface AttachmentItemProps {
 function AttachmentItemComponent({
   attachment,
   onRemove,
+  onRetry,
   size = 'md',
   expandable = false,
   className,
@@ -88,6 +92,31 @@ function AttachmentItemComponent({
         <span className="text-text-200 flex-1 min-w-0 truncate text-left" title={attachment.displayName}>
           {attachment.displayName}
         </span>
+        {attachment.size !== undefined && attachment.size > 0 && (
+          <span className="shrink-0 text-text-400 text-[length:var(--fs-xs)] font-mono">
+            {formatFileSize(attachment.size)}
+          </span>
+        )}
+        {attachment.uploadStatus === 'uploading' && (
+          <span
+            className="shrink-0 w-3 h-3 rounded-full border-2 border-text-400/40 border-t-text-200 animate-spin"
+            aria-label={t('attachment.uploading')}
+            title={t('attachment.uploading')}
+          />
+        )}
+        {attachment.uploadStatus === 'failed' && onRetry && (
+          <button
+            onClick={e => {
+              e.stopPropagation()
+              onRetry(attachment.id)
+            }}
+            className="shrink-0 text-danger-100 hover:text-danger-100/80 transition-colors"
+            aria-label={t('attachment.retryUpload')}
+            title={t('attachment.retryUpload')}
+          >
+            <RetryIcon size={12} />
+          </button>
+        )}
         {canExpand && (
           <span className={`text-text-400 transition-transform duration-300 ${isExpanded ? '' : '-rotate-90'}`}>
             <ChevronDownIcon size={10} />

@@ -1116,6 +1116,7 @@ export const ChatPane = memo(function ChatPane({
           modelSelectorRef={modelSelectorRef}
           rootPath={effectiveDirectory}
           sessionId={routeSessionId}
+          serverId={paneServerId}
           revertedText={revertedMessage?.text}
           revertedAttachments={revertedMessage?.attachments}
           composerDraft={composerDraft}

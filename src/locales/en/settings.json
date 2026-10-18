@@ -164,7 +164,7 @@
     "windows": "Windows",
     "unix": "Unix",
     "externalDropMentionMode": "Always Mention Dropped Files",
-    "externalDropMentionModeDesc": "Desktop only. When off, dropped files upload when supported and fall back to @mentions for folders or unsupported files.",
+    "externalDropMentionModeDesc": "Desktop only. When off, native media (images/PDF) is inlined and everything else is uploaded to the server's temp directory and sent as a path attachment; only folders and unreadable files fall back to @mentions.",
     "agentBehavior": "Agent Behavior",
     "agentBehaviorDesc": "Execution defaults for tool actions",
     "alwaysAllowMode": "Always Allow Mode",

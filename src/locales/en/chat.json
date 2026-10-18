@@ -61,6 +61,26 @@
     "shellPlaceholder": "Shell command (esc to exit · ⌫ on empty restores !)",
     "shellMode": "Shell"
   },
+  "attachment": {
+    "tooLarge": {
+      "title": "File too large: {{name}}",
+      "body": "Exceeds the {{max}} per-upload limit; it was not attached."
+    },
+    "uploadFailed": {
+      "title": "Attachment upload failed: {{name}}",
+      "body": "{{name}}\n{{reason}}\nUse the retry icon on the attachment, or remove it.",
+      "reason": {
+        "network": "Could not reach the server (network error or timeout)",
+        "unauthorized": "The server rejected the upload (authentication failed)",
+        "server": "The server failed to handle the upload; check its logs",
+        "unknown": "Unknown error"
+      }
+    },
+    "readFailed": {
+      "title": "Could not read file: {{name}}",
+      "body": "The browser refused to read this file; it was not attached."
+    }
+  },
   "shellMessage": {
     "timeout": "Command timed out",
     "killed": "Command terminated"

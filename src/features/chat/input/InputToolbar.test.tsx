@@ -99,6 +99,26 @@ describe('InputToolbar file selection', () => {
     readFileMock.mockReset()
   })
 
+  it('always offers the attach control and does not filter the file input by accept', () => {
+    // Issue #182：白名单外的文件会走服务端上传，所以附件入口不再受模型能力控制，
+    // 文件选择器也不能按 accept 过滤，否则用户根本选不到 zip/docx。
+    const { container } = render(
+      <InputToolbar
+        agents={[]}
+        fileCapabilities={{ image: false, pdf: false, audio: false, video: false }}
+        onFilesSelected={vi.fn()}
+        canSend={false}
+        onSend={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Attach file' })).toBeTruthy()
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    expect(input).toBeTruthy()
+    expect(input.hasAttribute('accept')).toBe(false)
+  })
+
   it('uses the browser file input on Tauri mobile', () => {
     useIsMobileMock.mockReturnValue(true)
     isTauriMock.mockReturnValue(true)
@@ -160,8 +180,7 @@ describe('InputToolbar file selection', () => {
     expect(files[0].type).toBe('image/png')
   })
 
-  it('moves focus into the opened agent menu and exposes menu semantics', async () => {
-    render(
+  it('moves focus into the opened agent menu and exposes menu semantics', async () => {    render(
       <InputToolbar
         agents={agents}
         selectedAgent="build"
@@ -205,7 +224,8 @@ describe('InputToolbar file selection', () => {
 
     await waitFor(() => {
       expect(trigger).toHaveAttribute('aria-expanded', 'false')
-      expect(screen.getByRole('button', { name: 'Send message' })).toHaveFocus()
+      // 下一个可聚焦控件是附件按钮（它现在恒常渲染，Issue #182）
+      expect(screen.getByRole('button', { name: 'Attach file' })).toHaveFocus()
     })
   })
 

@@ -164,7 +164,7 @@
     "windows": "Windows",
     "unix": "Unix",
     "externalDropMentionMode": "拖入文件始终使用 @",
-    "externalDropMentionModeDesc": "仅桌面客户端生效。关闭时，可上传的文件会正常上传，目录或不支持上传的文件会回退为 @ 引用。",
+    "externalDropMentionModeDesc": "仅桌面客户端生效。关闭时，原生媒体（图片/PDF）内联，其余文件上传到服务端临时目录并以路径附件发送；只有目录和读取失败的文件才回退为 @ 引用。",
     "agentBehavior": "Agent 行为",
     "agentBehaviorDesc": "工具操作的执行默认值",
     "alwaysAllowMode": "始终允许处理方式",

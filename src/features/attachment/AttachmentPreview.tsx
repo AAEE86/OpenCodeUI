@@ -4,6 +4,8 @@ import type { Attachment } from './types'
 interface AttachmentPreviewProps {
   attachments: Attachment[]
   onRemove?: (id: string) => void
+  /** 上传失败后的重试入口（Issue #182） */
+  onRetry?: (id: string) => void
   className?: string
   size?: 'sm' | 'md'
   expandable?: boolean
@@ -19,6 +21,7 @@ interface AttachmentPreviewProps {
 export function AttachmentPreview({
   attachments,
   onRemove,
+  onRetry,
   className = '',
   size = 'md',
   expandable = false,
@@ -53,6 +56,7 @@ export function AttachmentPreview({
           key={attachment.id}
           attachment={attachment}
           onRemove={onRemove}
+          onRetry={onRetry}
           size={size}
           expandable={expandable}
           className={itemClasses}

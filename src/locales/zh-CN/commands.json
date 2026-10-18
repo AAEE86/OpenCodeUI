@@ -117,6 +117,8 @@
   },
   "attachment": {
     "removeAttachment": "移除附件",
+    "uploading": "上传中",
+    "retryUpload": "重试上传",
     "category": "类别",
     "context": "上下文",
     "source": "来源",

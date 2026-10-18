@@ -61,6 +61,26 @@
     "shellPlaceholder": "Shell 命令（esc 退出 · 空命令退格还原 !）",
     "shellMode": "Shell"
   },
+  "attachment": {
+    "tooLarge": {
+      "title": "文件过大：{{name}}",
+      "body": "超过单次上传上限 {{max}}，未添加为附件。"
+    },
+    "uploadFailed": {
+      "title": "附件上传失败：{{name}}",
+      "body": "{{name}}\n{{reason}}\n可点击附件上的重试图标重试，或移除该附件。",
+      "reason": {
+        "network": "无法连接服务端（网络错误或超时）",
+        "unauthorized": "服务端拒绝了本次上传（认证失败）",
+        "server": "服务端处理失败，请查看服务端日志",
+        "unknown": "未知错误"
+      }
+    },
+    "readFailed": {
+      "title": "无法读取文件：{{name}}",
+      "body": "浏览器不允许读取该文件，未添加为附件。"
+    }
+  },
   "shellMessage": {
     "timeout": "命令超时",
     "killed": "命令已终止"

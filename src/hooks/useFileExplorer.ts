@@ -12,7 +12,12 @@ import { activeSessionStore } from '../store/activeSessionStore'
 import { useAutoRefresh } from './useAutoRefresh'
 import { canonicalizePath, fileBaseName, toAbsoluteFilePath } from '../utils/pathUtils'
 import { createUploadId, getServerTmpDirectory } from '../api/file'
-import { encodeTextPreservingFormat, hashBytes, MixedLineEndingsError } from '../utils/textEncoding'
+import {
+  encodeTextPreservingFormat,
+  encodeTextUnifyingLineEndings,
+  hashBytes,
+  MixedLineEndingsError,
+} from '../utils/textEncoding'
 
 /**
  * 文件树节点。
@@ -67,7 +72,13 @@ export interface UseFileExplorerResult {
   previewError: string | null
   loadPreview: (path: string, force?: boolean) => Promise<void>
   /** 保存编辑中的文件（需求三）：基线比对 → 保真编码 → 写 → 写后重读并更新缓存 */
-  savePreview: (path: string, text: string, baselineHash?: string, force?: boolean) => Promise<FileContent>
+  savePreview: (
+    path: string,
+    text: string,
+    baselineHash?: string,
+    force?: boolean,
+    unifyEol?: boolean,
+  ) => Promise<FileContent>
   /** 正在预览的文件被外部改动过（agent / 别的编辑器）；dirty 时即冲突来源 */
   externalChange: { path: string } | null
   clearExternalChange: () => void
@@ -325,25 +336,42 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
    * 写回时按原文保真（行尾 / BOM）；混合行尾原文直接拒绝（写出去必然整文件 diff）。
    */
   const savePreview = useCallback(
-    async (path: string, text: string, baselineHash?: string, force = false): Promise<FileContent> => {
+    async (path: string, text: string, baselineHash?: string, force = false, unifyEol = false): Promise<FileContent> => {
       if (!effectiveDirectory) throw new Error('No workspace is available')
+
+      // ⓪ 写入安全边界（§4.7）：只允许写工作区内的路径。
+      //    fs.write 本身不受 location 限制，所以必须自己拦一道。
+      const absTarget = canonicalizePath(toAbsoluteFilePath(path, effectiveDirectory))
+      const absRoot = canonicalizePath(effectiveDirectory).replace(/[/\\]+$/, "")
+      const withinRoot =
+        absTarget === absRoot || absTarget.startsWith(`${absRoot}/`) || absTarget.startsWith(`${absRoot}\\`)
+      if (!withinRoot) throw new Error(t("fileExplorer.writeOutsideWorkspace"))
       const cacheKey = `${serverId ?? ''}::${effectiveDirectory}::${path}`
       const baseline = previewCacheRef.current.get(cacheKey)
 
-      // ① 条件校验
-      const disk = await getFileContent(path, effectiveDirectory, serverId)
+      // ① 条件校验：同时保证"只改已存在的文件"——文件没了就地报错，不会凭空创建
+      const disk = await getFileContent(path, effectiveDirectory, serverId).catch(() => {
+        throw new Error(t("fileExplorer.fileMissing"))
+      })
       if (!force && baselineHash && hashBytes(disk.bytes) !== baselineHash) {
         const conflict = new Error(t('fileExplorer.saveConflict')) as Error & { code?: string }
         conflict.code = 'STALE_REVISION'
         throw conflict
       }
 
-      // ② 保真编码
+      // ② 保真编码（混合行尾默认拒绝；unifyEol 是用户确认后的"按多数行尾统一"兜底）
       let encoded: Uint8Array
       try {
-        encoded = encodeTextPreservingFormat(baseline?.bytes ?? disk.bytes, text)
+        const original = baseline?.bytes ?? disk.bytes
+        encoded = unifyEol
+          ? encodeTextUnifyingLineEndings(original, text)
+          : encodeTextPreservingFormat(original, text)
       } catch (error) {
-        if (error instanceof MixedLineEndingsError) throw new Error(t('fileExplorer.mixedLineEndings'))
+        if (error instanceof MixedLineEndingsError) {
+          const mixed = new Error(t("fileExplorer.mixedLineEndings")) as Error & { code?: string }
+          mixed.code = "MIXED_EOL"
+          throw mixed
+        }
         throw error
       }
 

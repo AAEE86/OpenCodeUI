@@ -40,7 +40,10 @@
     "saveVerifyFailed": "Post-save verification failed: the write may have been interrupted or overwritten. Please retry.",
     "savedAt": "Saved at {{time}}",
     "saving": "Saving…",
-    "unsavedCloseWarning": "Some files have unsaved changes; quitting now will lose them."
+    "unsavedCloseWarning": "Some files have unsaved changes; quitting now will lose them.",
+    "unifyLineEndings": "Unify line endings and save",
+    "writeOutsideWorkspace": "Refused: the target is outside the current workspace",
+    "fileMissing": "The file no longer exists (deleted or moved); nothing was written"
   },
   "terminal": {
     "terminal": "Terminal",

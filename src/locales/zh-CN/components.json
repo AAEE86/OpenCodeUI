@@ -40,7 +40,10 @@
     "saveVerifyFailed": "保存后校验不一致：写入可能被打断或已被并发修改，请重试",
     "savedAt": "已保存于 {{time}}",
     "saving": "保存中…",
-    "unsavedCloseWarning": "有未保存的文件改动，现在退出会丢失。"
+    "unsavedCloseWarning": "有未保存的文件改动，现在退出会丢失。",
+    "unifyLineEndings": "按多数行尾统一并保存",
+    "writeOutsideWorkspace": "拒绝写入：目标不在当前工作区内",
+    "fileMissing": "文件已不存在（可能被删除或移动），未做写入"
   },
   "terminal": {
     "terminal": "终端",

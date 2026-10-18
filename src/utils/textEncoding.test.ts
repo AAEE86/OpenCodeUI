@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   MixedLineEndingsError,
+  countLineEndings,
   detectLineEnding,
+  encodeTextUnifyingLineEndings,
+  majorityLineEnding,
   detectTextFormat,
   encodeTextPreservingFormat,
   hashBytes,
@@ -60,6 +63,30 @@ describe('encodeTextPreservingFormat', () => {
 
   it('混合行尾原文拒绝保存（会整文件 diff）', () => {
     expect(() => encodeTextPreservingFormat(enc('a\r\nb\n'), 'a\nb\n')).toThrow(MixedLineEndingsError)
+  })
+})
+
+describe('混合行尾的兜底：按多数行尾统一', () => {
+  it('多数是 CRLF 时统一成 CRLF，多数是 LF 时统一成 LF', () => {
+    const mostlyCrlf = enc('a\r\nb\r\nc\n')
+    expect(encodeTextUnifyingLineEndings(mostlyCrlf, 'x\ny\nz\n')).toBeTruthy()
+    expect(dec(encodeTextUnifyingLineEndings(mostlyCrlf, 'x\ny\nz\n'))).toBe('x\r\ny\r\nz\r\n')
+
+    const mostlyLf = enc('a\nb\nc\r\n')
+    expect(dec(encodeTextUnifyingLineEndings(mostlyLf, 'x\ny\nz\n'))).toBe('x\ny\nz\n')
+  })
+
+  it('并列时按 CRLF > LF > CR 取，并保留 BOM', () => {
+    const tie = new Uint8Array([0xef, 0xbb, 0xbf, ...enc('a\r\nb\n')])
+    const out = encodeTextUnifyingLineEndings(tie, 'a\nb\n')
+    expect(hasUtf8Bom(out)).toBe(true)
+    expect(dec(out)).toBe('a\r\nb\r\n')
+  })
+
+  it('countLineEndings / majorityLineEnding 与探测结果一致', () => {
+    expect(countLineEndings(enc('a\r\nb\r\nc\n'))).toEqual({ crlf: 2, lf: 1, cr: 0 })
+    expect(majorityLineEnding(enc('a\r\nb\r\nc\n'))).toBe('crlf')
+    expect(majorityLineEnding(enc('a\nb\nc\r\n'))).toBe('lf')
   })
 })
 

@@ -54,6 +54,34 @@ export function detectLineEnding(bytes: Uint8Array): LineEnding {
   return 'lf'
 }
 
+/** 数一下三种行尾各出现多少次（"多数行尾"兜底用） */
+export function countLineEndings(bytes: Uint8Array): { crlf: number; lf: number; cr: number } {
+  let crlf = 0
+  let lf = 0
+  let cr = 0
+  for (let index = 0; index < bytes.length; index++) {
+    if (bytes[index] === 0x0d) {
+      if (bytes[index + 1] === 0x0a) {
+        crlf++
+        index++
+      } else {
+        cr++
+      }
+    } else if (bytes[index] === 0x0a) {
+      lf++
+    }
+  }
+  return { crlf, lf, cr }
+}
+
+/** 混合行尾时的"多数派"行尾（并列时按 CRLF > LF > CR 取） */
+export function majorityLineEnding(bytes: Uint8Array): Exclude<LineEnding, "mixed"> {
+  const { crlf, lf, cr } = countLineEndings(bytes)
+  if (crlf >= lf && crlf >= cr) return "crlf"
+  if (lf >= cr) return "lf"
+  return "cr"
+}
+
 export function detectTextFormat(bytes: Uint8Array): TextFormat {
   return { eol: detectLineEnding(bytes), bom: hasUtf8Bom(bytes) }
 }
@@ -80,6 +108,22 @@ export function encodeTextPreservingFormat(original: Uint8Array, text: string): 
 }
 
 /** 基线指纹：判断磁盘上的字节是否还是编辑开始时的那些（FNV-1a 32 位 + 长度） */
+/**
+ * 混合行尾时的兜底：不拒绝，而是按"多数行尾"统一后写回。
+ * 只在用户明确确认后调用（默认路径仍然是拒绝，见 encodeTextPreservingFormat）。
+ */
+export function encodeTextUnifyingLineEndings(original: Uint8Array, text: string): Uint8Array {
+  const eol = majorityLineEnding(original)
+  const normalized = text.replace(/\r\n?/g, "\n")
+  const withEol = eol === "crlf" ? normalized.replace(/\n/g, "\r\n") : eol === "cr" ? normalized.replace(/\n/g, "\r") : normalized
+  const encoded = new TextEncoder().encode(withEol)
+  if (!hasUtf8Bom(original)) return encoded
+  const withBom = new Uint8Array(encoded.length + 3)
+  withBom.set(UTF8_BOM, 0)
+  withBom.set(encoded, 3)
+  return withBom
+}
+
 export function hashBytes(bytes: Uint8Array): string {
   let hash = 0x811c9dc5
   for (let index = 0; index < bytes.length; index++) {

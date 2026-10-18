@@ -759,7 +759,7 @@ interface FilePreviewProps {
   onClosePreview: (path: string) => void
   onReorderPreview: (draggedPath: string, targetPath: string) => void
   /** 保存（需求三：基线比对 + 保真写回）；未提供则不可编辑保存 */
-  onSave?: (path: string, text: string, baselineHash?: string, force?: boolean) => Promise<unknown>
+  onSave?: (path: string, text: string, baselineHash?: string, force?: boolean, unifyEol?: boolean) => Promise<unknown>
   /** 冲突时"重新载入"：绕过缓存从磁盘重读 */
   onReload?: (path: string) => Promise<void> | void
   /** 正在预览的文件被外部改动过（agent / 别的编辑器） */
@@ -805,6 +805,8 @@ function FilePreview({
   const [saveConflict, setSaveConflict] = useState(false)
   /** 上次保存成功的时间（状态栏「已保存于 …」） */
   const [savedAt, setSavedAt] = useState<number | null>(null)
+  /** 上次保存因混合行尾被拒（显示"按多数行尾统一"兜底按钮） */
+  const [mixEolFallback, setMixEolFallback] = useState(false)
   /** 进入编辑时的基线指纹：保存前用它判断磁盘是否被别人改过 */
   const [baselineHash, setBaselineHash] = useState<string | undefined>()
 
@@ -827,17 +829,19 @@ function FilePreview({
   }, [])
 
   const saveEditing = useCallback(
-    async (force = false) => {
+    async (force = false, unifyEol = false) => {
       if (!path || isSaving || !onSave) return
       setIsSaving(true)
       setSaveError(null)
       try {
-        await onSave(path, draft, baselineHash, force)
+        await onSave(path, draft, baselineHash, force, unifyEol)
         setIsEditing(false)
         setSaveConflict(false)
+        setMixEolFallback(false)
         setSavedAt(Date.now())
       } catch (failure) {
         setSaveError(failure instanceof Error ? failure.message : t('fileExplorer.saveFailed'))
+        setMixEolFallback(Boolean(failure && typeof failure === 'object' && 'code' in failure && failure.code === 'MIXED_EOL'))
         setSaveConflict(
           Boolean(failure && typeof failure === 'object' && 'code' in failure && failure.code === 'STALE_REVISION'),
         )
@@ -1231,6 +1235,14 @@ function FilePreview({
             {saveError && (
               <div className="px-3 py-2 text-danger-100 text-[length:var(--fs-xs)] flex items-center justify-between gap-3">
                 <span>{saveError}</span>
+                {mixEolFallback && (
+                  <button
+                    className="text-accent-main-100 hover:underline shrink-0"
+                    onClick={() => void saveEditing(false, true)}
+                  >
+                    {t('fileExplorer.unifyLineEndings')}
+                  </button>
+                )}
                 {saveConflict && (
                   <span className="flex gap-2 shrink-0">
                     <button

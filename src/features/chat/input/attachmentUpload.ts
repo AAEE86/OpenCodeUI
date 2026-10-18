@@ -35,6 +35,8 @@ export interface UploadOptions {
   directory?: string
   /** 服务端 20MB 附件上限之外的文件只作路径引用（不进 prompt.files[]） */
   pathOnly: boolean
+  /** 上传进度（0~1）：浏览器侧会走 XHR 才能真实上报（见 api/file.uploadAttachment） */
+  onProgress?: (fraction: number) => void
 }
 
 /** 从错误对象里抽出可读摘要（fetch 失败在浏览器里往往只有 "Failed to fetch"） */
@@ -153,7 +155,9 @@ async function uploadAndBuild(
   options: UploadOptions,
 ): Promise<UploadOutcome> {
   try {
-    const { path, size } = await uploadAttachment(payload, filename, options.directory, options.serverId)
+    const { path, size } = await uploadAttachment(payload, filename, options.directory, options.serverId, {
+      onProgress: options.onProgress,
+    })
     return {
       attachment: buildPathAttachment({
         id: createUploadId(),

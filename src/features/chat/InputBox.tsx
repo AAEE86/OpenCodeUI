@@ -329,7 +329,24 @@ function InputBoxComponent({
   const runAttachmentUpload = useCallback(
     (attachmentId: string, file: File, pathOnly: boolean) => {
       const task = (async () => {
-        const { attachment, failure } = await uploadFileAsAttachment(file, { ...uploadTarget, pathOnly })
+        const { attachment, failure } = await uploadFileAsAttachment(file, {
+          ...uploadTarget,
+          pathOnly,
+          // 浏览器侧会走 XHR 拿到真实进度；桌面端（经 Rust 发包）没有进度事件，
+          // 回调不触发 → 胶囊保持不确定态转圈
+          onProgress: fraction => {
+            setAttachments(prev =>
+              prev.map(item => {
+                if (item.id !== attachmentId) return item
+                // 百分比没变就不换引用，避免每个 progress 事件都触发重渲染
+                if (item.progress !== undefined && Math.round(item.progress * 100) === Math.round(fraction * 100)) {
+                  return item
+                }
+                return { ...item, progress: fraction }
+              }),
+            )
+          },
+        })
 
         if (attachment) {
           setAttachments(prev =>
@@ -359,22 +376,32 @@ function InputBoxComponent({
     [notifyAttachmentError, t, uploadFailureBody, uploadTarget],
   )
 
-  /** 插入占位附件并开始上传，返回可直接放进 attachments 的条目 */
+  /**
+   * 插入占位附件并开始上传。
+   *
+   * 顺序很重要：**先把占位插进 state，再开上传**。上传进度用的是函数式
+   * `setAttachments`，React 会按入队顺序应用，因此这里不会出现"进度先到、
+   * 占位还没落地 → 进度丢失"的竞态。
+   */
   const startAttachmentUpload = useCallback(
-    (file: File, pathOnly: boolean): Attachment => {
+    (file: File, pathOnly: boolean) => {
       const attachmentId = createUploadId()
       uploadSourcesRef.current.set(attachmentId, { file, pathOnly })
-      runAttachmentUpload(attachmentId, file, pathOnly)
 
-      return {
-        id: attachmentId,
-        type: 'file',
-        displayName: file.name,
-        mime: file.type || getMimeFromPath(file.name) || 'application/octet-stream',
-        size: file.size,
-        uploadStatus: 'uploading',
-        ...(pathOnly ? { pathOnly: true } : {}),
-      }
+      setAttachments(prev => [
+        ...prev,
+        {
+          id: attachmentId,
+          type: 'file',
+          displayName: file.name,
+          mime: file.type || getMimeFromPath(file.name) || 'application/octet-stream',
+          size: file.size,
+          uploadStatus: 'uploading',
+          ...(pathOnly ? { pathOnly: true } : {}),
+        },
+      ])
+
+      runAttachmentUpload(attachmentId, file, pathOnly)
     },
     [runAttachmentUpload],
   )
@@ -1230,7 +1257,7 @@ function InputBoxComponent({
     async (files: File[]) => {
       if (files.length === 0) return
 
-      const nextAttachments: Attachment[] = []
+      const inlineAttachments: Attachment[] = []
 
       for (const rawFile of files) {
         const file = ensureFileMime(rawFile)
@@ -1244,7 +1271,7 @@ function InputBoxComponent({
           try {
             const dataUrl = await readFileAsDataUrl(file)
 
-            nextAttachments.push({
+            inlineAttachments.push({
               id: crypto.randomUUID(),
               type: 'file',
               displayName: file.name,
@@ -1270,11 +1297,12 @@ function InputBoxComponent({
           continue
         }
 
-        nextAttachments.push(startAttachmentUpload(file, route.pathOnly))
+        // 上传：占位与启动都在 startAttachmentUpload 里（保证进度不会先于占位落地）
+        startAttachmentUpload(file, route.pathOnly)
       }
 
-      if (nextAttachments.length > 0) {
-        setAttachments(prev => [...prev, ...nextAttachments])
+      if (inlineAttachments.length > 0) {
+        setAttachments(prev => [...prev, ...inlineAttachments])
       }
     },
     [fileCaps, notifyAttachmentError, serverIsLocal, startAttachmentUpload, t],

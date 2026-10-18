@@ -48,6 +48,8 @@ export interface Attachment {
   pathOnly?: boolean
   /** 上传生命周期（仅输入框内的临时态） */
   uploadStatus?: 'uploading' | 'failed'
+  /** 上传进度 0~1（仅 uploadStatus === 'uploading' 且浏览器侧能上报时有值） */
+  progress?: number
 
   // 文件内容（从 synthetic text part 获取）
   content?: string // 文件内容预览

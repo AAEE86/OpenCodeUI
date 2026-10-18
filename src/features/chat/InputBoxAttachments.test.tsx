@@ -36,14 +36,14 @@ vi.mock('../attachment', () => ({
     attachments,
     onRetry,
   }: {
-    attachments: Array<{ id: string; url?: string; uploadStatus?: string }>
+    attachments: Array<{ id: string; url?: string; uploadStatus?: string; progress?: number }>
     onRetry?: (id: string) => void
   }) => (
     <div data-testid="attachment-count">
       {attachments.length}
       {attachments.map(attachment => (
         <span key={attachment.id} data-testid="attachment-meta">
-          {`${attachment.url ?? ''}|${attachment.uploadStatus ?? ''}`}
+          {`${attachment.url ?? ''}|${attachment.uploadStatus ?? ''}|${attachment.progress ?? ''}`}
         </span>
       ))}
       {attachments
@@ -253,6 +253,30 @@ describe('InputBox attachment handling', () => {
     })
     expect(uploadAttachmentMock).not.toHaveBeenCalled()
     expect(screen.getByTestId('attachment-count')).toHaveTextContent('0')
+  })
+
+  it('上传过程中把进度透传给胶囊（整个胶囊当进度条）', async () => {
+    const deferred: { release?: () => void } = {}
+    uploadAttachmentMock.mockImplementation(async (_payload, _name, _dir, _serverId, options) => {
+      ;(options as { onProgress?: (fraction: number) => void } | undefined)?.onProgress?.(0.5)
+      return await new Promise(resolve => {
+        deferred.release = () => resolve({ path: '/srv/tmp/uploads/u5/report.zip', size: 3 })
+      })
+    })
+    selectedFiles = [new File([new Uint8Array([1, 2, 3])], 'report.zip', { type: 'application/zip' })]
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'attach file' }))
+
+    // 上传还没回来：胶囊应该带着 0.5 的进度
+    await waitFor(() => {
+      expect(screen.getByTestId('attachment-meta')).toHaveTextContent('|uploading|0.5')
+    })
+
+    deferred.release?.()
+    await waitFor(() => {
+      expect(screen.getByTestId('attachment-meta')).toHaveTextContent('file:///srv/tmp/uploads/u5/report.zip|')
+    })
   })
 
   // ==========================================

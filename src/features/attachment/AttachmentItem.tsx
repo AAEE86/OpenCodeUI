@@ -37,6 +37,12 @@ function AttachmentItemComponent({
   const { Icon, colorClass } = getAttachmentIcon(attachment)
   const canExpand = expandable && hasExpandableContent(attachment)
 
+  // 上传中：整个胶囊当进度条。浏览器侧能拿到真实进度（XHR），桌面端拿不到 → 不确定态转圈
+  const progress =
+    attachment.uploadStatus === 'uploading' && typeof attachment.progress === 'number'
+      ? Math.min(1, Math.max(0, attachment.progress))
+      : undefined
+
   // file/folder 使用 material icon，其他类型用通用 SVG 图标
   const useMaterialIcon = attachment.type === 'file' || attachment.type === 'folder'
   const materialIconUrl = useMaterialIcon
@@ -58,9 +64,10 @@ function AttachmentItemComponent({
         className || ''
       } ${isExpanded ? expandedWidth : collapsedWidth}`}
     >
-      {/* 标签头部 */}
+      {/* 标签头部 — 上传中时整个胶囊就是进度条：先铺填充层，内容层盖在上面 */}
       <div
         className={`
+          relative overflow-hidden
           flex items-center gap-1.5 w-full
           px-2.5 py-1.5 rounded-lg border
           bg-bg-100/50 border-border-300/50
@@ -69,6 +76,15 @@ function AttachmentItemComponent({
         `}
         onClick={canExpand ? () => setIsExpanded(!isExpanded) : undefined}
       >
+        {progress !== undefined && (
+          <span
+            aria-hidden="true"
+            data-testid="attachment-progress-fill"
+            className="pointer-events-none absolute inset-y-0 left-0 bg-accent-main-100/25 transition-[width] duration-150 ease-out"
+            style={{ width: `${progress * 100}%` }}
+          />
+        )}
+        <div className="relative flex items-center gap-1.5 w-full min-w-0">
         {materialIconUrl ? (
           <img
             src={materialIconUrl}
@@ -92,13 +108,25 @@ function AttachmentItemComponent({
         <span className="text-text-200 flex-1 min-w-0 truncate text-left" title={attachment.displayName}>
           {attachment.displayName}
         </span>
-        {attachment.size !== undefined && attachment.size > 0 && (
-          <span className="shrink-0 text-text-400 text-[length:var(--fs-xs)] font-mono">
-            {formatFileSize(attachment.size)}
-          </span>
-        )}
-        {attachment.uploadStatus === 'uploading' && (
+        {attachment.uploadStatus === 'uploading' && progress !== undefined ? (
+          // 有真实进度：百分比（填充层本身已经在胶囊上）
           <span
+            className="shrink-0 text-text-300 text-[length:var(--fs-xs)] font-mono tabular-nums"
+            aria-label={`${t('attachment.uploading')} ${Math.round(progress * 100)}%`}
+          >
+            {Math.round(progress * 100)}%
+          </span>
+        ) : (
+          attachment.size !== undefined &&
+          attachment.size > 0 && (
+            <span className="shrink-0 text-text-400 text-[length:var(--fs-xs)] font-mono">
+              {formatFileSize(attachment.size)}
+            </span>
+          )
+        )}
+        {attachment.uploadStatus === 'uploading' && progress === undefined && (
+          <span
+            data-testid="attachment-progress-spinner"
             className="shrink-0 w-3 h-3 rounded-full border-2 border-text-400/40 border-t-text-200 animate-spin"
             aria-label={t('attachment.uploading')}
             title={t('attachment.uploading')}
@@ -134,6 +162,7 @@ function AttachmentItemComponent({
             <CloseIcon />
           </button>
         )}
+        </div>
       </div>
 
       {/* 展开的详情面板 - grid-rows 动画（和 think tag 同源） */}

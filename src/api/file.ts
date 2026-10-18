@@ -18,7 +18,9 @@
 
 import { getSDKClient } from './sdk'
 import { locationParam } from './location'
+import { getApiBaseUrl, getAuthHeader } from './http'
 import { fileBaseName } from '../utils/pathUtils'
+import { isTauri } from '../utils/tauri'
 import type { FileContent, FileNode, FileStatusItem } from './types'
 import { serverStore } from '../store/serverStore'
 
@@ -257,6 +259,67 @@ function sanitizeUploadFilename(filename: string): string {
   return cleaned || 'file'
 }
 
+export interface UploadAttachmentOptions {
+  /**
+   * 上传进度（0~1）。
+   *
+   * 给了它并且不在 Tauri 里时走 `XMLHttpRequest`：fetch 无法上报上传进度，
+   * 而 XHR 可以直接把 `File` 交给浏览器从磁盘流式发送（渲染进程不驻留整份文件）。
+   * 桌面端仍走 SDK（`@tauri-apps/plugin-http`，经 Rust 发包，不受 CORS 限制），
+   * 代价是没有进度——要进度得在 Rust 侧实现。
+   */
+  onProgress?: (fraction: number) => void
+  signal?: AbortSignal
+}
+
+/**
+ * 用 XHR 写文件（浏览器侧的唯一理由：真实上传进度 + 流式发 File）。
+ *
+ * 官方 app 也是这么做的（packages/app/src/composer/attachments/destination.ts:43-61）：
+ * "fetch cannot report upload progress and Chromium only streams request bodies over HTTP/2"。
+ */
+function writeWithXhr(input: {
+  url: string
+  body: Blob
+  authorization?: string
+  onProgress: (fraction: number) => void
+  signal?: AbortSignal
+}): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', input.url)
+    xhr.responseType = 'json'
+    xhr.setRequestHeader('content-type', 'application/octet-stream')
+    if (input.authorization) xhr.setRequestHeader('authorization', input.authorization)
+
+    xhr.upload.addEventListener('progress', event => {
+      const total = event.lengthComputable ? event.total : input.body.size
+      if (total > 0) input.onProgress(Math.min(1, event.loaded / total))
+    })
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status !== 200) {
+        reject(new Error(`Upload failed with status ${xhr.status}`))
+        return
+      }
+      const resolved = (xhr.response as { data?: { path?: string } } | null)?.data?.path
+      resolve(resolved || '')
+    })
+    xhr.addEventListener('error', () => reject(new Error('Upload failed: network error')))
+    xhr.addEventListener('abort', () => reject(new DOMException('Upload aborted', 'AbortError')))
+
+    if (input.signal) {
+      if (input.signal.aborted) {
+        xhr.abort()
+        return
+      }
+      input.signal.addEventListener('abort', () => xhr.abort(), { once: true })
+    }
+
+    xhr.send(input.body)
+  })
+}
+
 /**
  * 上传附件到服务端临时目录，返回**服务端上的绝对路径**与字节数。
  *
@@ -264,18 +327,43 @@ function sanitizeUploadFilename(filename: string): string {
  * （Windows 路径尤其重要）。每次上传单独一层 uuid 目录，避免同名覆盖。
  */
 export async function uploadAttachment(
-  payload: File | Uint8Array,
+  payload: Blob | Uint8Array,
   filename: string,
   directory?: string,
   serverId?: string,
+  options: UploadAttachmentOptions = {},
 ): Promise<{ path: string; size: number }> {
+  const tmp = await getServerTmpDirectory(serverId)
+  const target = `${tmp.replace(/[/\\]+$/, '')}/uploads/${createUploadId()}/${sanitizeUploadFilename(filename)}`
+
+  // 浏览器 + 要进度 → XHR（File 直接交给浏览器流式发送）
+  if (options.onProgress && !isTauri() && typeof XMLHttpRequest !== 'undefined') {
+    // 拷贝一份独立 buffer，避免 SharedArrayBuffer 后端类型与 BlobPart 不兼容
+    const body: Blob = ArrayBuffer.isView(payload)
+      ? new Blob([payload.slice().buffer as ArrayBuffer])
+      : payload
+    const base = getApiBaseUrl(serverId).replace(/\/+$/, '')
+
+    // 目录缺省时不带 location，交给服务端回落自己的默认工作目录
+    const params = new URLSearchParams({ path: target })
+    if (directory) params.set('location[directory]', directory)
+
+    const resolved = await writeWithXhr({
+      url: `${base}/api/experimental/fs/write?${params}`,
+      body,
+      authorization: getAuthHeader(serverId)['Authorization'],
+      onProgress: options.onProgress,
+      signal: options.signal,
+    })
+
+    return { path: resolved || target, size: body.size }
+  }
+
   // ArrayBuffer.isView 是跨 realm 安全的 brand check（`instanceof Uint8Array`
   // 在跨 window/worker 传进来的 typed array 上会失手）
   const bytes = ArrayBuffer.isView(payload)
     ? new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength)
     : new Uint8Array(await payload.arrayBuffer())
-  const tmp = await getServerTmpDirectory(serverId)
-  const target = `${tmp.replace(/[/\\]+$/, '')}/uploads/${createUploadId()}/${sanitizeUploadFilename(filename)}`
 
   const sdk = getSDKClient(serverId)
   const result = await sdk.file.write({

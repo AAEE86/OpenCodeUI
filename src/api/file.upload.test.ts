@@ -24,6 +24,87 @@ vi.mock('./sdk', () => ({
   }),
 }))
 
+// 进度上传走的是自建 XHR（绕过 SDK），这里只需要固定的 base/auth
+vi.mock('./http', () => ({
+  getApiBaseUrl: () => 'http://127.0.0.1:49374',
+  getAuthHeader: () => ({ Authorization: 'Basic test-token' }),
+}))
+
+/** 最小 XHR 假件：记录请求，允许测试驱动 progress/load/error */
+class FakeXhr {
+  static instances: FakeXhr[] = []
+
+  method = ''
+  url = ''
+  status = 0
+  response: unknown = null
+  responseType = ''
+  body: unknown = null
+  aborted = false
+  headers: Record<string, string> = {}
+
+  private listeners = new Map<string, Array<() => void>>()
+  upload = {
+    addEventListener: (type: string, handler: (event: { loaded: number; total: number }) => void) => {
+      this.uploadListeners.set(type, handler)
+    },
+    listeners: new Map<string, (event: { loaded: number; total: number }) => void>(),
+  }
+
+  private uploadListeners = new Map<
+    string,
+    (event: { loaded: number; total: number; lengthComputable: boolean }) => void
+  >()
+
+  constructor() {
+    FakeXhr.instances.push(this)
+  }
+
+  open(method: string, url: string) {
+    this.method = method
+    this.url = url
+  }
+
+  setRequestHeader(key: string, value: string) {
+    this.headers[key.toLowerCase()] = value
+  }
+
+  addEventListener(type: string, handler: () => void) {
+    const list = this.listeners.get(type) ?? []
+    list.push(handler)
+    this.listeners.set(type, list)
+  }
+
+  send(body: unknown) {
+    this.body = body
+  }
+
+  abort() {
+    this.aborted = true
+    this.emit('abort')
+  }
+
+  emit(type: string) {
+    for (const handler of this.listeners.get(type) ?? []) handler()
+  }
+
+  emitProgress(loaded: number, total: number, lengthComputable = true) {
+    this.uploadListeners.get('progress')?.({
+      loaded,
+      total: lengthComputable ? total : 0,
+      lengthComputable,
+    })
+  }
+
+  static last() {
+    return FakeXhr.instances.at(-1)!
+  }
+
+  static reset() {
+    FakeXhr.instances = []
+  }
+}
+
 const { clearServerTmpDirectoryCache, createUploadId, getServerTmpDirectory, probeServerPath, uploadAttachment } =
   await import('./file')
 
@@ -182,5 +263,98 @@ describe('probeServerPath', () => {
   it('没有父目录的裸文件名 → 读不到（不去列服务端根目录）', async () => {
     await expect(probeServerPath('report.zip')).resolves.toBe(false)
     expect(listMock).not.toHaveBeenCalled()
+  })
+})
+
+// ============================================
+// 带进度的上传（浏览器）：fetch 报不了上传进度，所以要走 XHR
+// 官方做法同款：packages/app/src/composer/attachments/destination.ts:43-61
+// ============================================
+
+describe('uploadAttachment — XHR 进度传输', () => {
+  beforeEach(() => {
+    writeMock.mockClear()
+    infoMock.mockClear()
+    clearServerTmpDirectoryCache()
+    FakeXhr.reset()
+    vi.stubGlobal('XMLHttpRequest', FakeXhr)
+  })
+
+  function uploadWithProgress(onProgress: (fraction: number) => void, directory?: string) {
+    return uploadAttachment(new Blob(['zip-bytes']), 'report.zip', directory, 'local', { onProgress })
+  }
+
+  /** 起一个上传并等到 XHR 真的被创建（前面有 await，必须让微任务先跑） */
+  async function startUpload(onProgress: (fraction: number) => void, directory?: string) {
+    const pending = uploadWithProgress(onProgress, directory)
+    await vi.waitFor(() => {
+      expect(FakeXhr.instances.length).toBeGreaterThan(0)
+    })
+    return { pending, xhr: FakeXhr.last() }
+  }
+
+  it('交出 File/Blob 本体（浏览器能从磁盘流式发送），query 带 location 与 path', async () => {
+    const { pending, xhr } = await startUpload(vi.fn())
+
+    expect(xhr.method).toBe('POST')
+    expect(xhr.url).toContain('http://127.0.0.1:49374/api/experimental/fs/write?')
+    expect(xhr.url).toContain('path=')
+    expect(xhr.url).toContain('uploads')
+    expect(xhr.url).toContain('report.zip')
+    // 缺省不带 location（交给服务端回落默认工作目录）
+    expect(xhr.url).not.toContain('location%5Bdirectory%5D')
+    expect(xhr.headers['content-type']).toBe('application/octet-stream')
+    expect(xhr.headers['authorization']).toBe('Basic test-token')
+    expect(xhr.body).toBeInstanceOf(Blob)
+
+    xhr.status = 200
+    xhr.response = { data: { path: '/srv/tmp/uploads/u1/report.zip' } }
+    xhr.emit('load')
+    await expect(pending).resolves.toEqual({ path: '/srv/tmp/uploads/u1/report.zip', size: 9 })
+  })
+
+  it('带目录时 query 里带上 location[directory]', async () => {
+    const { xhr } = await startUpload(vi.fn(), '/repo/project')
+    expect(xhr.url).toContain('location%5Bdirectory%5D=%2Frepo%2Fproject')
+  })
+
+  it('progress 事件换算成 0~1 的回调', async () => {
+    const onProgress = vi.fn()
+    const { xhr } = await startUpload(onProgress)
+
+    xhr.emitProgress(0, 100)
+    xhr.emitProgress(25, 100)
+    xhr.emitProgress(100, 100)
+
+    expect(onProgress.mock.calls.map(call => call[0])).toEqual([0, 0.25, 1])
+  })
+
+  it('非 200 抛错（供失败分类识别状态码）', async () => {
+    const { pending, xhr } = await startUpload(vi.fn())
+
+    xhr.status = 500
+    xhr.emit('load')
+    await expect(pending).rejects.toThrow('Upload failed with status 500')
+  })
+
+  it('网络错误与取消分别抛出可分类的错误', async () => {
+    const first = await startUpload(vi.fn())
+    first.xhr.emit('error')
+    await expect(first.pending).rejects.toThrow(/network error/i)
+
+    const second = await startUpload(vi.fn())
+    second.xhr.abort()
+    await expect(second.pending).rejects.toThrow(/aborted/i)
+  })
+
+  it('Tauri 下即使要进度也不走 XHR（webview 的 CORS/网络策略不可靠，仍走 SDK）', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true })
+    try {
+      await uploadAttachment(new Blob(['x']), 'report.zip', undefined, 'local', { onProgress: vi.fn() })
+      expect(writeMock).toHaveBeenCalledTimes(1)
+      expect(FakeXhr.instances).toHaveLength(0)
+    } finally {
+      Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
+    }
   })
 })

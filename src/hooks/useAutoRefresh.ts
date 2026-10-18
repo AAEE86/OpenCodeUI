@@ -61,6 +61,14 @@ export function useAutoRefresh(
 
   // 一次注册：会话级 idle/reconnect + 全局文件/分支变更（经 useGlobalEvents 广播）。
   const watchDirectory = options?.watchDirectory
+  /**
+   * 消费方的回调放 ref：注册只做一次，回调 identity 变化不该重建订阅。
+   * （这个回调原先在类型里有、实现里却没人调 —— 于是预览的"外部改动"链路是死的）
+   */
+  const filesystemChangedRef = useRef(options?.onFilesystemChanged)
+  useEffect(() => {
+    filesystemChangedRef.current = options?.onFilesystemChanged
+  }, [options?.onFilesystemChanged])
   useEffect(() => {
     if (!enabled) return
     return registerSessionConsumer(consumerId, sessionId, {
@@ -69,6 +77,8 @@ export function useAutoRefresh(
       onFilesystemChanged: data => {
         if (isGitInternalPath(data.file)) return
         if (watchDirectory && !isWithinDirectory(watchDirectory, data.file)) return
+        // 先给消费方（如文件预览判断"是不是我正在编辑的文件"），再照常刷新列表/状态
+        filesystemChangedRef.current?.(data)
         scheduleRefresh()
       },
       onVcsBranchUpdated: () => scheduleRefresh(),

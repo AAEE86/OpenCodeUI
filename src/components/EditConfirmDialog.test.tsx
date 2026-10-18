@@ -1,0 +1,73 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { EditConfirmDialog } from './EditConfirmDialog'
+
+// ============================================
+// 保存 / 放弃的二次确认弹层（需求三 A）
+//
+// 关键契约：写盘前、丢改动前都要先看到 diff；冲突时同一弹层多一行警告并把主
+// 按钮换成「覆盖」；改动过大不渲染 diff；确认键不自动聚焦（Enter 不该直接落盘）。
+// 测试环境 i18n 是英文，所以断言走 testid + 英文按钮名。
+// ============================================
+
+const base = {
+  isOpen: true,
+  fileName: 'app.ts',
+  before: 'const a = 1\n',
+  after: 'const a = 2\n',
+  language: 'text',
+  onConfirm: vi.fn(),
+  onCancel: vi.fn(),
+}
+
+describe('EditConfirmDialog', () => {
+  it('保存确认：展示 diff + 两个动作', () => {
+    render(<EditConfirmDialog {...base} mode="save" />)
+
+    expect(screen.getByTestId('edit-confirm-dialog')).toBeTruthy()
+    expect(screen.getByTestId('edit-confirm-diff')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy()
+    expect(screen.queryByTestId('edit-confirm-conflict')).toBeNull()
+  })
+
+  it('冲突保存：多一行警告，主按钮变成「覆盖」', () => {
+    render(<EditConfirmDialog {...base} mode="save" conflict />)
+
+    expect(screen.getByTestId('edit-confirm-conflict')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Overwrite' })).toBeTruthy()
+  })
+
+  it('放弃改动：按钮是危险色的「放弃」', () => {
+    render(<EditConfirmDialog {...base} mode="discard" />)
+
+    const discard = screen.getByRole('button', { name: 'Discard' })
+    expect(discard).toBeTruthy()
+    expect(discard.className).toContain('bg-danger-100')
+  })
+
+  it('改动过大：不渲染 diff，只给摘要', () => {
+    const huge = 'x'.repeat(150_000)
+    render(<EditConfirmDialog {...base} mode="save" before={huge} after={huge} />)
+
+    expect(screen.queryByTestId('edit-confirm-diff')).toBeNull()
+  })
+
+  it('确认键不自动聚焦（Enter 不该直接写盘 / 丢改动）', () => {
+    render(<EditConfirmDialog {...base} mode="save" />)
+
+    expect(screen.getByRole('button', { name: 'Save' })).not.toBe(document.activeElement)
+  })
+
+  it('确认 / 取消分别回调', () => {
+    const onConfirm = vi.fn()
+    const onCancel = vi.fn()
+    render(<EditConfirmDialog {...base} mode="save" onConfirm={onConfirm} onCancel={onCancel} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+})

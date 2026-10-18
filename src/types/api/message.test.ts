@@ -118,8 +118,19 @@ describe('判别与文本辅助', () => {
     expect(assistantText(message)).toBe('ab')
   })
 
-  it('userMessageText 就是 message.text', () => {
+  it('userMessageText 优先 metadata.displayText（附件的路径引用行不算用户输入）', () => {
     expect(userMessageText(user({ text: 'hi there' }))).toBe('hi there')
+
+    // 有 displayText 时用它：text 末尾被追加了给模型读的路径引用
+    expect(
+      userMessageText(
+        user({
+          text: '看看？\nAttached file: `C:/tmp/uploads/x/report.zip`',
+          metadata: { displayText: '看看？' },
+        }),
+      ),
+    ).toBe('看看？')
+
     // 防御：字段缺失时不崩
     expect(userMessageText({ ...user(), text: undefined as unknown as string })).toBe('')
   })

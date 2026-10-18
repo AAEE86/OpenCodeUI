@@ -17,6 +17,7 @@
 import { getSDKClient } from './sdk'
 import type { JsonValue } from '@opencode/client/promise'
 import { resolveSessionTarget } from '../utils/sessionKey'
+import { absolutePathToFileUrl, fileBaseName } from '../utils/pathUtils'
 import type { SessionMessage, UserMessage } from './types'
 import type { Attachment, RevertedMessage, SendMessageParams } from './types'
 
@@ -108,11 +109,13 @@ export async function getSessionMessagesPage(
  */
 export function extractUserMessageContent(message: UserMessage): RevertedMessage {
   const attachments: Attachment[] = []
+  const seenPaths = new Set<string>()
 
   for (const file of message.files ?? []) {
     const source = file.source
     const uri = source?.type === 'uri' ? source.uri : ''
     const displayName = file.name || uri || file.mime || 'attachment'
+    if (uri) seenPaths.add(uri)
     attachments.push({
       id: crypto.randomUUID(),
       type: 'file',
@@ -120,6 +123,30 @@ export function extractUserMessageContent(message: UserMessage): RevertedMessage
       // inline 附件没有可回填的路径，只在有 uri 时带上
       url: uri,
       relativePath: uri || displayName,
+    })
+  }
+
+  // 只作路径引用的附件（超 20MB 未进 files[]）不在 message.files 里，
+  // 只能从 metadata.attachments 还原——否则回填后模型拿不到这个文件。
+  const metadata = message.metadata as Record<string, unknown> | undefined
+  const references = Array.isArray(metadata?.['attachments']) ? metadata['attachments'] : []
+  for (const reference of references) {
+    if (!reference || typeof reference !== 'object') continue
+    const { name, mime, path } = reference as { name?: unknown; mime?: unknown; path?: unknown }
+    if (typeof path !== 'string' || !path) continue
+
+    const url = absolutePathToFileUrl(path)
+    if (seenPaths.has(url)) continue
+    seenPaths.add(url)
+
+    attachments.push({
+      id: crypto.randomUUID(),
+      type: 'file',
+      displayName: typeof name === 'string' && name ? name : fileBaseName(path),
+      url,
+      mime: typeof mime === 'string' ? mime : undefined,
+      relativePath: path,
+      pathOnly: true,
     })
   }
 
@@ -132,7 +159,12 @@ export function extractUserMessageContent(message: UserMessage): RevertedMessage
     })
   }
 
-  return { text: message.text ?? '', attachments }
+  // 回填用户原始输入（不含我们追加的路径引用行）：再次发送时由
+  // applyAttachmentReferences 依据附件重新生成，不会丢也不会重复。
+  const displayText = metadata?.['displayText']
+  const text = typeof displayText === 'string' ? displayText : message.text ?? ''
+
+  return { text, attachments }
 }
 
 // ============================================

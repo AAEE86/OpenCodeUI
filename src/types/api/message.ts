@@ -211,8 +211,18 @@ export function hasVisibleText(content: AssistantContent): boolean {
   return content.type === 'text' || content.type === 'reasoning' ? content.text.trim().length > 0 : false
 }
 
-/** 用户消息的可见正文（v2 里正文就是 message.text） */
+/**
+ * 用户消息的可见正文。
+ *
+ * 优先 `metadata.displayText`（用户原始输入）：上传附件时我们会把服务端的
+ * 绝对路径作为一行引用追加进 `text`（`Attached file: \`<path>\``，官方
+ * request.ts:173-182 同款），那是给模型读的管道信息，不该出现在气泡/大纲里。
+ * 官方也是这么取的（packages/app/src/composer/prompt.ts:73
+ * `presentation?.displayText ?? message.text`）。
+ */
 export function userMessageText(message: UserMessage): string {
+  const displayText = message.metadata?.['displayText']
+  if (typeof displayText === 'string') return displayText
   return typeof message.text === 'string' ? message.text : ''
 }
 

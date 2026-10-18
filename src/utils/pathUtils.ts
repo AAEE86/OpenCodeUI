@@ -32,6 +32,20 @@ export function normalizePathSeparators(path: string): string {
 }
 
 /**
+ * 绝对路径 → `file://` URL（服务端 `readFileAttachment` 只接受 file: 协议，
+ * 裸路径会被 `new URL` 解析成盘符协议而 400）。
+ *
+ * Windows 盘符要三斜杠（`file:///C:/x`），Unix 绝对路径两斜杠（`file:///x` 亦可，
+ * 这里保持与官方 `file://${encodeFilePath(path)}` 兼容的形态）。
+ */
+export function absolutePathToFileUrl(path: string): string {
+  const normalized = normalizePathSeparators(path).replace(/\/{2,}/g, '/')
+  if (/^[a-zA-Z]:/.test(normalized)) return `file:///${normalized}`
+  if (normalized.startsWith('/')) return `file://${normalized}`
+  return `file:///${normalized}`
+}
+
+/**
  * 折叠路径中的 `.` / `..` 段并统一为正斜杠（浏览器端的 path.resolve 单参数版）。
  * 保留盘符根（C:/）、UNC 前缀（//server/share）与 Unix 根（/）。
  *

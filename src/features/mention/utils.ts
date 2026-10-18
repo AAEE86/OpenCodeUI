@@ -4,6 +4,7 @@
 
 import type { MentionType, MentionItem, ParsedSegment } from './types'
 import { getMentionPattern } from './types'
+import { absolutePathToFileUrl } from '../../utils/pathUtils'
 
 /**
  * 规范化路径（统一使用 /，移除重复斜杠）
@@ -43,19 +44,12 @@ export function toAbsolutePath(relativePath: string, rootPath: string): string {
 /**
  * 将文件路径转换为 file:// URL
  * Windows 路径需要用 file:/// 格式
+ *
+ * 与 api 层的回填共用一个实现（utils/pathUtils），避免两处对 Windows/Unix
+ * 的斜杠规则产生分歧。
  */
 export function toFileUrl(filePath: string): string {
-  const normalized = normalizePath(filePath)
-  // Windows 路径 (C:/...) 需要 file:///
-  if (/^[a-zA-Z]:/.test(normalized)) {
-    return `file:///${normalized}`
-  }
-  // Unix 绝对路径 (/...)
-  if (normalized.startsWith('/')) {
-    return `file://${normalized}`
-  }
-  // 相对路径（不应该出现，但保险起见）
-  return `file:///${normalized}`
+  return absolutePathToFileUrl(filePath)
 }
 
 /**

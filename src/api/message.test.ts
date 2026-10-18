@@ -341,3 +341,70 @@ describe('sendMessage — 路径型附件的文本引用', () => {
   })
 })
 
+// ============================================
+// 附件消息回填（Issue #182）
+//
+// 气泡/回填都不能露出管道信息：`text` 末尾那行路径引用是给模型读的，
+// 用户原始输入在 metadata.displayText（官方 comment-note.ts:42-50 同款）。
+// ============================================
+
+describe('extractUserMessageContent — 路径附件回填', () => {
+  const userMessage = (overrides: Record<string, unknown> = {}) =>
+    ({
+      id: 'msg_u',
+      type: 'user',
+      text: '看看？\nAttached file: `C:/tmp/uploads/u1/report.zip`',
+      time: { created: 0 },
+      metadata: {
+        displayText: '看看？',
+        attachments: [{ name: 'report.zip', mime: 'application/zip', path: 'C:/tmp/uploads/u1/report.zip' }],
+      },
+      ...overrides,
+    }) as never
+
+  it('回填用户原始输入，不带上追加的路径引用行', async () => {
+    const { extractUserMessageContent } = await import('./message')
+    const restored = extractUserMessageContent(userMessage())
+    expect(restored.text).toBe('看看？')
+  })
+
+  it('只作路径引用的附件（超 20MB 未进 files[]）从 metadata.attachments 还原', async () => {
+    const { extractUserMessageContent } = await import('./message')
+    const restored = extractUserMessageContent(userMessage())
+
+    expect(restored.attachments).toHaveLength(1)
+    expect(restored.attachments[0]).toMatchObject({
+      type: 'file',
+      displayName: 'report.zip',
+      url: 'file:///C:/tmp/uploads/u1/report.zip',
+      relativePath: 'C:/tmp/uploads/u1/report.zip',
+      pathOnly: true,
+    })
+  })
+
+  it('已在 files[] 里的附件不会因为 metadata 再重复一次', async () => {
+    const { extractUserMessageContent } = await import('./message')
+    const restored = extractUserMessageContent(
+      userMessage({
+        files: [
+          {
+            data: 'QQ==',
+            mime: 'application/zip',
+            source: { type: 'uri', uri: 'file:///C:/tmp/uploads/u1/report.zip' },
+            name: 'report.zip',
+          },
+        ],
+      }),
+    )
+
+    expect(restored.attachments).toHaveLength(1)
+    expect(restored.attachments[0]?.pathOnly).toBeUndefined()
+  })
+
+  it('没有 metadata 的旧消息回落到 message.text', async () => {
+    const { extractUserMessageContent } = await import('./message')
+    const restored = extractUserMessageContent(userMessage({ metadata: undefined }))
+    expect(restored.text).toBe('看看？\nAttached file: `C:/tmp/uploads/u1/report.zip`')
+  })
+})
+

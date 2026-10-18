@@ -1092,6 +1092,21 @@ export const ChatPane = memo(function ChatPane({
             </div>
           </div>
         )}
+        {/* websearch.provider 表单 → 与提问/权限同一个「请求区」，按流排在输入框上方。
+            官方也是这么排的（session-composer-region.tsx：websearch → question →
+            permission → composer 在同一个 flex-col 容器里）。
+            之前这里自己套了一层 absolute bottom-0 z-[9]，比输入框的 z-10 还低，
+            于是输入框的底部（免责声明那行）压在卡片上，看起来就是"重合"。 */}
+        {visibleWebsearchRequest && (
+          <div className="mx-auto max-w-[min(100%,var(--oc-chat-input-width,48rem))] pb-2 pointer-events-auto">
+            <WebsearchDock
+              form={visibleWebsearchRequest}
+              directory={effectiveDirectory}
+              onReply={handleFormReply}
+            />
+          </div>
+        )}
+
         <InputBox
           paneId={paneId}
           onSend={handleSend}
@@ -1210,18 +1225,6 @@ export const ChatPane = memo(function ChatPane({
         />
       )}
 
-      {/* websearch.provider 表单 → 专用 dock（官方 session-websearch-dock） */}
-      {visibleWebsearchRequest && (
-        <div className="absolute bottom-0 left-0 right-0 z-[9] pointer-events-none">
-          <div className="mx-auto max-w-[min(100%,var(--oc-chat-input-width,48rem))] px-3.5 pb-2">
-            <WebsearchDock
-              form={visibleWebsearchRequest}
-              directory={effectiveDirectory}
-              onReply={handleFormReply}
-            />
-          </div>
-        </div>
-      )}
     </div>
   )
 

@@ -1,6 +1,6 @@
 import { memo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowDownIcon, ArrowUpIcon, PermissionListIcon, QuestionIcon } from '../../../components/Icons'
+import { ArrowDownIcon, ArrowUpIcon, PermissionListIcon, QuestionIcon, SearchIcon } from '../../../components/Icons'
 import { UndoStatus } from './UndoStatus'
 import { usePresence } from '../../../hooks'
 import type { CollapsedDialogInfo } from '../InputBox'
@@ -60,6 +60,7 @@ interface FloatingActionsProps {
   onScrollToBottom?: () => void
   collapsedPermission?: CollapsedDialogInfo
   collapsedQuestion?: CollapsedDialogInfo
+  collapsedWebsearch?: CollapsedDialogInfo
 }
 
 export const FloatingActions = memo(function FloatingActions({
@@ -72,6 +73,7 @@ export const FloatingActions = memo(function FloatingActions({
   onScrollToBottom,
   collapsedPermission,
   collapsedQuestion,
+  collapsedWebsearch,
 }: FloatingActionsProps) {
   return (
     <div className="flex items-center justify-center gap-2 pointer-events-none">
@@ -104,6 +106,23 @@ export const FloatingActions = memo(function FloatingActions({
             <span className="whitespace-nowrap">{collapsedQuestion.label}</span>
             {collapsedQuestion.queueLength > 1 && (
               <span className="text-[length:var(--fs-xxs)] opacity-70">+{collapsedQuestion.queueLength - 1}</span>
+            )}
+          </button>
+        )}
+      </PresenceItem>
+
+      {/* Collapsed Websearch Capsule（与权限/提问同款收起态） */}
+      <PresenceItem show={!!collapsedWebsearch}>
+        {collapsedWebsearch && (
+          <button
+            type="button"
+            onClick={collapsedWebsearch.onExpand}
+            className="flex items-center gap-1.5 px-3 h-[32px] rounded-full bg-accent-main-100/10 backdrop-blur-md border border-accent-main-100/20 text-[length:var(--fs-sm)] leading-[14px] text-accent-main-000 hover:bg-accent-main-100/20 transition-colors"
+          >
+            <SearchIcon size={14} />
+            <span className="whitespace-nowrap">{collapsedWebsearch.label}</span>
+            {collapsedWebsearch.queueLength > 1 && (
+              <span className="text-[length:var(--fs-xxs)] opacity-70">+{collapsedWebsearch.queueLength - 1}</span>
             )}
           </button>
         )}

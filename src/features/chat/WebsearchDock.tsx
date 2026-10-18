@@ -14,8 +14,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { SpinnerIcon } from '../../components/Icons'
+import { ReturnIcon, SearchIcon, ChevronDownIcon, SpinnerIcon } from '../../components/Icons'
 import { getWebsearchProviders } from '../../api/client'
+import { usePresence } from '../../hooks'
+import { useChatViewport } from './chatViewport'
+import { keybindingStore, matchesKeybinding } from '../../store/keybindingStore'
 import type { ApiFormInfo, FormAnswer } from '../../api'
 import type { FormStringField } from '@opencode/client/promise'
 
@@ -24,6 +27,9 @@ interface WebsearchDockProps {
   /** 会话所在目录（providers 按 location 拉取） */
   directory?: string
   onReply: (form: ApiFormInfo, answer: FormAnswer) => Promise<boolean>
+  isReplying?: boolean
+  collapsed?: boolean
+  onCollapsedChange?: (collapsed: boolean) => void
 }
 
 /** 官方 webSearchProviderField：specific 表单判定 */
@@ -42,8 +48,17 @@ function providerField(form: ApiFormInfo): FormStringField | undefined {
  */
 const pendingChooseProvider = new Map<string, string>()
 
-export function WebsearchDock({ form, directory, onReply }: WebsearchDockProps) {
+export function WebsearchDock({
+  form,
+  directory,
+  onReply,
+  isReplying = false,
+  collapsed = false,
+  onCollapsedChange,
+}: WebsearchDockProps) {
   const { t } = useTranslation(['chat', 'common'])
+  const { presentation } = useChatViewport()
+  const isCompact = presentation.isCompact
   const specific = useMemo(() => providerField(form), [form])
   const [selected, setSelected] = useState<string>('random')
   const [options, setOptions] = useState<{ value: string; label: string }[]>([])
@@ -132,75 +147,140 @@ export function WebsearchDock({ form, directory, onReply }: WebsearchDockProps) 
     [specific, options, t],
   )
   const unavailable = loading || loadFailed || options.length === 0
+  /** 回复在途（本地提交中或上层正在回复） */
+  const busy = sending || isReplying
+
+  /** 键盘：和提问/权限一致——send keybinding 启用，Escape 不使用搜索 */
+  function handleKeyDown(event: React.KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      if (!specific) handleDisable()
+      return
+    }
+    const sendKey = keybindingStore.getKey('sendMessage')
+    if (sendKey && matchesKeybinding(event.nativeEvent, sendKey)) {
+      event.preventDefault()
+      if (!busy && !unavailable && selected) handleEnable()
+    }
+  }
+
+  // 弹出/收起动画
+  const { shouldRender, ref: animRef } = usePresence<HTMLDivElement>(!collapsed, {
+    from: { opacity: 0, transform: 'translateY(16px)' },
+    to: { opacity: 1, transform: 'translateY(0px)' },
+    duration: 0.2,
+  })
+
+  if (!shouldRender) return null
 
   return (
-    <section
-      data-component="session-websearch-dock"
-      aria-label={t('chat:websearch.title')}
-      aria-busy={sending}
-      className="pointer-events-auto glass border border-border-200/60 rounded-xl shadow-lg p-3"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[length:var(--fs-sm)] font-medium text-text-100">{t('chat:websearch.title')}</div>
-          <div className="text-[length:var(--fs-xs)] text-text-400 mt-0.5">{t('chat:websearch.description')}</div>
-        </div>
-        <select
-          aria-label={t('chat:websearch.provider')}
-          value={selected}
-          onChange={e => setSelected(e.target.value)}
-          disabled={sending || unavailable}
-          className="shrink-0 bg-bg-000 border border-border-200 rounded-md px-2 py-1.5 text-[length:var(--fs-sm)] text-text-100 focus:outline-none focus:border-accent-main-100/50 disabled:opacity-50 max-w-[180px]"
+    <div ref={animRef} className="absolute bottom-0 left-0 right-0 z-[10]" onKeyDown={handleKeyDown}>
+      <div
+        className="mx-auto max-w-[min(100%,var(--oc-chat-input-width,48rem))] pointer-events-auto transition-[max-width] duration-300 ease-in-out pb-2"
+        style={{
+          paddingLeft: isCompact ? 6 : 14,
+          paddingRight: isCompact ? 6 : 14,
+          paddingBottom: 'max(8px, var(--safe-area-inset-bottom, 8px))',
+        }}
+      >
+        <div
+          data-component="session-websearch-dock"
+          aria-label={t('chat:websearch.title')}
+          aria-busy={busy}
+          className="border border-border-300/40 rounded-[14px] shadow-float bg-bg-100 overflow-hidden"
         >
-          {allOptions.map(option => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="flex items-center justify-between gap-2 mt-2.5">
-        <div className="text-[length:var(--fs-xs)] text-text-400" aria-live="polite">
-          {loading && (
-            <span className="inline-flex items-center gap-1.5">
-              <SpinnerIcon size={10} className="animate-spin" />
-              {t('common:loading')}
-            </span>
-          )}
-          {!loading && failed && <span className="text-danger-100">{t('chat:websearch.failed')}</span>}
-          {!loading && !failed && loadFailed && (
-            <span className="inline-flex items-center gap-2">
-              <span className="text-danger-100">{t('chat:websearch.loadFailed')}</span>
-              <button type="button" onClick={loadProviders} className="text-accent-main-100 hover:underline">
-                {t('chat:websearch.retry')}
+          <div className="bg-bg-000 rounded-t-[14px]">
+            {/* Header —— 与权限/提问同款：图标 + 标题 + 收起 */}
+            <div className="flex items-center justify-between py-3 px-4">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center justify-center text-text-100 w-5 h-5">
+                  <SearchIcon />
+                </div>
+                <h3 className="text-[length:var(--fs-base)] leading-none font-medium text-text-100">
+                  {t('chat:websearch.title')}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => onCollapsedChange?.(true)}
+                className="p-1 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200 transition-colors"
+                title={t('chat:websearch.minimize')}
+                aria-label={t('chat:websearch.minimize')}
+              >
+                <ChevronDownIcon size={16} />
               </button>
-            </span>
-          )}
-          {!loading && !failed && !loadFailed && options.length === 0 && <span>{t('chat:websearch.empty')}</span>}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {!specific && (
-            <button
-              type="button"
-              onClick={handleDisable}
-              disabled={sending}
-              className="px-2.5 py-1 text-[length:var(--fs-xs)] text-text-300 hover:text-text-100 hover:bg-bg-200/50 rounded-md transition-colors disabled:opacity-50"
-            >
-              {t('chat:websearch.disable')}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleEnable}
-            disabled={sending || unavailable || !selected}
-            className="px-2.5 py-1 text-[length:var(--fs-xs)] bg-accent-main-100 hover:bg-accent-main-200 text-oncolor-100 rounded-md transition-colors disabled:opacity-50 flex items-center gap-1.5"
-          >
-            {sending && <SpinnerIcon size={10} className="animate-spin" />}
-            {t('chat:websearch.enable')}
-          </button>
+            </div>
+
+            <div className="border-t border-border-300/30" />
+
+            {/* 内容：搜索源选择 */}
+            <div className="px-4 py-3 space-y-3 max-h-[45vh] overflow-y-auto custom-scrollbar">
+              <div>
+                <p className="text-[length:var(--fs-sm)] text-text-400 mb-2">{t('chat:websearch.description')}</p>
+                <select
+                  aria-label={t('chat:websearch.provider')}
+                  value={selected}
+                  onChange={e => setSelected(e.target.value)}
+                  disabled={busy || unavailable}
+                  className="w-full bg-bg-000 border border-border-200 rounded-md px-2.5 py-2 text-[length:var(--fs-base)] text-text-100 focus:outline-none focus:border-accent-main-100/50 disabled:opacity-50"
+                >
+                  {allOptions.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="text-[length:var(--fs-xs)] text-text-400" aria-live="polite">
+                {loading && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <SpinnerIcon size={10} className="animate-spin" />
+                    {t('common:loading')}
+                  </span>
+                )}
+                {!loading && failed && <span className="text-danger-100">{t('chat:websearch.failed')}</span>}
+                {!loading && !failed && loadFailed && (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="text-danger-100">{t('chat:websearch.loadFailed')}</span>
+                    <button type="button" onClick={loadProviders} className="text-accent-main-100 hover:underline">
+                      {t('chat:websearch.retry')}
+                    </button>
+                  </span>
+                )}
+                {!loading && !failed && !loadFailed && options.length === 0 && (
+                  <span>{t('chat:websearch.empty')}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Actions —— 与权限/提问同款的全宽行按钮 */}
+            <div className="px-3 py-3 space-y-[6px]">
+              <button
+                type="button"
+                onClick={handleEnable}
+                disabled={busy || unavailable || !selected}
+                className="w-full flex items-center justify-between px-3.5 py-2 rounded-lg bg-text-100 text-bg-000 hover:bg-text-200 transition-colors font-medium text-[length:var(--fs-base)] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span>{busy ? t('common:sending') : t('chat:websearch.enable')}</span>
+                {!busy && <ReturnIcon />}
+              </button>
+
+              {!specific && (
+                <button
+                  type="button"
+                  onClick={handleDisable}
+                  disabled={busy}
+                  className="w-full flex items-center justify-between px-3.5 py-2 rounded-lg text-text-300 hover:bg-bg-200 transition-colors text-[length:var(--fs-base)] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span>{t('chat:websearch.disable')}</span>
+                  <span className="text-[length:var(--fs-sm)] text-text-500">{t('common:esc')}</span>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
-    </section>
+    </div>
   )
 }

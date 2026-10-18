@@ -26,6 +26,7 @@
   },
   "websearch": {
     "title": "第三方网页搜索",
+    "minimize": "最小化",
     "description": "选择 Agent 搜索网页时使用的搜索源",
     "provider": "搜索源",
     "any": "任意",

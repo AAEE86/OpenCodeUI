@@ -23,9 +23,10 @@ interface UseMobileCollapseOptions {
   footerRef: React.RefObject<HTMLDivElement | null>
   /** 注册输入框容器用于动画 */
   registerInputBox?: (element: HTMLElement | null) => void
-  /** 收起态的 permission/question 对话框 */
+  /** 收起态的 permission/question/websearch 对话框 */
   collapsedPermission?: CollapsedDialogInfo
   collapsedQuestion?: CollapsedDialogInfo
+  collapsedWebsearch?: CollapsedDialogInfo
 }
 
 interface UseMobileCollapseReturn {
@@ -54,6 +55,7 @@ export function useMobileCollapse({
   registerInputBox,
   collapsedPermission,
   collapsedQuestion,
+  collapsedWebsearch,
 }: UseMobileCollapseOptions): UseMobileCollapseReturn {
   // 判断节点是否在输入区域内部（inputContainer / contentWrap / footer）
   const isInsideInputArea = useCallback(
@@ -98,7 +100,7 @@ export function useMobileCollapse({
   // 直接计算是否收起（纯派生值）
   // isAtBottom 语义是「用户未主动离底」（ChatArea 用 !userScrolled），不是几何 dist。
   // 流式贴底跟随期间 dist 会抖，但 userScrolled 仍为 false → 不收起，Footer 不闪。
-  const hasPendingDialogs = !!collapsedPermission || !!collapsedQuestion
+  const hasPendingDialogs = !!collapsedPermission || !!collapsedQuestion || !!collapsedWebsearch
   const isCollapsed = enabled && !isAtBottom && !hasContent && !isFocused && !hasPendingDialogs && !justCleared
 
   // 展开态内容区高度（用于收起时占位，防 isAtBottom 反馈循环）

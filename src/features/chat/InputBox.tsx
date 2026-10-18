@@ -226,6 +226,7 @@ export interface InputBoxProps {
   // Collapsed dialog capsules
   collapsedPermission?: CollapsedDialogInfo
   collapsedQuestion?: CollapsedDialogInfo
+  collapsedWebsearch?: CollapsedDialogInfo
 }
 
 // ============================================
@@ -277,6 +278,7 @@ function InputBoxComponent({
   onScrollToBottom,
   collapsedPermission,
   collapsedQuestion,
+  collapsedWebsearch,
 }: InputBoxProps) {
   const { t } = useTranslation('chat')
   // 合并文件能力：优先用 fileCapabilities，回退到 supportsImages
@@ -544,6 +546,7 @@ function InputBoxComponent({
       registerInputBox,
       collapsedPermission,
       collapsedQuestion,
+      collapsedWebsearch,
     })
 
   // 处理 revert 恢复
@@ -1809,6 +1812,7 @@ function InputBoxComponent({
                 onScrollToBottom={onScrollToBottom}
                 collapsedPermission={collapsedPermission}
                 collapsedQuestion={collapsedQuestion}
+                collapsedWebsearch={collapsedWebsearch}
               />
             </div>
           </div>

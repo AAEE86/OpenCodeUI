@@ -26,6 +26,7 @@
   },
   "websearch": {
     "title": "Third-party web search",
+    "minimize": "Minimize",
     "description": "Select the search provider agents use to search the web",
     "provider": "Search provider",
     "any": "Any",

@@ -827,6 +827,7 @@ export const ChatPane = memo(function ChatPane({
   // ============================================
   const [permissionCollapsed, setPermissionCollapsed] = useState(false)
   const [questionCollapsed, setQuestionCollapsed] = useState(false)
+  const [websearchCollapsed, setWebsearchCollapsed] = useState(false)
 
   const {
     inlineToolRequests,
@@ -936,12 +937,16 @@ export const ChatPane = memo(function ChatPane({
   // 新请求出现（含 inline 模式底部兜底）时解除折叠
   const permissionRequestId = visiblePermissionRequests[0]?.id
   const questionRequestId = visibleQuestionRequests[0]?.id
+  const websearchRequestId = visibleWebsearchRequest?.id
   useEffect(() => {
     if (permissionRequestId) setPermissionCollapsed(false)
   }, [permissionRequestId])
   useEffect(() => {
     if (questionRequestId) setQuestionCollapsed(false)
   }, [questionRequestId])
+  useEffect(() => {
+    if (websearchRequestId) setWebsearchCollapsed(false)
+  }, [websearchRequestId])
 
   const inlineToolRequestCtx = useMemo<InlineToolRequestContextValue>(
     () => ({
@@ -1092,21 +1097,6 @@ export const ChatPane = memo(function ChatPane({
             </div>
           </div>
         )}
-        {/* websearch.provider 表单 → 与提问/权限同一个「请求区」，按流排在输入框上方。
-            官方也是这么排的（session-composer-region.tsx：websearch → question →
-            permission → composer 在同一个 flex-col 容器里）。
-            之前这里自己套了一层 absolute bottom-0 z-[9]，比输入框的 z-10 还低，
-            于是输入框的底部（免责声明那行）压在卡片上，看起来就是"重合"。 */}
-        {visibleWebsearchRequest && (
-          <div className="mx-auto max-w-[min(100%,var(--oc-chat-input-width,48rem))] pb-2 pointer-events-auto">
-            <WebsearchDock
-              form={visibleWebsearchRequest}
-              directory={effectiveDirectory}
-              onReply={handleFormReply}
-            />
-          </div>
-        )}
-
         <InputBox
           paneId={paneId}
           onSend={handleSend}
@@ -1169,6 +1159,15 @@ export const ChatPane = memo(function ChatPane({
                 }
               : undefined
           }
+          collapsedWebsearch={
+            visibleWebsearchRequest && websearchCollapsed
+              ? {
+                  label: t('chat:websearch.title'),
+                  queueLength: 1,
+                  onExpand: () => setWebsearchCollapsed(false),
+                }
+              : undefined
+          }
         />
         {/* 输入框左缘拖拽把手（与对话列把手独立，各调各的宽度） */}
         {canAdjustChatWidth && paneWidth > 0 && (
@@ -1222,6 +1221,18 @@ export const ChatPane = memo(function ChatPane({
           isReplying={isReplying}
           collapsed={questionCollapsed}
           onCollapsedChange={setQuestionCollapsed}
+        />
+      )}
+
+      {/* websearch.provider 表单 → 与权限/提问同一个请求区（同款卡片、同样能收起成胶囊） */}
+      {visibleWebsearchRequest && (
+        <WebsearchDock
+          form={visibleWebsearchRequest}
+          directory={effectiveDirectory}
+          onReply={handleFormReply}
+          isReplying={isReplying}
+          collapsed={websearchCollapsed}
+          onCollapsedChange={setWebsearchCollapsed}
         />
       )}
 

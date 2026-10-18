@@ -10,7 +10,7 @@ import type { FileNode, FileContent, FileStatusItem, FileDiff } from '../api/typ
 import { useSessionChangeScope } from '../store/changeScopeStore'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { useAutoRefresh } from './useAutoRefresh'
-import { fileBaseName, toAbsoluteFilePath } from '../utils/pathUtils'
+import { canonicalizePath, fileBaseName, toAbsoluteFilePath } from '../utils/pathUtils'
 import { createUploadId, getServerTmpDirectory } from '../api/file'
 import { encodeTextPreservingFormat, hashBytes, MixedLineEndingsError } from '../utils/textEncoding'
 
@@ -68,6 +68,9 @@ export interface UseFileExplorerResult {
   loadPreview: (path: string, force?: boolean) => Promise<void>
   /** 保存编辑中的文件（需求三）：基线比对 → 保真编码 → 写 → 写后重读并更新缓存 */
   savePreview: (path: string, text: string, baselineHash?: string, force?: boolean) => Promise<FileContent>
+  /** 正在预览的文件被外部改动过（agent / 别的编辑器）；dirty 时即冲突来源 */
+  externalChange: { path: string } | null
+  clearExternalChange: () => void
   clearPreview: () => void
 
   /** 实际生效的目录（session 目录优先于传入目录）；预览按此作用域分键 */
@@ -112,6 +115,10 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const previewCacheRef = useRef<Map<string, FileContent>>(new Map())
+  /** 正在预览的内容（ref 版：事件回调里要读最新值） */
+  const previewContentRef = useRef<FileContent | null>(null)
+  /** 外部改动标记 */
+  const [externalChange, setExternalChange] = useState<{ path: string } | null>(null)
   /** 最近一次由我们写入的文件（路径 + 内容指纹），用于自写事件抑制 */
   const lastWriteRef = useRef<{ path: string; hash: string } | null>(null)
   const previewLoadIdRef = useRef(0)
@@ -365,6 +372,45 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     [effectiveDirectory, serverId, t],
   )
 
+  useEffect(() => {
+    previewContentRef.current = previewContent
+  }, [previewContent])
+
+  /**
+   * filesystem.changed 命中正在预览的文件时（需求三：和 agent 抢同一个文件）。
+   *
+   * 两件事：
+   *  1) **自写抑制**：内容指纹与我们刚写入的一致 → 是我们自己的保存，忽略
+   *  2) 内容真变了 → 刷新预览内容与缓存（只读视图立刻看到最新），并把这次
+   *     外部改动标记出去；若用户正在编辑（dirty），保存时会由基线比对报冲突
+   */
+  const handleExternalFileChange = useCallback(
+    async (file: string) => {
+      const current = previewContentRef.current
+      if (!current || !effectiveDirectory) return
+
+      const absChanged = toAbsoluteFilePath(file, effectiveDirectory)
+      const absCurrent = toAbsoluteFilePath(current.path, effectiveDirectory)
+      if (canonicalizePath(absChanged) !== canonicalizePath(absCurrent)) return
+
+      const fresh = await getFileContent(current.path, effectiveDirectory, serverId).catch(() => null)
+      if (!fresh) return
+      const freshHash = hashBytes(fresh.bytes)
+
+      // 自写抑制：是我们刚写下去的内容 → 不是外部改动
+      const last = lastWriteRef.current
+      if (last && last.path === current.path && last.hash === freshHash) return
+      // 内容其实没变（touch / 权限变更等）：无需提示
+      if (current.bytes && hashBytes(current.bytes) === freshHash) return
+
+      const cacheKey = `${serverId ?? ""}::${effectiveDirectory}::${current.path}`
+      previewCacheRef.current.set(cacheKey, fresh)
+      setPreviewContent(fresh)
+      setExternalChange({ path: current.path })
+    },
+    [effectiveDirectory, serverId],
+  )
+
   // 加载文件预览
   const loadPreview = useCallback(
     async (path: string, force = false) => {
@@ -432,6 +478,9 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
   // 自动刷新：文件/分支变更事件 + session idle + SSE 重连（见 useAutoRefresh）
   useAutoRefresh(consumerId, sessionId ?? null, softRefresh, !!effectiveDirectory, {
     watchDirectory: effectiveDirectory,
+    onFilesystemChanged: data => {
+      void handleExternalFileChange(data.file)
+    },
   })
 
   // 初始加载
@@ -490,6 +539,8 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     previewError,
     loadPreview,
     savePreview,
+    externalChange,
+    clearExternalChange: () => setExternalChange(null),
     clearPreview,
     effectiveDirectory,
     fileStatus,

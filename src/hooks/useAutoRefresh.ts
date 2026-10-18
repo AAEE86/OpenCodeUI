@@ -39,6 +39,11 @@ export function useAutoRefresh(
   options?: {
     /** 文件变更事件按此目录过滤（只关心该目录下的改动）；缺省则任何文件变更都触发 */
     watchDirectory?: string
+    /**
+     * 文件真的变了时的回调（已过 .git 内部与 watchDirectory 过滤）。
+     * 用于预览这类"不只是刷新列表"的消费方：例如编辑中的文件被外部改动。
+     */
+    onFilesystemChanged?: (data: { file: string; event: string }) => void
   },
 ): void {
   const refreshRef = useRef(refresh)

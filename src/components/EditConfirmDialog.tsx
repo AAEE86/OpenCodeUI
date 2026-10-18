@@ -1,17 +1,21 @@
 import { useTranslation } from 'react-i18next'
 import { Dialog } from './ui'
-import { DiffViewer, useDiffViewerData } from './DiffViewer'
+import { DiffView } from './DiffView'
 
 // ============================================
 // EditConfirmDialog — 保存 / 放弃改动的二次确认（需求三）
 //
-// 为什么要它：一次误触（点错 ✓ 或 ✕、切错 tab）就会写盘或丢掉改动。
-// 所以写盘前、丢改动前都先让人看一眼 diff，确认键**不做默认聚焦**（Enter 不会
-// 直接落盘），Esc = 取消。保存确认与冲突覆盖共用同一个弹层，只是多一行警告。
+// 为什么不自己画 diff：工具调用卡片里的 `DiffView` 才是项目里 diff 的标准形态
+// —— 自带文件名、+/- 统计、折叠、**全屏**，把它搬进来就不用再维持第二套观感。
+//
+// 误触一次就会写盘或丢改动，所以两条路都要先看一眼 diff；确认键**不做默认
+// 聚焦**（Enter 不会直接落盘），Esc = 取消。
 // ============================================
 
 /** 超过这个体量就不渲染 diff（避免弹层卡死），只给摘要 */
 const MAX_DIFF_CHARS = 200_000
+/** diff 区高度上限：够看，又不至于把动作按钮挤出屏幕 */
+const DIFF_MAX_HEIGHT = 520
 
 export interface EditConfirmDialogProps {
   isOpen: boolean
@@ -43,12 +47,14 @@ export function EditConfirmDialog({
 }: EditConfirmDialogProps) {
   const { t } = useTranslation(['components', 'common'])
   const tooLarge = before.length + after.length > MAX_DIFF_CHARS
-  const diffData = useDiffViewerData(before, after, language, false, isOpen && !tooLarge)
 
-  const title = mode === 'save' ? t('fileExplorer.confirmSaveTitle', { name: fileName }) : t('fileExplorer.confirmDiscardTitle', { name: fileName })
+  const title =
+    mode === 'save'
+      ? t('fileExplorer.confirmSaveTitle', { name: fileName })
+      : t('fileExplorer.confirmDiscardTitle', { name: fileName })
 
   return (
-    <Dialog isOpen={isOpen} onClose={onCancel} title={title} width={720} ariaLabel={title}>
+    <Dialog isOpen={isOpen} onClose={onCancel} title={title} width="min(92vw, 960px)" ariaLabel={title}>
       <div className="flex flex-col gap-3" data-testid="edit-confirm-dialog">
         {mode === 'save' && conflict && (
           <p className="text-[length:var(--fs-sm)] text-danger-100" data-testid="edit-confirm-conflict">
@@ -62,14 +68,14 @@ export function EditConfirmDialog({
         {tooLarge ? (
           <p className="text-[length:var(--fs-xs)] text-text-500">{t('fileExplorer.confirmDiffTooLarge')}</p>
         ) : (
-          <div className="border border-border-200/50 rounded-lg overflow-hidden" data-testid="edit-confirm-diff">
-            <DiffViewer
+          // 与工具卡片同一个组件：头部有文件名 / +/- 统计 / 全屏按钮
+          <div data-testid="edit-confirm-diff">
+            <DiffView
               before={before}
               after={after}
+              filePath={fileName}
               language={language}
-              maxHeight={320}
-              data={diffData}
-              stateKey={`edit-confirm:${mode}:${fileName}`}
+              maxHeight={DIFF_MAX_HEIGHT}
             />
           </div>
         )}

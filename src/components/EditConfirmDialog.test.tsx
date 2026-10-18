@@ -1,13 +1,15 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { EditConfirmDialog } from './EditConfirmDialog'
+import { FullscreenProvider } from '../contexts'
 
 // ============================================
 // 保存 / 放弃的二次确认弹层（需求三 A）
 //
-// 关键契约：写盘前、丢改动前都要先看到 diff；冲突时同一弹层多一行警告并把主
-// 按钮换成「覆盖」；改动过大不渲染 diff；确认键不自动聚焦（Enter 不该直接落盘）。
-// 测试环境 i18n 是英文，所以断言走 testid + 英文按钮名。
+// 它现在包的是工具卡片那套 DiffView（同名 diff 组件），所以顺带继承：
+// 头部显示文件名、+/- 统计、全屏按钮。这里锁住：文件名可见、diff 可见、
+// 冲突时多一行警告且主按钮变「覆盖」、改动过大不渲染 diff、确认键不自动聚焦。
+// 测试环境 i18n 是英文，断言走 testid / 英文按钮名。
 // ============================================
 
 const base = {
@@ -20,26 +22,36 @@ const base = {
   onCancel: vi.fn(),
 }
 
+function renderDialog(props: Partial<React.ComponentProps<typeof EditConfirmDialog>> = {}) {
+  return render(
+    <FullscreenProvider>
+      <EditConfirmDialog {...base} mode="save" {...props} />
+    </FullscreenProvider>,
+  )
+}
+
 describe('EditConfirmDialog', () => {
-  it('保存确认：展示 diff + 两个动作', () => {
-    render(<EditConfirmDialog {...base} mode="save" />)
+  it('保存确认：展示带文件名的 diff + 两个动作', () => {
+    renderDialog()
 
     expect(screen.getByTestId('edit-confirm-dialog')).toBeTruthy()
     expect(screen.getByTestId('edit-confirm-diff')).toBeTruthy()
+    // 文件名出现在 diff 头部（工具卡片同款）
+    expect(screen.getByText('app.ts')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy()
     expect(screen.queryByTestId('edit-confirm-conflict')).toBeNull()
   })
 
   it('冲突保存：多一行警告，主按钮变成「覆盖」', () => {
-    render(<EditConfirmDialog {...base} mode="save" conflict />)
+    renderDialog({ conflict: true })
 
     expect(screen.getByTestId('edit-confirm-conflict')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Overwrite' })).toBeTruthy()
   })
 
   it('放弃改动：按钮是危险色的「放弃」', () => {
-    render(<EditConfirmDialog {...base} mode="discard" />)
+    renderDialog({ mode: 'discard' })
 
     const discard = screen.getByRole('button', { name: 'Discard' })
     expect(discard).toBeTruthy()
@@ -48,13 +60,13 @@ describe('EditConfirmDialog', () => {
 
   it('改动过大：不渲染 diff，只给摘要', () => {
     const huge = 'x'.repeat(150_000)
-    render(<EditConfirmDialog {...base} mode="save" before={huge} after={huge} />)
+    renderDialog({ before: huge, after: huge })
 
     expect(screen.queryByTestId('edit-confirm-diff')).toBeNull()
   })
 
   it('确认键不自动聚焦（Enter 不该直接写盘 / 丢改动）', () => {
-    render(<EditConfirmDialog {...base} mode="save" />)
+    renderDialog()
 
     expect(screen.getByRole('button', { name: 'Save' })).not.toBe(document.activeElement)
   })
@@ -62,7 +74,7 @@ describe('EditConfirmDialog', () => {
   it('确认 / 取消分别回调', () => {
     const onConfirm = vi.fn()
     const onCancel = vi.fn()
-    render(<EditConfirmDialog {...base} mode="save" onConfirm={onConfirm} onCancel={onCancel} />)
+    renderDialog({ onConfirm, onCancel })
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(onConfirm).toHaveBeenCalledTimes(1)

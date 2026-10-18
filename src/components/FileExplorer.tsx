@@ -150,6 +150,8 @@ export const FileExplorer = memo(function FileExplorer({
     previewError,
     loadPreview,
     savePreview,
+    externalChange,
+    clearExternalChange,
     clearPreview,
     effectiveDirectory,
     fileStatus,
@@ -490,6 +492,8 @@ export const FileExplorer = memo(function FileExplorer({
             targetRanges={scopedPreviewFile?.targetRanges}
             content={previewContent}
             onSave={savePreview}
+            externalChange={externalChange}
+            onClearExternalChange={clearExternalChange}
             onReload={async reloadPath => {
               await loadPreview(reloadPath, true)
             }}
@@ -758,6 +762,9 @@ interface FilePreviewProps {
   onSave?: (path: string, text: string, baselineHash?: string, force?: boolean) => Promise<unknown>
   /** 冲突时"重新载入"：绕过缓存从磁盘重读 */
   onReload?: (path: string) => Promise<void> | void
+  /** 正在预览的文件被外部改动过（agent / 别的编辑器） */
+  externalChange?: { path: string } | null
+  onClearExternalChange?: () => void
   isResizing?: boolean
   directory?: string
 }
@@ -777,6 +784,8 @@ function FilePreview({
   onReorderPreview,
   onSave,
   onReload,
+  externalChange,
+  onClearExternalChange,
   isResizing = false,
   directory,
 }: FilePreviewProps) {
@@ -862,6 +871,26 @@ function FilePreview({
     },
     [isDirty],
   )
+
+  /** 外部改动的一次性轻提示（几秒后自己消失，不打断输入） */
+  const [externalNotice, setExternalNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (!externalChange || externalChange.path !== path) return
+    if (isDirty) {
+      // 我在改、磁盘也变了：不覆盖草稿，标成冲突，保存时基线比对会再确认一次
+      setSaveConflict(true)
+      setSaveError(t('fileExplorer.saveConflict'))
+    } else {
+      setExternalNotice(t('fileExplorer.externalUpdated'))
+    }
+    onClearExternalChange?.()
+  }, [externalChange, isDirty, onClearExternalChange, path, t])
+
+  useEffect(() => {
+    if (!externalNotice) return
+    const timer = window.setTimeout(() => setExternalNotice(null), 4000)
+    return () => window.clearTimeout(timer)
+  }, [externalNotice])
 
   // 应用级脏标记（关窗/离开前拦一道）
   useEffect(() => {
@@ -1173,6 +1202,14 @@ function FilePreview({
 
       {/* Preview Content */}
       <div ref={scrollRef} className="flex-1 overflow-auto panel-scrollbar">
+        {externalNotice && (
+          <div
+            className="px-3 py-1 text-[length:var(--fs-xs)] text-text-400 bg-bg-200/30 border-b border-border-200/40"
+            data-testid="preview-external-notice"
+          >
+            {externalNotice}
+          </div>
+        )}
         {isLoading ? (
           <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
             {t('common:loading')}

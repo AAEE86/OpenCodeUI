@@ -362,6 +362,14 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
 
       // ④ 写后重读（既做校验，也让缓存与磁盘一致——顺手修掉"存完切走再切回是旧内容"）
       const saved = await getFileContent(path, effectiveDirectory, serverId)
+
+      // ⑥ 写后校验：磁盘上真的是我们刚写的那些字节吗？
+      //    不一致说明保存被打断，或写完立刻又被并发改了 —— 保留 dirty 让用户重试。
+      if (hashBytes(saved.bytes) !== hashBytes(encoded)) {
+        const verifyError = new Error(t("fileExplorer.saveVerifyFailed")) as Error & { code?: string }
+        verifyError.code = "VERIFY_FAILED"
+        throw verifyError
+      }
       previewCacheRef.current.set(cacheKey, saved)
       setPreviewContent(current => (current?.path === path ? saved : current))
       // 记下"这是我刚写的内容"：后续 filesystem.changed 用内容指纹认出自己的写，

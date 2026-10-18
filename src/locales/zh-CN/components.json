@@ -35,7 +35,9 @@
     "confirmDiscardTitle": "放弃对 {{name}} 的改动？",
     "confirmDiscardHint": "下面是会被丢弃的改动（左＝现在，右＝你的草稿）：",
     "confirmDiffTooLarge": "改动太大，已省略差异预览。",
-    "discardAction": "放弃改动"
+    "discardAction": "放弃改动",
+    "externalUpdated": "文件已在磁盘上更新（已重新载入）",
+    "saveVerifyFailed": "保存后校验不一致：写入可能被打断或已被并发修改，请重试"
   },
   "terminal": {
     "terminal": "终端",

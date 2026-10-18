@@ -35,7 +35,9 @@
     "confirmDiscardTitle": "Discard changes to {{name}}?",
     "confirmDiscardHint": "These changes will be lost (left = current, right = your draft):",
     "confirmDiffTooLarge": "Changes are too large — diff preview omitted.",
-    "discardAction": "Discard"
+    "discardAction": "Discard",
+    "externalUpdated": "The file changed on disk — reloaded",
+    "saveVerifyFailed": "Post-save verification failed: the write may have been interrupted or overwritten. Please retry."
   },
   "terminal": {
     "terminal": "Terminal",

@@ -216,12 +216,15 @@ export async function uploadPathAsAttachment(
 }
 
 /**
- * DataTransferItem 的最小结构（便于单测传假对象）。
+ * 把一次拖入拆成「真文件」和「文件夹」。
  *
  * 为什么要按 entry 判断而不能看 dataTransfer.files：浏览器把拖入的文件夹也塞进
  * files，表现为一个 size 0、type 空的 File —— 直接上传会得到一个空附件，请求还
  * 常被浏览器安全策略挡掉（net::ERR_ACCESS_DENIED）。所以文件夹必须靠
  * webkitGetAsEntry().isDirectory 认出来，也不能用"大小为 0"来猜（空文件是合法的）。
+ *
+ * fallbackFiles 只在**根本没有 items 可用**时兜底（老环境 / 合成事件）。注意不能在
+ * "拣完只剩文件夹"时回退到它 —— 那会把文件夹重新捞回来，正是要拦的东西。
  */
 export interface DroppedItemLike {
   kind: string
@@ -229,7 +232,12 @@ export interface DroppedItemLike {
   getAsFile?: () => File | null
 }
 
-export function splitDroppedItems(items: DroppedItemLike[]): { files: File[]; folderNames: string[] } {
+export function splitDroppedItems(
+  items: DroppedItemLike[],
+  fallbackFiles: File[] = [],
+): { files: File[]; folderNames: string[] } {
+  if (items.length === 0) return { files: fallbackFiles, folderNames: [] }
+
   const files: File[] = []
   const folderNames: string[] = []
   for (const item of items) {

@@ -63,6 +63,10 @@
     "shellMode": "Shell"
   },
   "attachment": {
+    "folderUnsupported": {
+      "title": "暂不支持拖入文件夹",
+      "body": "{{names}} 是文件夹；请拖入文件，或先压缩成 zip 再拖入"
+    },
     "tooLarge": {
       "title": "文件过大：{{name}}",
       "body": "超过单次上传上限 {{max}}，未添加为附件。"

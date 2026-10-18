@@ -1751,9 +1751,12 @@ function InputBoxComponent({
 
       // 原生文件拖拽（从操作系统拖入）
       // 先按 entry 分流：文件夹（浏览器里表现为 size 0 的假 File）必须在上传前拦掉，
-      // 否则会得到一个空附件，请求还会被浏览器安全策略挡掉（ERR_ACCESS_DENIED）
-      const dropped = splitDroppedItems(Array.from(e.dataTransfer.items ?? []))
-      const files = dropped.files.length > 0 ? dropped.files : Array.from(e.dataTransfer.files)
+      // 否则会得到一个空附件，请求还会被浏览器安全策略挡掉（ERR_ACCESS_DENIED）。
+      // 注意兜底只给"没有 items 可用"的环境，不能在拣完只剩文件夹时回退到 files
+      const dropped = splitDroppedItems(
+        Array.from(e.dataTransfer.items ?? []),
+        Array.from(e.dataTransfer.files),
+      )
 
       if (dropped.folderNames.length > 0) {
         notifyAttachmentError(
@@ -1762,9 +1765,9 @@ function InputBoxComponent({
         )
       }
 
-      if (files.length > 0) {
+      if (dropped.files.length > 0) {
         if (Date.now() - lastTauriDropAtRef.current < 750) return
-        void handleFilesSelected(files)
+        void handleFilesSelected(dropped.files)
       }
     },
     [handleFilesSelected, notifyAttachmentError, t],

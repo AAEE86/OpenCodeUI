@@ -237,4 +237,22 @@ describe('splitDroppedItems', () => {
     expect(result.folderNames).toEqual([])
     expect(result.files).toEqual([])
   })
+
+  it('只拖了文件夹时绝不回退到 fallback（否则文件夹又被捞回去上传）', () => {
+    // 浏览器里被拖入的文件夹同时存在于 items 和 files：files 里那个假 File
+    // 正是失败上传的来源（ERR_ACCESS_DENIED），所以有 items 时就不能用它兜底
+    const folderAsFile = new File([], '新建文件夹', { type: '' })
+    const result = splitDroppedItems([folderItem('新建文件夹')], [folderAsFile])
+
+    expect(result.folderNames).toEqual(['新建文件夹'])
+    expect(result.files).toEqual([])
+  })
+
+  it('没有 items 可用时才用 fallback（拿不到 entry 的老环境）', () => {
+    const fallback = new File(['x'], 'a.txt', { type: 'text/plain' })
+    const result = splitDroppedItems([], [fallback])
+
+    expect(result.folderNames).toEqual([])
+    expect(result.files.map(f => f.name)).toEqual(['a.txt'])
+  })
 })

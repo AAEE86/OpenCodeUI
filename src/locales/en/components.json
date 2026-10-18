@@ -216,9 +216,5 @@
   },
   "diffView": {
     "fullscreenView": "Fullscreen"
-  },
-  "attachment": {
-    "folderUnsupported.title": "Folders are not supported",
-    "folderUnsupported.body": "{{names}} is a folder — drop files instead, or zip it first"
   }
 }

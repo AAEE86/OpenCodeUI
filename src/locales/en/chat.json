@@ -63,6 +63,10 @@
     "shellMode": "Shell"
   },
   "attachment": {
+    "folderUnsupported": {
+      "title": "Folders are not supported",
+      "body": "{{names}} is a folder — drop files instead, or zip it first"
+    },
     "tooLarge": {
       "title": "File too large: {{name}}",
       "body": "Exceeds the {{max}} per-upload limit; it was not attached."

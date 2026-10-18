@@ -88,3 +88,71 @@ export function readFileAsDataUrl(file: File): Promise<string> {
     reader.readAsDataURL(file)
   })
 }
+
+// ============================================
+// 附件分发（Issue #182：任意文件上传）
+//
+// `prompt.files[].uri` 只是「让服务端去读这个文件」的通道，**不是**
+// 「让模型看到这个文件」的通道：
+//   - data URL / file:// 都会在服务端被整份读入内存；
+//   - 超过 20MB 直接 AttachmentError（整条 prompt 失败）；
+//   - 嗅探出的 mime 不在 text/image/pdf 白名单时，转 LLM 阶段会被丢弃，
+//     模型只能靠 prompt 文本里的路径去用工具读（见 api/message 的路径引用注入）。
+// 这三条决定了下面的分发规则与体积阈值。
+// ============================================
+
+/**
+ * 服务端读 `files[].uri` 的硬上限：20MB。
+ *
+ * 与 core `SessionPrompt` 的 `MAX_ATTACHMENT_BYTES` 等值，超出会让**整条
+ * prompt 失败**，所以内联与引用都必须卡在这个阈值内。
+ */
+export const MAX_INLINE_BYTES = 20 * 1024 * 1024
+
+/**
+ * 单次上传体积上限。
+ *
+ * 超过上限的文件连上传都不做（避免把服务端临时目录写满）；产品需要更大
+ * 文件时调这里，并同时考虑客户端内存（fetch 方案会把整份文件读进内存）。
+ */
+export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+
+export type AttachmentRoute =
+  /** 原生媒体且未超限：data URL 内联 */
+  | { kind: 'inline' }
+  /** 服务端与本机同机且有原生路径：路径直引，零拷贝（需求二，暂未启用） */
+  | { kind: 'reference'; path: string; pathOnly: boolean }
+  /** 上传到服务端临时目录，返回的绝对路径作为附件 */
+  | { kind: 'upload'; pathOnly: boolean }
+  /** 超过上传上限，拒绝 */
+  | { kind: 'reject'; reason: 'too-large' }
+
+/**
+ * 决定一个文件的附件形态（纯函数，便于单测）。
+ *
+ * `pathOnly` 表示「只把路径写进 prompt 文本、不进 `prompt.files[]`」——
+ * 体积超过服务端 20MB 硬上限时唯一还能让模型拿到文件的方式。
+ */
+export function routeAttachment(input: {
+  mime: string
+  size: number
+  caps: FileCapabilities
+  /** 服务端是否与客户端同机（决定本机路径能否直引） */
+  serverIsLocal: boolean
+  /** 本机原生路径，仅桌面端可能拿到 */
+  nativePath?: string
+}): AttachmentRoute {
+  if (isFileSupported(input.mime, input.caps) && input.size <= MAX_INLINE_BYTES) {
+    return { kind: 'inline' }
+  }
+
+  if (input.nativePath && input.serverIsLocal) {
+    return { kind: 'reference', path: input.nativePath, pathOnly: input.size > MAX_INLINE_BYTES }
+  }
+
+  if (input.size > MAX_UPLOAD_BYTES) {
+    return { kind: 'reject', reason: 'too-large' }
+  }
+
+  return { kind: 'upload', pathOnly: input.size > MAX_INLINE_BYTES }
+}

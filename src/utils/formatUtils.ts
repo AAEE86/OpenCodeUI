@@ -97,3 +97,19 @@ export function formatNumber(num: number): string {
   if (num >= 1000) return (num / 1000).toFixed(1) + 'k'
   return num.toString()
 }
+
+/** Format a byte count for display: 1536 → "1.5 KB"（单位通用，不做本地化） */
+export function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes / 1024
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+
+  return `${value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[unitIndex]}`
+}

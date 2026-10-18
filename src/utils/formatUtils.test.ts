@@ -4,6 +4,7 @@ import {
   formatDateTime,
   formatDetailedDateTime,
   formatDuration,
+  formatFileSize,
   formatProcessDuration,
   formatTime,
 } from './formatUtils'
@@ -68,5 +69,25 @@ describe('completed time formatting', () => {
     const ms = new Date(2026, 3, 17, 10, 30, 45).getTime()
     expect(formatCompletedAt(ms, 'time')).toBe('10:30')
     expect(formatCompletedAt(ms, 'dateTime')).toBe('2026-04-17 10:30')
+  })
+})
+
+describe('formatFileSize', () => {
+  it('formats bytes, kilobytes and megabytes', () => {
+    expect(formatFileSize(0)).toBe('0 B')
+    expect(formatFileSize(999)).toBe('999 B')
+    expect(formatFileSize(1536)).toBe('1.5 KB')
+    expect(formatFileSize(20 * 1024 * 1024)).toBe('20 MB')
+    expect(formatFileSize(200 * 1024 * 1024)).toBe('200 MB')
+  })
+
+  it('keeps two significant shapes under 10 and rounds above', () => {
+    expect(formatFileSize(1024)).toBe('1.0 KB')
+    expect(formatFileSize(1024 * 1024 * 1024)).toBe('1.0 GB')
+  })
+
+  it('returns empty string for invalid input', () => {
+    expect(formatFileSize(Number.NaN)).toBe('')
+    expect(formatFileSize(-1)).toBe('')
   })
 })

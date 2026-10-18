@@ -35,6 +35,20 @@ export interface Attachment {
   mime?: string // MIME 类型
   relativePath?: string // 相对路径（用于显示和 source.path）
 
+  // 服务端上传附件（Issue #182）
+  /** 原始字节数，用于展示 */
+  size?: number
+  /**
+   * 只作路径引用、**不进** `prompt.files[]`。
+   *
+   * 服务端读 `files[].uri` 时有 20MB 硬上限，超限会让整条 prompt 失败
+   * （core `SessionPrompt.readFileAttachment` 的 `MAX_ATTACHMENT_BYTES`）。
+   * 超过该阈值的附件只把路径写进 prompt 文本，交给模型用工具访问。
+   */
+  pathOnly?: boolean
+  /** 上传生命周期（仅输入框内的临时态） */
+  uploadStatus?: 'uploading' | 'failed'
+
   // 文件内容（从 synthetic text part 获取）
   content?: string // 文件内容预览
 

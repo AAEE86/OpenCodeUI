@@ -191,6 +191,102 @@ export async function writeFileBytes(
   await sdk.file.write({ path, payload, location: locationParam(directory, serverId) })
 }
 
+// ============================================
+// 附件上传（Issue #182：拖入任意文件 → 服务端临时目录 → 路径附件）
+//
+// `fs.write` 是 experimental 且**不受 location 限制**：它能写到任意绝对
+// 路径、自动建父目录。附件上传是它唯一的新业务调用点，因此全部收口在本文件。
+// ============================================
+
+/** 服务端临时目录（`server.info().paths.tmp`）按 serverId 缓存 */
+const serverTmpDirectoryCache = new Map<string, string>()
+
+/**
+ * 取服务端的临时目录绝对路径。
+ *
+ * 这是官方钦定的附件落点：core 的内置指令让模型优先使用它，默认 agent
+ * 权限里 `<tmp>/*` 也是 allow（通配符跨目录分隔符）——因此模型读上传
+ * 文件不会弹外部目录批准框。
+ */
+export async function getServerTmpDirectory(serverId?: string): Promise<string> {
+  const cacheKey = serverId ?? serverStore.getActiveServerId()
+  const cached = serverTmpDirectoryCache.get(cacheKey)
+  if (cached) return cached
+
+  const sdk = getSDKClient(serverId)
+  const info = await sdk.server.info()
+  const tmp = info.paths?.tmp
+  if (!tmp) throw new Error('Server did not report a temporary directory')
+
+  serverTmpDirectoryCache.set(cacheKey, tmp)
+  return tmp
+}
+
+/** 清理临时目录缓存（服务器切换 / 单测） */
+export function clearServerTmpDirectoryCache(): void {
+  serverTmpDirectoryCache.clear()
+}
+
+/**
+ * 生成上传目录名。
+ *
+ * `crypto.randomUUID` 只在安全上下文可用，而本应用可能被局域网 http
+ * （`http://192.168.x.x`）访问，此时它是 undefined → 必须有兜底。
+ */
+export function createUploadId(): string {
+  const cryptoApi = globalThis.crypto
+  if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+    try {
+      return cryptoApi.randomUUID()
+    } catch {
+      // 非安全上下文：走下面的兜底
+    }
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+/** 只保留最后一段文件名，去掉路径分隔符与各平台保留字符 */
+function sanitizeUploadFilename(filename: string): string {
+  const base = filename.split(/[/\\]/).pop() ?? ''
+  // 先剔除控制字符（避免正则里的控制字符类），再替换各平台保留字符
+  const printable = Array.from(base)
+    .filter(char => char.charCodeAt(0) > 31)
+    .join('')
+  const cleaned = printable.replace(/[<>:"|?*]/g, '_').trim()
+  return cleaned || 'file'
+}
+
+/**
+ * 上传附件到服务端临时目录，返回**服务端上的绝对路径**与字节数。
+ *
+ * 用响应的 `data.path`，不要用自己拼的路径：服务端会规范化分隔符
+ * （Windows 路径尤其重要）。每次上传单独一层 uuid 目录，避免同名覆盖。
+ */
+export async function uploadAttachment(
+  payload: File | Uint8Array,
+  filename: string,
+  directory?: string,
+  serverId?: string,
+): Promise<{ path: string; size: number }> {
+  // ArrayBuffer.isView 是跨 realm 安全的 brand check（`instanceof Uint8Array`
+  // 在跨 window/worker 传进来的 typed array 上会失手）
+  const bytes = ArrayBuffer.isView(payload)
+    ? new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength)
+    : new Uint8Array(await payload.arrayBuffer())
+  const tmp = await getServerTmpDirectory(serverId)
+  const target = `${tmp.replace(/[/\\]+$/, '')}/uploads/${createUploadId()}/${sanitizeUploadFilename(filename)}`
+
+  const sdk = getSDKClient(serverId)
+  const result = await sdk.file.write({
+    path: target,
+    payload: bytes,
+    location: locationParam(directory, serverId),
+  })
+
+  const resolved = result?.data?.path
+  return { path: resolved || target, size: bytes.byteLength }
+}
+
 /**
  * 获取文件的版本控制状态。
  *

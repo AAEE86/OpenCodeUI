@@ -97,14 +97,19 @@ describe('MarkdownRenderer', () => {
     expect(codeEl.tagName).toBe('CODE')
   })
 
-  it('renders inline code with accent text styling (no border/bg)', () => {
+  it('renders inline code as a muted monospace chip (no accent color)', () => {
     render(<MarkdownRenderer content={'Use `code` here'} />)
 
     const codeEl = screen.getByText('code')
-    expect(codeEl.className).not.toMatch(/border/)
-    expect(codeEl.className).not.toMatch(/bg-accent-main/)
+    // 传统样式：等宽 + 淡底色 chip；颜色继承正文（不自己指定，免得比正文亮）
     expect(codeEl.className).toMatch(/font-mono/)
-    expect(codeEl.className).toMatch(/text-accent-main-100/)
+    expect(codeEl.className).not.toMatch(/text-text-\d/)
+    // 底色必须是前景色叠加（背景色阶在各主题下会和页面底色糊在一起）
+    expect(codeEl.className).toMatch(/bg-text-100\/\d+/)
+    expect(codeEl.className).not.toMatch(/bg-bg-200/)
+    expect(codeEl.className).toMatch(/rounded/)
+    expect(codeEl.className).not.toMatch(/text-accent-main/)
+    expect(codeEl.className).not.toMatch(/border/)
   })
 
   it('renders inline code inside list items as code elements', () => {
@@ -114,7 +119,7 @@ describe('MarkdownRenderer', () => {
     expect(codeEl).toBeInTheDocument()
     expect(codeEl).toHaveTextContent('单行代码')
     expect(codeEl).toHaveClass('font-mono')
-    expect(codeEl).toHaveClass('text-accent-main-100')
+    expect(codeEl).toHaveClass('bg-text-100/15')
   })
 
   it('keeps inline emphasis styles on the markdown path', () => {

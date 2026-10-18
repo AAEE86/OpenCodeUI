@@ -391,9 +391,14 @@ function createMarkdownHtmlRenderer(isReasoning: boolean, renderHtml: boolean) {
   }
 
   renderer.codespan = ({ text }) => {
-    const className = isReasoning
-      ? 'font-mono text-accent-main-100 text-[0.9em] align-baseline break-words'
-      : 'text-accent-main-100 text-[0.9em] font-mono align-baseline break-words'
+    // 传统样式：等宽 + 淡底色 chip，**文字颜色继承正文**。
+    // 区分靠等宽和底色，不靠颜色 —— 之前用主题色、后来用 text-100 都比正文
+    // （text-200）亮，看起来像被"特意强调"；继承还有个好处：reasoning 里正文
+    // 变暗时它会自动跟着变暗。
+    // 底色用**前景色叠加**而不是 bg-200 那类背景色阶：背景色阶和页面底色只差
+    // 一档，各主题下都糊在一起；前景色叠加在深浅主题里都自然有对比。
+    const className =
+      'font-mono text-[0.9em] align-baseline break-words bg-text-100/15 rounded px-[0.35em] py-[0.1em]'
     return `<code class="${className}">${escapeHtml(text)}</code>`
   }
 

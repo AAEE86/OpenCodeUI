@@ -695,7 +695,18 @@ function renderInlineTokensToReact(tokens: unknown[], _isReasoning: boolean): Re
     if (item.type === 'del') {
       return <del key={index} className={_isReasoning ? 'text-text-500 line-through decoration-text-500/50' : 'text-text-400 line-through decoration-text-400/50'}>{renderInlineTokensToReact((item.tokens as unknown[]) ?? [], _isReasoning)}</del>
     }
-    if (item.type === 'codespan') return <code key={index} className={_isReasoning ? 'font-mono text-accent-main-100 text-[0.9em] align-baseline break-words' : 'text-accent-main-100 text-[0.9em] font-mono align-baseline break-words'}>{String(item.text ?? '')}</code>
+    if (item.type === 'codespan') {
+      // 与 markdownHtmlRenderer 的 codespan 保持一致：等宽 + 淡底色 chip，
+      // 颜色继承正文（不自己指定，免得比正文亮，也不抢主题色）
+      return (
+        <code
+          key={index}
+          className="font-mono text-[0.9em] align-baseline break-words bg-text-100/15 rounded px-[0.35em] py-[0.1em]"
+        >
+          {String(item.text ?? '')}
+        </code>
+      )
+    }
     if (item.type === 'link') {
       const href = typeof item.href === 'string' ? item.href : undefined
       if (isUnsafeHrefInline(href)) return <span key={index}>{renderInlineTokensToReact((item.tokens as unknown[]) ?? [], _isReasoning)} [blocked]</span>

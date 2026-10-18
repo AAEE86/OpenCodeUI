@@ -12,8 +12,9 @@
 // ============================================
 
 import { createUploadId, uploadAttachment } from '../../../api/file'
-import { getMimeFromPath } from './inputUtils'
+import { getMimeFromPath, routeAttachment } from './inputUtils'
 import { toFileUrl } from '../../mention'
+import type { FileCapabilities } from '../../../api'
 import type { Attachment } from '../../attachment'
 
 export type UploadFailureReason = 'network' | 'unauthorized' | 'server' | 'unknown'
@@ -78,6 +79,44 @@ export function buildPathAttachment(input: {
     relativePath: input.path,
     size: input.size,
     ...(input.pathOnly ? { pathOnly: true } : {}),
+  }
+}
+
+export type NativeFileDecision =
+  /** 原生媒体：读本机字节内联成 data URL（浏览器/桌面都走这条） */
+  | { kind: 'inline' }
+  /** 服务端同机：交给原有的 `@` 引用，**不上传**（需求二） */
+  | { kind: 'mention' }
+  /** 服务端在远端：必须上传 */
+  | { kind: 'upload'; pathOnly: boolean }
+  /** 超过上传上限 */
+  | { kind: 'reject' }
+
+/**
+ * 桌面端拖入的**本机文件**该走哪条路。
+ *
+ * 桌面端拿得到真实路径（`getDroppedPathsInfo`），所以与服务端同机时可以不
+ * 上传：原生媒体内联，其余沿用原有的 `@` 引用（服务端自己读得到那个路径）。
+ * 服务端在远端时本机路径对它没有意义，只能上传。
+ */
+export function decideNativeFileRoute(input: {
+  mime: string
+  size: number
+  caps: FileCapabilities
+  serverIsLocal: boolean
+  nativePath: string
+}): NativeFileDecision {
+  const route = routeAttachment(input)
+
+  switch (route.kind) {
+    case 'inline':
+      return { kind: 'inline' }
+    case 'reference':
+      return { kind: 'mention' }
+    case 'reject':
+      return { kind: 'reject' }
+    default:
+      return { kind: 'upload', pathOnly: route.pathOnly }
   }
 }
 

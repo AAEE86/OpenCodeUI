@@ -593,3 +593,57 @@ describe('serverStore health check', () => {
     expect(serverStore.getHealth('local')?.status).toBe('online')
   })
 })
+
+// ============================================
+// 服务端是否与客户端同机（需求二：本机实例不走附件上传）
+// ============================================
+
+describe('isLocalServerHost', () => {
+  it('只认回环地址', async () => {
+    const { isLocalServerHost } = await import('./serverStore')
+
+    expect(isLocalServerHost('http://localhost:4096')).toBe(true)
+    expect(isLocalServerHost('http://127.0.0.1:49374')).toBe(true)
+    // IPv6 的 hostname 带方括号，只写 '::1' 会漏判
+    expect(isLocalServerHost('http://[::1]:4096')).toBe(true)
+    expect(isLocalServerHost('https://LOCALHOST:8443')).toBe(true)
+
+    expect(isLocalServerHost('http://192.168.1.20:4096')).toBe(false)
+    expect(isLocalServerHost('http://10.0.0.5:4096')).toBe(false)
+    expect(isLocalServerHost('https://opencode.example.com')).toBe(false)
+    expect(isLocalServerHost(undefined)).toBe(false)
+    expect(isLocalServerHost('not a url')).toBe(false)
+  })
+})
+
+describe('serverStore.isLocalServer', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    localStorage.clear()
+    sessionStorage.clear()
+  })
+
+  it('内置 local 与 WSL 之外的判断规则', async () => {
+    const { serverStore, LOCAL_SERVER_ID, WSL_SERVER_PREFIX } = await import('./serverStore')
+
+    // 内置 local：由本应用/侧车在本机拉起
+    expect(serverStore.isLocalServer(LOCAL_SERVER_ID)).toBe(true)
+    // 缺省用活动服务器（默认就是 local）
+    expect(serverStore.isLocalServer()).toBe(true)
+    // WSL：网络上是独立主机，保守按“非同机”处理
+    expect(serverStore.isLocalServer(`${WSL_SERVER_PREFIX}ubuntu`)).toBe(false)
+  })
+
+  it('手动添加的服务器按 URL 的 host 判断', async () => {
+    const { serverStore } = await import('./serverStore')
+
+    const loopback = serverStore.addServer({ name: '本机', url: 'http://127.0.0.1:49374' })
+    expect(serverStore.isLocalServer(loopback.id)).toBe(true)
+
+    const laptop = serverStore.addServer({ name: '局域网', url: 'http://192.168.1.20:4096' })
+    expect(serverStore.isLocalServer(laptop.id)).toBe(false)
+
+    // 未知 id 不抛错，按非同机处理
+    expect(serverStore.isLocalServer('server-does-not-exist')).toBe(false)
+  })
+})

@@ -33,9 +33,10 @@ import {
   routeAttachment,
 } from './input/inputUtils'
 import { formatFileSize } from '../../utils/formatUtils'
-import { uploadBytesAsAttachment, uploadFileAsAttachment, type UploadFailure } from './input/attachmentUpload'
+import { uploadBytesAsAttachment, uploadFileAsAttachment, decideNativeFileRoute, type UploadFailure } from './input/attachmentUpload'
 import { createUploadId } from '../../api/file'
 import { notificationStore } from '../../store/notificationStore'
+import { serverStore } from '../../store/serverStore'
 import { sessionKeyToServerId } from '../../utils/sessionKey'
 import { keybindingStore, matchesKeybinding } from '../../store/keybindingStore'
 import { themeStore } from '../../store/themeStore'
@@ -275,6 +276,15 @@ function InputBoxComponent({
     }),
     [rootPath, serverIdProp, sessionId],
   )
+
+  /**
+   * 服务端是否与客户端同机（需求二）。
+   *
+   * 同机时**不走上传**：桌面端拖入的文件直接沿用原有的引用方式
+   * （原生媒体内联；其余退化成 `@` 引用，服务端自己能读到那个路径）。
+   * 浏览器里永远拿不到真实路径，所以同机也照旧上传（issue #182 的主场景）。
+   */
+  const serverIsLocal = useMemo(() => serverStore.isLocalServer(uploadTarget.serverId), [uploadTarget.serverId])
 
   /** 在途上传（id → 完成信号）。发送前必须清空，避免把半个附件发出去 */
   const pendingUploadsRef = useRef(new Map<string, Promise<void>>())
@@ -1213,8 +1223,9 @@ function InputBoxComponent({
         const file = ensureFileMime(rawFile)
         const mime = file.type || getMimeFromPath(file.name) || 'application/octet-stream'
 
-        // serverIsLocal 暂固定 false：本机直引（需求二）尚未启用，一律走上传
-        const route = routeAttachment({ mime, size: file.size, caps: fileCaps, serverIsLocal: false })
+        // 浏览器里永远拿不到文件的真实路径（安全边界），所以即使服务端在本机
+        // 也只能上传——references 需要 nativePath，这里不传自然落到 upload。
+        const route = routeAttachment({ mime, size: file.size, caps: fileCaps, serverIsLocal })
 
         if (route.kind === 'inline') {
           try {
@@ -1253,7 +1264,7 @@ function InputBoxComponent({
         setAttachments(prev => [...prev, ...nextAttachments])
       }
     },
-    [fileCaps, notifyAttachmentError, startAttachmentUpload, t],
+    [fileCaps, notifyAttachmentError, serverIsLocal, startAttachmentUpload, t],
   )
 
   // 删除附件
@@ -1435,10 +1446,27 @@ function InputBoxComponent({
       const name = fileInfo.name || getFileName(fileInfo.path)
       const mime = getMimeFromPath(fileInfo.path)
 
+      const rejectTooLarge = () => {
+        notifyAttachmentError(
+          t('attachment.tooLarge.title', { name }),
+          t('attachment.tooLarge.body', { max: formatFileSize(MAX_UPLOAD_BYTES) }),
+        )
+        return 'skip' as const
+      }
+
+      const inlineAttachment = (bytes: Uint8Array, byteLength: number): Attachment => ({
+        id: crypto.randomUUID(),
+        type: 'file',
+        displayName: name,
+        url: bytesToDataUrl(bytes, mime),
+        mime,
+        size: byteLength,
+      })
+
       try {
         const { readFile, stat } = await import('@tauri-apps/plugin-fs')
 
-        // 先探大小：超过上传上限就不必把整份文件读进内存
+        // 先探大小：内联判定与上传上限都要它，也避免把超大文件读进内存
         let size = -1
         try {
           const info = await stat(fileInfo.path)
@@ -1447,37 +1475,30 @@ function InputBoxComponent({
           size = -1
         }
 
-        if (size > MAX_UPLOAD_BYTES) {
-          notifyAttachmentError(
-            t('attachment.tooLarge.title', { name }),
-            t('attachment.tooLarge.body', { max: formatFileSize(MAX_UPLOAD_BYTES) }),
-          )
-          return 'skip'
+        const decideRoute = (byteLength: number) =>
+          decideNativeFileRoute({
+            mime,
+            size: byteLength,
+            caps: fileCaps,
+            serverIsLocal,
+            nativePath: fileInfo.path,
+          })
+
+        if (size >= 0) {
+          const route = decideRoute(size)
+          // 'mention' = 服务端同机且不满足内联条件 → 交回调用方退化成 @ 引用（原行为）
+          if (route.kind === 'mention') return null
+          if (route.kind === 'reject') return rejectTooLarge()
+          if (route.kind === 'inline') return inlineAttachment(await readFile(fileInfo.path), size)
         }
 
         const bytes = await readFile(fileInfo.path)
         size = size >= 0 ? size : bytes.byteLength
 
-        const route = routeAttachment({ mime, size, caps: fileCaps, serverIsLocal: false })
-
-        if (route.kind === 'reject') {
-          notifyAttachmentError(
-            t('attachment.tooLarge.title', { name }),
-            t('attachment.tooLarge.body', { max: formatFileSize(MAX_UPLOAD_BYTES) }),
-          )
-          return 'skip'
-        }
-
-        if (route.kind === 'inline') {
-          return {
-            id: crypto.randomUUID(),
-            type: 'file',
-            displayName: name,
-            url: bytesToDataUrl(bytes, mime),
-            mime,
-            size,
-          }
-        }
+        const route = decideRoute(size)
+        if (route.kind === 'mention') return null
+        if (route.kind === 'reject') return rejectTooLarge()
+        if (route.kind === 'inline') return inlineAttachment(bytes, size)
 
         const { attachment, failure } = await uploadBytesAsAttachment(bytes, name, mime, {
           ...uploadTarget,
@@ -1496,7 +1517,7 @@ function InputBoxComponent({
         return null
       }
     },
-    [fileCaps, notifyAttachmentError, t, uploadFailureBody, uploadTarget],
+    [fileCaps, notifyAttachmentError, serverIsLocal, t, uploadFailureBody, uploadTarget],
   )
 
   const handleTauriExternalDrop = useCallback(

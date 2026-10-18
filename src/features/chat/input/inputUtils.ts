@@ -120,7 +120,10 @@ export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 export type AttachmentRoute =
   /** 原生媒体且未超限：data URL 内联 */
   | { kind: 'inline' }
-  /** 服务端与本机同机且有原生路径：路径直引，零拷贝（需求二，暂未启用） */
+  /**
+   * 服务端与客户端同机、且拿得到原生路径：**不走上传**，沿用本机引用方式
+   * （当前实现：交给 `@` 引用，服务端自己读得到那个路径）。
+   */
   | { kind: 'reference'; path: string; pathOnly: boolean }
   /** 上传到服务端临时目录，返回的绝对路径作为附件 */
   | { kind: 'upload'; pathOnly: boolean }

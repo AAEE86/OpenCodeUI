@@ -87,6 +87,24 @@ export function normalizeConnectableUrl(url: string): string {
     .replace(/^https:\/\/\[::\]:/i, 'https://[::1]:')
 }
 
+/**
+ * 服务端地址是否指向本机回环（决定桌面端拖入的文件能否直接引用本机路径）。
+ *
+ * 注意 IPv6 的 `hostname` **带方括号**（`new URL('http://[::1]:4096').hostname === '[::1]'`），
+ * 所以不能只判 `::1`。`0.0.0.0` / `[::]` 这类绑定地址已由
+ * `normalizeConnectableUrl` 归一化成回环。
+ */
+export function isLocalServerHost(url: string | undefined): boolean {
+  if (!url) return false
+  try {
+    const { hostname } = new URL(url)
+    const host = hostname.toLowerCase()
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]'
+  } catch {
+    return false
+  }
+}
+
 function normalizeConnectionError(err: unknown): string {  if (err instanceof DOMException && err.name === 'AbortError') return 'Connection timed out'
   if (!(err instanceof Error)) return 'Connection failed'
 
@@ -378,6 +396,28 @@ class ServerStore {
 
   isActiveLocalServer(): boolean {
     return this.getActiveServerId() === this.DEFAULT_SERVER_ID
+  }
+
+  /**
+   * 服务端是否与客户端**同机**（决定桌面端拖入的文件能否直接引用本机路径，
+   * 而不必先上传到服务端）。
+   *
+   * - 内置 `local`（由本应用/侧车在本机拉起）：同机。
+   * - `wsl:` 实例：保守判否——WSL 跑在独立网络命名空间里，仅凭 Windows 侧
+   *   的 URL 判不出同机性，且路径要 `/mnt/c/...` 映射，宁可上传。
+   * - 用户手动添加的服务器：按 URL 的 host 判（`localhost` / `127.0.0.1` /
+   *   `[::1]`）。
+   *
+   * ⚠️ 已知边界：容器端口转发到回环（Docker `-p 127.0.0.1:4096`）会被判成同机，
+   * 但服务端进程在容器里读不到宿主路径。调用方需要能容忍这一点（失败时退化
+   * 为上传/引用，不要让它变成"消息发不出去"）。
+   */
+  isLocalServer(serverId?: string): boolean {
+    const id = serverId ?? this.getActiveServerId()
+    if (id === this.DEFAULT_SERVER_ID) return true
+    if (id.startsWith(WSL_SERVER_PREFIX)) return false
+
+    return isLocalServerHost(this.getServer(id)?.url)
   }
 
   /**

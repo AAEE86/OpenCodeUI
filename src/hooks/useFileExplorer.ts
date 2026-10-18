@@ -5,12 +5,13 @@
 
 import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
-import { listDirectory, getFileContent, getFileStatus, getSessionDiff, getVcsDiff } from '../api'
+import { listDirectory, getFileContent, getFileStatus, getSessionDiff, getVcsDiff, writeFileBytes } from '../api'
 import type { FileNode, FileContent, FileStatusItem, FileDiff } from '../api/types'
 import { useSessionChangeScope } from '../store/changeScopeStore'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { useAutoRefresh } from './useAutoRefresh'
 import { fileBaseName, toAbsoluteFilePath } from '../utils/pathUtils'
+import { encodeTextPreservingFormat, hashBytes, MixedLineEndingsError } from '../utils/textEncoding'
 
 /**
  * 文件树节点。
@@ -63,7 +64,9 @@ export interface UseFileExplorerResult {
   previewContent: FileContent | null
   previewLoading: boolean
   previewError: string | null
-  loadPreview: (path: string) => Promise<void>
+  loadPreview: (path: string, force?: boolean) => Promise<void>
+  /** 保存编辑中的文件（需求三）：基线比对 → 保真编码 → 写 → 写后重读并更新缓存 */
+  savePreview: (path: string, text: string, baselineHash?: string, force?: boolean) => Promise<FileContent>
   clearPreview: () => void
 
   /** 实际生效的目录（session 目录优先于传入目录）；预览按此作用域分键 */
@@ -302,9 +305,53 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     })
   }, [updateExpandedPaths])
 
+  /**
+   * 保存编辑中的文件（需求三：保存事务）。
+   *
+   * 服务端的 `fs.write` 没有 If-Match / 版本号（协议里只有 path + 裸字节），
+   * 所以乐观并发只能自己做：**保存前重读磁盘**，与编辑开始时的基线指纹比对。
+   * 不一致且未 force → 抛 `code: 'STALE_REVISION'`，由 UI 弹"重新载入 / 覆盖"。
+   *
+   * 写回时按原文保真（行尾 / BOM）；混合行尾原文直接拒绝（写出去必然整文件 diff）。
+   */
+  const savePreview = useCallback(
+    async (path: string, text: string, baselineHash?: string, force = false): Promise<FileContent> => {
+      if (!effectiveDirectory) throw new Error('No workspace is available')
+      const cacheKey = `${serverId ?? ''}::${effectiveDirectory}::${path}`
+      const baseline = previewCacheRef.current.get(cacheKey)
+
+      // ① 条件校验
+      const disk = await getFileContent(path, effectiveDirectory, serverId)
+      if (!force && baselineHash && hashBytes(disk.bytes) !== baselineHash) {
+        const conflict = new Error(t('fileExplorer.saveConflict')) as Error & { code?: string }
+        conflict.code = 'STALE_REVISION'
+        throw conflict
+      }
+
+      // ② 保真编码
+      let encoded: Uint8Array
+      try {
+        encoded = encodeTextPreservingFormat(baseline?.bytes ?? disk.bytes, text)
+      } catch (error) {
+        if (error instanceof MixedLineEndingsError) throw new Error(t('fileExplorer.mixedLineEndings'))
+        throw error
+      }
+
+      // ③ 写入
+      await writeFileBytes(path, encoded, effectiveDirectory, serverId)
+
+      // ④ 写后重读（既做校验，也让缓存与磁盘一致——顺手修掉"存完切走再切回是旧内容"）
+      const saved = await getFileContent(path, effectiveDirectory, serverId)
+      previewCacheRef.current.set(cacheKey, saved)
+      setPreviewContent(current => (current?.path === path ? saved : current))
+      return saved
+    },
+    [effectiveDirectory, serverId, t],
+  )
+
   // 加载文件预览
   const loadPreview = useCallback(
-    async (path: string) => {
+    async (path: string, force = false) => {
       if (!effectiveDirectory) return
 
       const loadId = ++previewLoadIdRef.current
@@ -315,7 +362,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
       // 缓存键必须带服务器+目录维度：相对路径在不同工作区会撞名（两边都有
       // src/app.ts），只按 path 缓存会在切工作区后预览到上一个工作区的同名文件
       const cacheKey = `${serverId ?? ''}::${effectiveDirectory}::${path}`
-      const cached = previewCacheRef.current.get(cacheKey)
+      const cached = force ? undefined : previewCacheRef.current.get(cacheKey)
       if (cached) {
         if (loadId === previewLoadIdRef.current) {
           setPreviewContent(cached)
@@ -426,6 +473,7 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     previewLoading,
     previewError,
     loadPreview,
+    savePreview,
     clearPreview,
     effectiveDirectory,
     fileStatus,

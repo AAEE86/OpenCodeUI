@@ -22,7 +22,12 @@
     "revealInExplorer": "在资源管理器中显示",
     "revealInFinder": "在 Finder 中显示",
     "revealInFileManager": "在文件管理器中显示",
-    "previewEditNotice": "可编辑预览（保存功能开发中，改动暂不会写入文件）"
+    "saveFailed": "保存失败",
+    "saveConflict": "文件已在磁盘上被修改",
+    "discardUnsaved": "有未保存的改动，确定放弃吗？",
+    "reload": "重新载入",
+    "overwrite": "覆盖磁盘",
+    "mixedLineEndings": "该文件是混合行尾（CRLF 与 LF 混用），保存会产生整文件 diff，已拒绝"
   },
   "terminal": {
     "terminal": "终端",

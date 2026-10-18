@@ -19,8 +19,12 @@ import {
   MaximizeIcon,
   SearchIcon,
   CloseIcon,
+  PencilIcon,
+  CheckIcon,
 } from './Icons'
 import { CodePreview } from './CodePreview'
+import { setFileEditorDirty } from '../store/unsavedFileStore'
+import { hashBytes } from '../utils/textEncoding'
 import { HtmlFilePreviewFrame } from './HtmlFilePreviewFrame'
 import { PreviewTabsBar, type PreviewTabsBarItem } from './PreviewTabsBar'
 import { MarkdownRenderer } from './MarkdownRenderer'
@@ -144,6 +148,7 @@ export const FileExplorer = memo(function FileExplorer({
     previewLoading,
     previewError,
     loadPreview,
+    savePreview,
     clearPreview,
     effectiveDirectory,
     fileStatus,
@@ -483,6 +488,10 @@ export const FileExplorer = memo(function FileExplorer({
             targetKey={scopedPreviewFile?.targetKey}
             targetRanges={scopedPreviewFile?.targetRanges}
             content={previewContent}
+            onSave={savePreview}
+            onReload={async reloadPath => {
+              await loadPreview(reloadPath, true)
+            }}
             isLoading={previewLoading}
             error={previewError}
             onClose={handleClosePreview}
@@ -744,6 +753,10 @@ interface FilePreviewProps {
   onActivatePreview: (path: string) => void
   onClosePreview: (path: string) => void
   onReorderPreview: (draggedPath: string, targetPath: string) => void
+  /** 保存（需求三：基线比对 + 保真写回）；未提供则不可编辑保存 */
+  onSave?: (path: string, text: string, baselineHash?: string, force?: boolean) => Promise<unknown>
+  /** 冲突时"重新载入"：绕过缓存从磁盘重读 */
+  onReload?: (path: string) => Promise<void> | void
   isResizing?: boolean
   directory?: string
 }
@@ -761,19 +774,96 @@ function FilePreview({
   onActivatePreview,
   onClosePreview,
   onReorderPreview,
+  onSave,
+  onReload,
   isResizing = false,
   directory,
 }: FilePreviewProps) {
   const { t } = useTranslation(['components', 'common'])
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  /**
-   * 编辑草稿（需求三 P2.1）：按路径暂存，切 tab 不丢。
-   *
-   * P2.2 的保存事务接入后，这里会换成带基线/脏标记/diff 决策的编辑会话。
-   */
-  const [drafts, setDrafts] = useState<Map<string, string>>(() => new Map())
-  const activeDraft = path ? drafts.get(path) : undefined
+  // ============================================
+  // 编辑模式（需求三，交互对齐 PiUI）
+  //
+  // 显式进入编辑态：铅笔 → ✓ 保存 / ✕ 取消。dirty = 草稿与磁盘内容不同；
+  // 保存失败在内容区顶部给横幅，冲突（STALE_REVISION）额外给"重新载入 / 覆盖"。
+  // ============================================
+  const [isEditing, setIsEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveConflict, setSaveConflict] = useState(false)
+  /** 进入编辑时的基线指纹：保存前用它判断磁盘是否被别人改过 */
+  const [baselineHash, setBaselineHash] = useState<string | undefined>()
+
+  const originalText = content && !content.isBinary ? content.content : ''
+
+  const beginEditing = useCallback(() => {
+    if (!content || content.isBinary) return
+    setDraft(content.content)
+    setSaveError(null)
+    setSaveConflict(false)
+    setBaselineHash(content.bytes ? hashBytes(content.bytes) : undefined)
+    setIsEditing(true)
+  }, [content])
+
+  const cancelEditing = useCallback(() => {
+    setIsEditing(false)
+    setDraft('')
+    setSaveError(null)
+    setSaveConflict(false)
+  }, [])
+
+  const saveEditing = useCallback(
+    async (force = false) => {
+      if (!path || isSaving || !onSave) return
+      setIsSaving(true)
+      setSaveError(null)
+      try {
+        await onSave(path, draft, baselineHash, force)
+        setIsEditing(false)
+        setSaveConflict(false)
+      } catch (failure) {
+        setSaveError(failure instanceof Error ? failure.message : t('fileExplorer.saveFailed'))
+        setSaveConflict(
+          Boolean(failure && typeof failure === 'object' && 'code' in failure && failure.code === 'STALE_REVISION'),
+        )
+      } finally {
+        setIsSaving(false)
+      }
+    },
+    [baselineHash, draft, isSaving, onSave, path, t],
+  )
+
+  const isDirty = isEditing && draft !== originalText
+  const confirmDiscard = useCallback(() => !isDirty || window.confirm(t('fileExplorer.discardUnsaved')), [isDirty, t])
+
+  // 应用级脏标记（关窗/离开前拦一道）
+  useEffect(() => {
+    if (!path) return
+    setFileEditorDirty(`${path}`, isDirty)
+    return () => setFileEditorDirty(`${path}`, false)
+  }, [isDirty, path])
+
+  useEffect(() => {
+    if (!isDirty) return
+    const beforeUnload = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => window.removeEventListener('beforeunload', beforeUnload)
+  }, [isDirty])
+
+  // Ctrl/Cmd+S 保存（编辑器自身不绑，避免和输入框抢）
+  useEffect(() => {
+    if (!isEditing) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        void saveEditing(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isEditing, saveEditing])
 
   // 获取文件名
   const fileName = path?.split(/[/\\]/).pop() || 'Untitled'
@@ -970,14 +1060,52 @@ function FilePreview({
         items={previewTabItems}
         activeId={path}
         closeAllTitle={t('common:closeAllTabs')}
-        onActivate={onActivatePreview}
-        onClose={onClosePreview}
-        onCloseAll={onClose}
+        onActivate={nextPath => {
+          if (confirmDiscard()) onActivatePreview(nextPath)
+        }}
+        onClose={closePath => {
+          if (confirmDiscard()) onClosePreview(closePath)
+        }}
+        onCloseAll={() => {
+          if (confirmDiscard()) onClose()
+        }}
         onReorder={onReorderPreview}
         tabWidthClassName="w-auto max-w-none min-w-max"
         rightActions={
           content ? (
             <>
+              {!content.isBinary &&
+                (isEditing ? (
+                  <>
+                    <button
+                      onClick={() => void saveEditing(false)}
+                      disabled={isSaving}
+                      className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
+                      title={t('common:save')}
+                      aria-label={t('common:save')}
+                    >
+                      <CheckIcon size={12} />
+                    </button>
+                    <button
+                      onClick={cancelEditing}
+                      disabled={isSaving}
+                      className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
+                      title={t('common:cancel')}
+                      aria-label={t('common:cancel')}
+                    >
+                      <CloseIcon size={12} />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={beginEditing}
+                    className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors"
+                    title={t('common:edit')}
+                    aria-label={t('common:edit')}
+                  >
+                    <PencilIcon size={12} />
+                  </button>
+                ))}
               <button
                 onClick={openFullscreen}
                 className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors"
@@ -999,20 +1127,6 @@ function FilePreview({
 
       {/* Preview Content */}
       <div ref={scrollRef} className="flex-1 overflow-auto panel-scrollbar">
-        {displayContent?.type === 'text' && !content?.isBinary && (
-          // P2.1：可编辑但保存事务未接入，必须明确告知（避免以为改动已落盘）
-          <div className="flex items-center justify-between gap-2 px-3 py-1 border-b border-border-200/40 bg-bg-200/30 text-[length:var(--fs-xs)] text-text-400">
-            <span className="truncate">{t('fileExplorer.previewEditNotice')}</span>
-            <button
-              type="button"
-              disabled
-              className="shrink-0 px-2 py-0.5 rounded-md border border-border-200 text-text-500 cursor-not-allowed"
-              title={t('common:save')}
-            >
-              {t('common:save')}
-            </button>
-          </div>
-        )}
         {isLoading ? (
           <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
             {t('common:loading')}
@@ -1070,19 +1184,49 @@ function FilePreview({
         // ) : displayContent?.type === 'diff' ? (
         //   <DiffPreview hunks={displayContent.hunks} isResizing={isResizing} />
         displayContent?.type === 'text' ? (
-          <CodePreview
-            code={activeDraft ?? displayContent.text}
-            language={language || 'text'}
-            isResizing={isResizing}
-            targetLine={targetLine}
-            targetKey={targetKey}
-            targetRanges={targetRanges}
-            editable={!content?.isBinary}
-            onChange={text => {
-              if (!path) return
-              setDrafts(prev => new Map(prev).set(path, text))
-            }}
-          />
+          isEditing ? (
+            <div className="min-h-full flex flex-col">
+              {saveError && (
+                <div className="px-3 py-2 text-danger-100 text-[length:var(--fs-xs)] flex items-center justify-between gap-3">
+                  <span>{saveError}</span>
+                  {saveConflict && (
+                    <span className="flex gap-2 shrink-0">
+                      <button
+                        className="text-text-200 hover:text-text-100"
+                        onClick={() => {
+                          setIsEditing(false)
+                          setSaveError(null)
+                          setSaveConflict(false)
+                          if (path) void onReload?.(path)
+                        }}
+                      >
+                        {t('fileExplorer.reload')}
+                      </button>
+                      <button className="text-danger-100 hover:text-danger-200" onClick={() => void saveEditing(true)}>
+                        {t('fileExplorer.overwrite')}
+                      </button>
+                    </span>
+                  )}
+                </div>
+              )}
+              <CodePreview
+                code={draft}
+                language={language || 'text'}
+                isResizing={isResizing}
+                readOnly={false}
+                onChange={setDraft}
+              />
+            </div>
+          ) : (
+            <CodePreview
+              code={displayContent.text}
+              language={language || 'text'}
+              isResizing={isResizing}
+              targetLine={targetLine}
+              targetKey={targetKey}
+              targetRanges={targetRanges}
+            />
+          )
         ) : (
           <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
             {t('common:noContent')}

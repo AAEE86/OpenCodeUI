@@ -72,6 +72,8 @@ vi.mock('./ui', () => ({
 
 describe('MarkdownRenderer', () => {
   beforeEach(() => {
+    // raw HTML 的渲染/净化用例要显式打开这个开关：它的默认值已改为关闭
+    themeStore.setRenderHtmlContent(true)
     themeMock.resolvedTheme = 'light'
     clearMermaidRenderCache()
     useInputCapabilitiesMock.mockReset()
@@ -1587,7 +1589,8 @@ describe('MarkdownRenderer HTML 渲染开关', () => {
     themeStore.setRenderHtmlContent(false)
   })
   afterEach(() => {
-    themeStore.setRenderHtmlContent(true)
+    // 还原成默认值（已改为关闭）
+    themeStore.setRenderHtmlContent(false)
   })
 
   it('关闭后完整 HTML 文档按源码代码块展示，不起沙箱预览', () => {

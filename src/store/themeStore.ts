@@ -147,7 +147,9 @@ const DEFAULT_COMPLETED_AT_FORMAT: CompletedAtFormat = 'time'
 
 const DEFAULT_REASONING_DISPLAY_MODE: ReasoningDisplayMode = 'markdown'
 const DEFAULT_RENDER_USER_MARKDOWN = false
-const DEFAULT_RENDER_HTML_CONTENT = true
+// 默认不渲染：AI 输出里的 HTML 一律按源码展示（要活预览可在设置里显式打开）。
+// HTML 活渲染是个有副作用的开关（iframe / 脚本），默认开的风险大于收益。
+const DEFAULT_RENDER_HTML_CONTENT = false
 const DEFAULT_DIFF_STYLE: DiffStyle = 'markers'
 const DEFAULT_DESCRIPTIVE_TOOL_STEPS = true
 const DEFAULT_INLINE_TOOL_REQUESTS = true

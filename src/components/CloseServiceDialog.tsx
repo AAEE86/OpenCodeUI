@@ -10,12 +10,14 @@ import { Button } from './ui/Button'
 import { PlugIcon, SpinnerIcon } from './Icons'
 
 interface CloseServiceDialogProps {
+  /** 有未保存的文件编辑（需求三）：退出会丢失，必须显式提醒 */
+  hasUnsavedChanges?: boolean
   isOpen: boolean
   onConfirm: (stopService: boolean) => void
   onCancel: () => void
 }
 
-export function CloseServiceDialog({ isOpen, onConfirm, onCancel }: CloseServiceDialogProps) {
+export function CloseServiceDialog({ isOpen, onConfirm, onCancel, hasUnsavedChanges }: CloseServiceDialogProps) {
   const { t } = useTranslation(['components', 'common'])
   const [closing, setClosing] = useState(false)
 
@@ -40,6 +42,11 @@ export function CloseServiceDialog({ isOpen, onConfirm, onCancel }: CloseService
         {/* Description */}
         <p className="text-[length:var(--fs-md)] text-text-300 leading-relaxed mb-6 max-w-[320px]">
           {t('closeService.description')}
+        {hasUnsavedChanges && (
+          <p className="mt-2 text-danger-100" data-testid="close-unsaved-warning">
+            {t('fileExplorer.unsavedCloseWarning')}
+          </p>
+        )}
         </p>
 
         {/* Actions */}

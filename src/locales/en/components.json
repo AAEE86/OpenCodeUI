@@ -37,7 +37,10 @@
     "confirmDiffTooLarge": "Changes are too large — diff preview omitted.",
     "discardAction": "Discard",
     "externalUpdated": "The file changed on disk — reloaded",
-    "saveVerifyFailed": "Post-save verification failed: the write may have been interrupted or overwritten. Please retry."
+    "saveVerifyFailed": "Post-save verification failed: the write may have been interrupted or overwritten. Please retry.",
+    "savedAt": "Saved at {{time}}",
+    "saving": "Saving…",
+    "unsavedCloseWarning": "Some files have unsaved changes; quitting now will lose them."
   },
   "terminal": {
     "terminal": "Terminal",

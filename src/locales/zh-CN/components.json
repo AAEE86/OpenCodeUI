@@ -37,7 +37,10 @@
     "confirmDiffTooLarge": "改动太大，已省略差异预览。",
     "discardAction": "放弃改动",
     "externalUpdated": "文件已在磁盘上更新（已重新载入）",
-    "saveVerifyFailed": "保存后校验不一致：写入可能被打断或已被并发修改，请重试"
+    "saveVerifyFailed": "保存后校验不一致：写入可能被打断或已被并发修改，请重试",
+    "savedAt": "已保存于 {{time}}",
+    "saving": "保存中…",
+    "unsavedCloseWarning": "有未保存的文件改动，现在退出会丢失。"
   },
   "terminal": {
     "terminal": "终端",

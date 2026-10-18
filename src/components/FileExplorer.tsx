@@ -803,6 +803,8 @@ function FilePreview({
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveConflict, setSaveConflict] = useState(false)
+  /** 上次保存成功的时间（状态栏「已保存于 …」） */
+  const [savedAt, setSavedAt] = useState<number | null>(null)
   /** 进入编辑时的基线指纹：保存前用它判断磁盘是否被别人改过 */
   const [baselineHash, setBaselineHash] = useState<string | undefined>()
 
@@ -833,6 +835,7 @@ function FilePreview({
         await onSave(path, draft, baselineHash, force)
         setIsEditing(false)
         setSaveConflict(false)
+        setSavedAt(Date.now())
       } catch (failure) {
         setSaveError(failure instanceof Error ? failure.message : t('fileExplorer.saveFailed'))
         setSaveConflict(
@@ -895,9 +898,11 @@ function FilePreview({
   // 应用级脏标记（关窗/离开前拦一道）
   useEffect(() => {
     if (!path) return
-    setFileEditorDirty(`${path}`, isDirty)
-    return () => setFileEditorDirty(`${path}`, false)
-  }, [isDirty, path])
+    // editorId 带目录：不同工作区可能有同名文件，只按相对路径会串号
+    const editorId = `${directory ?? ""}::${path}`
+    setFileEditorDirty(editorId, isDirty)
+    return () => setFileEditorDirty(editorId, false)
+  }, [directory, isDirty, path])
 
   useEffect(() => {
     if (!isDirty) return
@@ -1246,6 +1251,14 @@ function FilePreview({
                 )}
               </div>
             )}
+            {/* 保存状态栏：保存中 / 上次保存时间 */}
+            <div className="flex items-center justify-end px-3 py-1 text-[length:var(--fs-xs)] text-text-400">
+              {isSaving
+                ? t('fileExplorer.saving')
+                : savedAt
+                  ? t('fileExplorer.savedAt', { time: new Date(savedAt).toLocaleTimeString() })
+                  : null}
+            </div>
             <CodePreview
               code={draft}
               language={language || 'text'}

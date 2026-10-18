@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { isTauri } from '../utils/tauri'
 import { uiErrorHandler } from '../utils'
+import { hasUnsavedFileChanges } from '../store/unsavedFileStore'
 
 /**
  * Tauri desktop only: 监听 Rust 侧的 close-requested 事件，
@@ -46,5 +47,7 @@ export function useCloseServiceDialog() {
     showCloseDialog,
     handleCloseDialogConfirm,
     handleCloseDialogCancel,
+    // 关窗时读一次即可：有未保存的文件改动就在确认框里明确警告（可取消返回去存）
+    hasUnsavedChanges: showCloseDialog && hasUnsavedFileChanges(),
   }
 }

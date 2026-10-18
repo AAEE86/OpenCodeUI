@@ -24,6 +24,7 @@ import {
 } from './Icons'
 import { CodePreview } from './CodePreview'
 import { setFileEditorDirty } from '../store/unsavedFileStore'
+import { EditConfirmDialog } from './EditConfirmDialog'
 import { hashBytes } from '../utils/textEncoding'
 import { HtmlFilePreviewFrame } from './HtmlFilePreviewFrame'
 import { PreviewTabsBar, type PreviewTabsBarItem } from './PreviewTabsBar'
@@ -836,7 +837,31 @@ function FilePreview({
   )
 
   const isDirty = isEditing && draft !== originalText
-  const confirmDiscard = useCallback(() => !isDirty || window.confirm(t('fileExplorer.discardUnsaved')), [isDirty, t])
+
+  /**
+   * 二次确认：写盘前、丢改动前都先让人看一眼 diff（防误触）。
+   * run 是"确认后才执行"的动作，所以切 tab / 关 tab 也能挂进来。
+   */
+  const [confirmState, setConfirmState] = useState<{ mode: 'save' | 'discard'; conflict?: boolean; run: () => void } | null>(
+    null,
+  )
+  const requestSave = useCallback(
+    (force: boolean) => {
+      if (!isDirty && !force) return
+      setConfirmState({ mode: 'save', conflict: force || saveConflict, run: () => void saveEditing(force) })
+    },
+    [isDirty, saveConflict, saveEditing],
+  )
+  const requestDiscard = useCallback(
+    (run: () => void) => {
+      if (!isDirty) {
+        run()
+        return
+      }
+      setConfirmState({ mode: 'discard', run })
+    },
+    [isDirty],
+  )
 
   // 应用级脏标记（关窗/离开前拦一道）
   useEffect(() => {
@@ -858,12 +883,12 @@ function FilePreview({
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault()
-        void saveEditing(false)
+        requestSave(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [isEditing, saveEditing])
+  }, [isEditing, requestSave])
 
   // 获取文件名
   const fileName = path?.split(/[/\\]/).pop() || 'Untitled'
@@ -1070,15 +1095,9 @@ function FilePreview({
         items={previewTabItems}
         activeId={path}
         closeAllTitle={t('common:closeAllTabs')}
-        onActivate={nextPath => {
-          if (confirmDiscard()) onActivatePreview(nextPath)
-        }}
-        onClose={closePath => {
-          if (confirmDiscard()) onClosePreview(closePath)
-        }}
-        onCloseAll={() => {
-          if (confirmDiscard()) onClose()
-        }}
+        onActivate={nextPath => requestDiscard(() => onActivatePreview(nextPath))}
+        onClose={closePath => requestDiscard(() => onClosePreview(closePath))}
+        onCloseAll={() => requestDiscard(() => onClose())}
         onReorder={onReorderPreview}
         tabWidthClassName="w-auto max-w-none min-w-max"
         rightActions={
@@ -1088,7 +1107,7 @@ function FilePreview({
                 (isEditing ? (
                   <>
                     <button
-                      onClick={() => void saveEditing(false)}
+                      onClick={() => requestSave(false)}
                       disabled={isSaving}
                       className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
                       title={t('common:save')}
@@ -1097,7 +1116,7 @@ function FilePreview({
                       <CheckIcon size={12} />
                     </button>
                     <button
-                      onClick={cancelEditing}
+                      onClick={() => requestDiscard(cancelEditing)}
                       disabled={isSaving}
                       className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
                       title={t('common:cancel')}
@@ -1135,6 +1154,23 @@ function FilePreview({
         }
       />
 
+      <EditConfirmDialog
+        isOpen={confirmState !== null}
+        mode={confirmState?.mode ?? 'save'}
+        fileName={fileName}
+        before={confirmState?.mode === 'discard' ? draft : originalText}
+        after={confirmState?.mode === 'discard' ? originalText : draft}
+        language={language || 'text'}
+        conflict={confirmState?.conflict}
+        busy={isSaving}
+        onCancel={() => setConfirmState(null)}
+        onConfirm={() => {
+          const pending = confirmState
+          setConfirmState(null)
+          pending?.run()
+        }}
+      />
+
       {/* Preview Content */}
       <div ref={scrollRef} className="flex-1 overflow-auto panel-scrollbar">
         {isLoading ? (
@@ -1166,7 +1202,7 @@ function FilePreview({
                     >
                       {t('fileExplorer.reload')}
                     </button>
-                    <button className="text-danger-100 hover:text-danger-200" onClick={() => void saveEditing(true)}>
+                    <button className="text-danger-100 hover:text-danger-200" onClick={() => requestSave(true)}>
                       {t('fileExplorer.overwrite')}
                     </button>
                   </span>

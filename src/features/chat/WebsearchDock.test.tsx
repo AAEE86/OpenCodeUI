@@ -86,6 +86,16 @@ describe('WebsearchDock', () => {
     expect(screen.getByRole('menuitemradio', { name: /Brave/ })).toBeTruthy()
   })
 
+  it('头部下方的分隔线两端留空（与项目面板 inset-x-3 同款做法）', async () => {
+    const { container } = render(<WebsearchDock form={form()} onReply={vi.fn()} />)
+
+    const divider = container.querySelector('.h-px')
+    expect(divider).toBeTruthy()
+    // 留空宽度 = 头部内容的 padding（px-4 → mx-4），不能整条填满
+    expect(divider?.className).toContain('mx-4')
+    expect(divider?.className).not.toContain('border-t')
+  })
+
   it('展开时箭头翻转（ComposerSeatMenu / ModelSelector 同款细节）', async () => {
     render(<WebsearchDock form={form()} onReply={vi.fn()} />)
 

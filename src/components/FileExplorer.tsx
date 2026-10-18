@@ -883,9 +883,19 @@ function FilePreview({
         title: file.path,
         closeTitle: `${t('common:close')} ${file.name}`,
         iconPath: file.path,
-        label: <span className="block whitespace-nowrap text-[length:var(--fs-xs)] font-mono">{file.name}</span>,
+        label: (
+          <span className="flex items-center gap-1 whitespace-nowrap text-[length:var(--fs-xs)] font-mono">
+            {file.path === path && isDirty && (
+              <span className="text-accent-main-100" title={t("fileExplorer.discardUnsaved")} aria-label="dirty">
+                ●
+              </span>
+            )}
+            {file.path === path && saveConflict && <span className="text-danger-100" aria-label="conflict">⚠</span>}
+            {file.name}
+          </span>
+        ),
       })),
-    [previewFiles, t],
+    [isDirty, path, previewFiles, saveConflict, t],
   )
 
   // 处理内容类型分发

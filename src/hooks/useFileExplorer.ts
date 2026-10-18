@@ -11,6 +11,7 @@ import { useSessionChangeScope } from '../store/changeScopeStore'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { useAutoRefresh } from './useAutoRefresh'
 import { fileBaseName, toAbsoluteFilePath } from '../utils/pathUtils'
+import { createUploadId, getServerTmpDirectory } from '../api/file'
 import { encodeTextPreservingFormat, hashBytes, MixedLineEndingsError } from '../utils/textEncoding'
 
 /**
@@ -111,6 +112,8 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const previewCacheRef = useRef<Map<string, FileContent>>(new Map())
+  /** 最近一次由我们写入的文件（路径 + 内容指纹），用于自写事件抑制 */
+  const lastWriteRef = useRef<{ path: string; hash: string } | null>(null)
   const previewLoadIdRef = useRef(0)
 
   // 文件状态（git）
@@ -337,13 +340,26 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
         throw error
       }
 
-      // ③ 写入
+      // ③ 覆盖前留备份：服务端 fs.write 没有版本号/快照，备份是唯一兜底。
+      //    备份失败不阻断保存（用户要的是存下来）。
+      try {
+        const tmp = await getServerTmpDirectory(serverId)
+        const backupTarget = `${tmp.replace(/[/\\]+$/, "")}/backups/${createUploadId()}/${fileBaseName(path)}`
+        await writeFileBytes(backupTarget, disk.bytes, effectiveDirectory, serverId)
+      } catch (backupError) {
+        console.warn("[useFileExplorer] 备份失败（保存继续）:", backupError)
+      }
+
+      // ④ 写入
       await writeFileBytes(path, encoded, effectiveDirectory, serverId)
 
       // ④ 写后重读（既做校验，也让缓存与磁盘一致——顺手修掉"存完切走再切回是旧内容"）
       const saved = await getFileContent(path, effectiveDirectory, serverId)
       previewCacheRef.current.set(cacheKey, saved)
       setPreviewContent(current => (current?.path === path ? saved : current))
+      // 记下"这是我刚写的内容"：后续 filesystem.changed 用内容指纹认出自己的写，
+      // 避免把自己的保存当成外部改动（那会导致保存后立刻弹冲突）。
+      lastWriteRef.current = { path, hash: hashBytes(saved.bytes) }
       return saved
     },
     [effectiveDirectory, serverId, t],

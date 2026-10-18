@@ -101,19 +101,18 @@ describe('MarkdownRenderer', () => {
     render(<MarkdownRenderer content={'Use `code` here'} />)
 
     const codeEl = screen.getByText('code')
-    // 传统 chip 样式：等宽 + 淡底色 + 内边距 + 外侧间距；颜色继承正文
+    // chip 样式：等宽 + 淡底 + 细描边 + flex 垂直居中；颜色继承正文
     expect(codeEl.className).toMatch(/font-mono/)
     expect(codeEl.className).not.toMatch(/text-text-\d/)
-    // 底色必须是前景色叠加（背景色阶在各主题下会和页面底色糊在一起）
-    expect(codeEl.className).toMatch(/bg-text-100\/\d+/)
-    expect(codeEl.className).not.toMatch(/bg-bg-200/)
+    expect(codeEl.className).toMatch(/bg-bg-200/)
+    expect(codeEl.className).toMatch(/border-\[0\.5px\]/)
     expect(codeEl.className).toMatch(/rounded-md/)
-    // 内边距与外侧间距：chip 紧贴前后文字会很挤
-    expect(codeEl.className).toMatch(/px-1\.5/)
-    expect(codeEl.className).toMatch(/py-0\.5/)
-    expect(codeEl.className).toMatch(/mx-0\.5/)
+    expect(codeEl.className).toMatch(/px-\[5px\]/)
+    // 纵向不能靠继承段落行高（leading-7=28px）：chip 会高出一截，和正文对不上
+    expect(codeEl.className).toMatch(/inline-flex/)
+    expect(codeEl.className).toMatch(/items-center/)
+    expect(codeEl.className).toMatch(/leading-tight/)
     expect(codeEl.className).not.toMatch(/text-accent-main/)
-    expect(codeEl.className).not.toMatch(/border/)
   })
 
   it('renders inline code inside list items as code elements', () => {
@@ -123,7 +122,8 @@ describe('MarkdownRenderer', () => {
     expect(codeEl).toBeInTheDocument()
     expect(codeEl).toHaveTextContent('单行代码')
     expect(codeEl).toHaveClass('font-mono')
-    expect(codeEl).toHaveClass('bg-text-100/15')
+    expect(codeEl).toHaveClass('bg-bg-200')
+    expect(codeEl).toHaveClass('inline-flex')
   })
 
   it('keeps inline emphasis styles on the markdown path', () => {
@@ -550,7 +550,8 @@ $$
     expect(paragraph.className).toMatch(/text-text-400/)
 
     const codeEl = screen.getByText('code')
-    expect(codeEl.className).not.toMatch(/border/)
+    // chip 也有描边（0.5px 细边），但底色不能是强调色
+    expect(codeEl.className).toMatch(/border-\[0\.5px\]/)
     expect(codeEl.className).not.toMatch(/bg-accent/)
   })
 

@@ -391,17 +391,20 @@ function createMarkdownHtmlRenderer(isReasoning: boolean, renderHtml: boolean) {
   }
 
   renderer.codespan = ({ text }) => {
-    // 内联代码 chip：rounded-md + px-1.5 py-0.5 + mx-0.5 + font-mono + 小一号字号
-    // 三个要点：
-    //  1) **文字颜色继承正文**：之前用主题色、后来用 text-100，都比正文
-    //     （text-200）亮，看着像被"特意强调"；继承还有个好处——reasoning 里
+    // 内联代码 chip。要点：
+    //  1) **文字颜色继承正文**，不自己指定：正文是 text-text-200，给主题色或更亮的
+    //     色阶都会比正文突出（看着像被"特意强调"）；继承还有个好处——reasoning 里
     //     正文变暗时它会自动跟着变暗
-    //  2) **底色用前景色叠加**而不是 bg-200 那类背景色阶：背景色阶和页面底色
-    //     只差一档，各主题下都糊在一起；前景色叠加在深浅主题里都自然有对比
-    //  3) **mx-0.5 必须留着**：chip 紧贴前后文字会很挤，这点间距是"像不像
-    //     chip"的关键
+    //  2) **inline-flex + items-center，纵向 padding 为 0**：靠 padding 撑高会把
+    //     行盒撑起来，同一行的中文和代码基线对不齐，整行看着起伏；改成 flex 居中
+    //     后，高度跟着行走，纵向只留 0
+    //  3) **淡底色 + 0.5px 细描边**：底色只是比页面底色抬一档，靠描边给边界；
+    //     只给底色（没有描边）在各主题下都会糊在一起
+    //  4) **必须显式给 leading**：段落是 leading-7（28px），inline-flex 的盒子会
+    //     把这个行高继承成自己的高度，于是 chip 高 28px、文字只有 12px，看着比
+    //     正文高一截。给个紧凑行高 + 1px 纵向内边距，高度才和正文文字齐平
     const className =
-      'font-mono text-[length:var(--fs-code)] align-baseline break-words bg-text-100/15 rounded-md mx-0.5 px-1.5 py-0.5'
+      'inline-flex items-center font-mono text-[0.875em] leading-tight py-px break-words bg-bg-200 border-[0.5px] border-text-100/10 rounded-md px-[5px]'
     return `<code class="${className}">${escapeHtml(text)}</code>`
   }
 

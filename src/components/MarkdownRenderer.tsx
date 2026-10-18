@@ -701,7 +701,7 @@ function renderInlineTokensToReact(tokens: unknown[], _isReasoning: boolean): Re
       return (
         <code
           key={index}
-          className="font-mono text-[length:var(--fs-code)] align-baseline break-words bg-text-100/15 rounded-md mx-0.5 px-1.5 py-0.5"
+          className="inline-flex items-center font-mono text-[0.875em] leading-tight py-px break-words bg-bg-200 border-[0.5px] border-text-100/10 rounded-md px-[5px]"
         >
           {String(item.text ?? '')}
         </code>

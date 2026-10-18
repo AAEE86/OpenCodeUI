@@ -767,6 +767,14 @@ function FilePreview({
   const { t } = useTranslation(['components', 'common'])
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  /**
+   * 编辑草稿（需求三 P2.1）：按路径暂存，切 tab 不丢。
+   *
+   * P2.2 的保存事务接入后，这里会换成带基线/脏标记/diff 决策的编辑会话。
+   */
+  const [drafts, setDrafts] = useState<Map<string, string>>(() => new Map())
+  const activeDraft = path ? drafts.get(path) : undefined
+
   // 获取文件名
   const fileName = path?.split(/[/\\]/).pop() || 'Untitled'
   const language = path ? detectLanguage(path) : 'text'
@@ -991,6 +999,20 @@ function FilePreview({
 
       {/* Preview Content */}
       <div ref={scrollRef} className="flex-1 overflow-auto panel-scrollbar">
+        {displayContent?.type === 'text' && !content?.isBinary && (
+          // P2.1：可编辑但保存事务未接入，必须明确告知（避免以为改动已落盘）
+          <div className="flex items-center justify-between gap-2 px-3 py-1 border-b border-border-200/40 bg-bg-200/30 text-[length:var(--fs-xs)] text-text-400">
+            <span className="truncate">{t('fileExplorer.previewEditNotice')}</span>
+            <button
+              type="button"
+              disabled
+              className="shrink-0 px-2 py-0.5 rounded-md border border-border-200 text-text-500 cursor-not-allowed"
+              title={t('common:save')}
+            >
+              {t('common:save')}
+            </button>
+          </div>
+        )}
         {isLoading ? (
           <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
             {t('common:loading')}
@@ -1049,12 +1071,17 @@ function FilePreview({
         //   <DiffPreview hunks={displayContent.hunks} isResizing={isResizing} />
         displayContent?.type === 'text' ? (
           <CodePreview
-            code={displayContent.text}
+            code={activeDraft ?? displayContent.text}
             language={language || 'text'}
             isResizing={isResizing}
             targetLine={targetLine}
             targetKey={targetKey}
             targetRanges={targetRanges}
+            editable={!content?.isBinary}
+            onChange={text => {
+              if (!path) return
+              setDrafts(prev => new Map(prev).set(path, text))
+            }}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">

@@ -21,7 +21,8 @@
     "oneToOne": "1:1",
     "revealInExplorer": "Reveal in File Explorer",
     "revealInFinder": "Reveal in Finder",
-    "revealInFileManager": "Reveal in File Manager"
+    "revealInFileManager": "Reveal in File Manager",
+    "previewEditNotice": "Editable preview (saving is not wired up yet — changes are not written to disk)"
   },
   "terminal": {
     "terminal": "Terminal",

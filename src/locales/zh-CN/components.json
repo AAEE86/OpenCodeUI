@@ -21,7 +21,8 @@
     "oneToOne": "1:1",
     "revealInExplorer": "在资源管理器中显示",
     "revealInFinder": "在 Finder 中显示",
-    "revealInFileManager": "在文件管理器中显示"
+    "revealInFileManager": "在文件管理器中显示",
+    "previewEditNotice": "可编辑预览（保存功能开发中，改动暂不会写入文件）"
   },
   "terminal": {
     "terminal": "终端",

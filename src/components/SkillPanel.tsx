@@ -74,7 +74,7 @@ export const SkillPanel = memo(function SkillPanel({ isResizing: _isResizing }: 
           onClick={loadSkills}
           disabled={loading}
           aria-label={t('common:refresh')}
-          className="inline-flex h-6 w-6 items-center justify-center hover:bg-bg-200/50 rounded-md text-text-300 hover:text-text-100 transition-colors disabled:opacity-50"
+          className="inline-flex h-6 w-6 items-center justify-center text-text-400 hover:bg-bg-200/50 rounded-md hover:text-text-100 transition-colors disabled:opacity-50"
           title={t('common:refresh')}
         >
           <RetryIcon size={12} className={loading ? 'animate-spin' : ''} />

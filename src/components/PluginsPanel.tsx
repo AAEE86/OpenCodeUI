@@ -81,7 +81,7 @@ export const PluginsPanel = memo(function PluginsPanel({ isResizing: _isResizing
           }}
           title={t('common:retry')}
           aria-label={t('common:retry')}
-          className="inline-flex h-6 w-6 items-center justify-center hover:bg-bg-200/50 rounded-md text-text-300 hover:text-text-100 transition-colors"
+          className="inline-flex h-6 w-6 items-center justify-center text-text-400 hover:bg-bg-200/50 rounded-md hover:text-text-100 transition-colors"
         >
           <RetryIcon size={12} />
         </button>

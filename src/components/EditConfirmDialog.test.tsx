@@ -58,11 +58,11 @@ describe('EditConfirmDialog', () => {
     expect(discard.className).toContain('bg-danger-100')
   })
 
-  it('改动过大：不渲染 diff，只给摘要', () => {
-    const huge = 'x'.repeat(150_000)
-    renderDialog({ before: huge, after: huge })
+  it('大 diff 也照常渲染（不做体积兜底）', () => {
+    const big = 'x'.repeat(220_000)
+    renderDialog({ before: big, after: `${big}y` })
 
-    expect(screen.queryByTestId('edit-confirm-diff')).toBeNull()
+    expect(screen.getByTestId('edit-confirm-diff')).toBeTruthy()
   })
 
   it('确认键不自动聚焦（Enter 不该直接写盘 / 丢改动）', () => {

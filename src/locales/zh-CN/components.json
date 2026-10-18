@@ -32,7 +32,6 @@
     "confirmSaveConflict": "注意：磁盘上的内容已经被改过，覆盖会丢弃他那边的修改。",
     "confirmSaveAction": "确认保存",
     "confirmDiscardTitle": "放弃对 {{name}} 的改动？",
-    "confirmDiffTooLarge": "改动太大，已省略差异预览。",
     "discardAction": "放弃改动",
     "externalUpdated": "文件已在磁盘上更新（已重新载入）",
     "saveVerifyFailed": "保存后校验不一致：写入可能被打断或已被并发修改，请重试",

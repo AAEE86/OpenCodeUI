@@ -12,8 +12,6 @@ import { DiffView } from './DiffView'
 // 聚焦**（Enter 不会直接落盘），Esc = 取消。
 // ============================================
 
-/** 超过这个体量就不渲染 diff（避免弹层卡死），只给摘要 */
-const MAX_DIFF_CHARS = 200_000
 /** diff 区高度上限：够看，又不至于把动作按钮挤出屏幕 */
 const DIFF_MAX_HEIGHT = 520
 
@@ -46,7 +44,6 @@ export function EditConfirmDialog({
   onCancel,
 }: EditConfirmDialogProps) {
   const { t } = useTranslation(['components', 'common'])
-  const tooLarge = before.length + after.length > MAX_DIFF_CHARS
 
   const title =
     mode === 'save'
@@ -62,20 +59,10 @@ export function EditConfirmDialog({
           </p>
         )}
 
-        {tooLarge ? (
-          <p className="text-[length:var(--fs-xs)] text-text-500">{t('fileExplorer.confirmDiffTooLarge')}</p>
-        ) : (
-          // 与工具卡片同一个组件：头部有文件名 / +/- 统计 / 全屏按钮
-          <div data-testid="edit-confirm-diff">
-            <DiffView
-              before={before}
-              after={after}
-              filePath={fileName}
-              language={language}
-              maxHeight={DIFF_MAX_HEIGHT}
-            />
-          </div>
-        )}
+        {/* 与工具卡片同一个组件：头部有文件名 / +/- 统计 / 全屏按钮 */}
+        <div data-testid="edit-confirm-diff">
+          <DiffView before={before} after={after} filePath={fileName} language={language} maxHeight={DIFF_MAX_HEIGHT} />
+        </div>
 
         <div className="flex items-center justify-end gap-2 pt-1">
           <button

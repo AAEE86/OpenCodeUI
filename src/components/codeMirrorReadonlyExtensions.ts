@@ -1,4 +1,4 @@
-import { defaultKeymap } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { EditorState, StateEffect, StateField, type Extension, type Range } from '@codemirror/state'
 import {
   closeSearchPanel,
@@ -16,6 +16,7 @@ import {
   Decoration,
   EditorView,
   drawSelection,
+  highlightActiveLine,
   highlightActiveLineGutter,
   keymap,
   lineNumbers,
@@ -24,33 +25,69 @@ import {
 } from '@codemirror/view'
 import type { HighlightTokens } from '../hooks/useSyntaxHighlight'
 
-export function codeLineHeight(offset: number): number {
-  return 24 + offset * 2
-}
-
-export function createReadonlyCodeMirrorExtensions({
-  wordWrap,
-  lineHeight,
-  showLineNumbers = true,
-  maxHeight,
-  editable = true,
-  lineNumberWidth,
-  extraExtensions = [],
-}: {
+/** 只读 / 可编辑两种模式共用的基础参数 */
+export interface CodeMirrorExtensionOptions {
   wordWrap: boolean
   lineHeight: number
   showLineNumbers?: boolean
   maxHeight?: number
-  editable?: boolean
   lineNumberWidth: number
   extraExtensions?: Extension[]
-}): Extension[] {
+}
+
+export function codeLineHeight(offset: number): number {
+  return 24 + offset * 2
+}
+
+export function createReadonlyCodeMirrorExtensions(
+  options: CodeMirrorExtensionOptions & { editable?: boolean },
+): Extension[] {
+  const { editable = true, ...base } = options
+  return createCodeMirrorExtensions(base, {
+    // 这里的 editable 语义是「能否选中文本」（历史上与 maxHeight 绑定），不是「能否编辑」
+    leading: [EditorView.editable.of(editable), EditorState.readOnly.of(true)],
+    keybindings: [...searchKeymap, ...defaultKeymap],
+  })
+}
+
+/**
+ * 可编辑模式的扩展：非只读 + 撤销栈 + Mod-s 保存。
+ *
+ * 与只读共用同一套基础扩展（主题 / 行号 / 搜索面板 / 高亮装饰），只有
+ * 只读开关、keymap 和若干编辑器手感相关扩展不同。
+ */
+export function createEditableCodeMirrorExtensions(
+  options: CodeMirrorExtensionOptions & { onSave?: () => void },
+): Extension[] {
+  const { onSave, ...base } = options
+  return createCodeMirrorExtensions(base, {
+    leading: [EditorView.editable.of(true), history(), highlightActiveLine()],
+    keybindings: [
+      { key: 'Mod-s', preventDefault: true, run: () => (onSave?.(), true) },
+      ...searchKeymap,
+      ...historyKeymap,
+      ...defaultKeymap,
+    ],
+  })
+}
+
+/** 只读 / 可编辑共用的基础扩展；两个模式的差异通过 leading + keybindings 注入 */
+function createCodeMirrorExtensions(
+  {
+    wordWrap,
+    lineHeight,
+    showLineNumbers = true,
+    maxHeight,
+    lineNumberWidth,
+    extraExtensions = [],
+  }: CodeMirrorExtensionOptions,
+  mode: { leading: Extension[]; keybindings: Parameters<typeof keymap.of>[0] },
+): Extension[] {
   const extensions: Extension[] = [
-    EditorView.editable.of(editable),
-    EditorState.readOnly.of(true),
+    ...mode.leading,
     highlightActiveLineGutter(),
     drawSelection(),
-    keymap.of([...searchKeymap, ...defaultKeymap]),
+    keymap.of(mode.keybindings),
     search({ top: true, createPanel: createCodeMirrorSearchPanel }),
     highlightSelectionMatches(),
     shikiDecorationsField,

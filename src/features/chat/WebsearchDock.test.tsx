@@ -50,10 +50,13 @@ describe('WebsearchDock', () => {
     render(<WebsearchDock form={form()} onReply={vi.fn()} onCollapsedChange={onCollapsedChange} />)
 
     expect(screen.getByText('Third-party web search')).toBeTruthy()
-    // 搜索源列表加载完成
+    // 搜索源列表加载完成（触发器上出现当前值）
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'Exa' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Search provider' })).toHaveTextContent('Any')
     })
+    // 打开菜单能看到列表
+    fireEvent.click(screen.getByRole('button', { name: 'Search provider' }))
+    expect(screen.getByRole('menuitemradio', { name: /Exa/ })).toBeTruthy()
 
     // 收起按钮存在（title 与权限/提问同款「最小化」）
     const minimize = screen.getByTitle('Minimize')
@@ -66,12 +69,29 @@ describe('WebsearchDock', () => {
     expect(container.querySelector('[data-component="session-websearch-dock"]')).toBeNull()
   })
 
+  it('搜索源用项目统一的 DropdownMenu + MenuItem（不是原生 select）', async () => {
+    const { container } = render(<WebsearchDock form={form()} onReply={vi.fn()} />)
+
+    // 不允许出现原生下拉
+    expect(container.querySelector('select')).toBeNull()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Search provider' })).toBeTruthy()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Search provider' }))
+
+    // 菜单是 role=menu + menuitemradio（与输入框 Build/High 同款）
+    expect(screen.getByRole('menu')).toBeTruthy()
+    expect(screen.getByRole('menuitemradio', { name: /Exa/ })).toBeTruthy()
+    expect(screen.getByRole('menuitemradio', { name: /Brave/ })).toBeTruthy()
+  })
+
   it('选「任意」启用 → 回 {choice: allow}', async () => {
     const onReply = vi.fn(async () => true)
     render(<WebsearchDock form={form()} onReply={onReply} />)
 
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'Exa' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Search provider' })).toBeTruthy()
     })
     fireEvent.click(screen.getByRole('button', { name: /Enable/ }))
 
@@ -96,9 +116,11 @@ describe('WebsearchDock', () => {
     render(<WebsearchDock form={form()} onReply={onReply} />)
 
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'Exa' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Search provider' })).toBeTruthy()
     })
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'exa' } })
+    // 项目统一的选择器：触发器 → DropdownMenu → MenuItem
+    fireEvent.click(screen.getByRole('button', { name: 'Search provider' }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Exa/ }))
     fireEvent.click(screen.getByRole('button', { name: /Enable/ }))
 
     await waitFor(() => {

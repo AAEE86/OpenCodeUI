@@ -12,9 +12,10 @@
 //   - specific（带 provider string 字段 + options）：直接回 {provider: 选中值}。
 // ============================================
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ReturnIcon, SearchIcon, ChevronDownIcon, SpinnerIcon } from '../../components/Icons'
+import { DropdownMenu, MenuItem } from '../../components/ui'
 import { getWebsearchProviders } from '../../api/client'
 import { usePresence } from '../../hooks'
 import { useChatViewport } from './chatViewport'
@@ -66,6 +67,43 @@ export function WebsearchDock({
   const [loadFailed, setLoadFailed] = useState(false)
   const [sending, setSending] = useState(false)
   const [failed, setFailed] = useState(false)
+
+  // 搜索源选择用项目统一的 DropdownMenu + MenuItem（与输入框的 Build/High 同款），
+  // 不用原生 <select>
+  const [providerMenuOpen, setProviderMenuOpen] = useState(false)
+  const providerTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const providerMenuRef = useRef<HTMLDivElement | null>(null)
+  const providerMenuFocusRef = useRef<'selected' | 'first' | 'last' | null>(null)
+
+  // 点菜单外关闭（菜单是 portal，不能靠 DOM 冒泡判断）
+  useEffect(() => {
+    if (!providerMenuOpen) return
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (providerMenuRef.current?.contains(target)) return
+      if (providerTriggerRef.current?.contains(target)) return
+      setProviderMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [providerMenuOpen])
+
+  // 打开后把焦点放进菜单（键盘可达）
+  useEffect(() => {
+    if (!providerMenuOpen) return
+    const menu = providerMenuRef.current
+    if (!menu) return
+    const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'))
+    const mode = providerMenuFocusRef.current ?? 'selected'
+    const target =
+      mode === 'first'
+        ? items[0]
+        : mode === 'last'
+          ? items[items.length - 1]
+          : (items.find(item => item.getAttribute('aria-checked') === 'true') ?? items[0])
+    target?.focus()
+    providerMenuFocusRef.current = null
+  }, [providerMenuOpen])
 
   const loadProviders = useCallback(() => {
     if (specific) {
@@ -149,9 +187,20 @@ export function WebsearchDock({
   const unavailable = loading || loadFailed || options.length === 0
   /** 回复在途（本地提交中或上层正在回复） */
   const busy = sending || isReplying
+  /** 当前搜索源在触发器上的文案 */
+  const currentOptionLabel = allOptions.find(option => option.value === selected)?.label ?? ''
 
-  /** 键盘：和提问/权限一致——send keybinding 启用，Escape 不使用搜索 */
+  /** 键盘：和提问/权限一致——send keybinding 启用，Escape 不使用搜索（菜单打开时先关菜单） */
   function handleKeyDown(event: React.KeyboardEvent) {
+    // 菜单是 portal，事件仍会经 React 树冒到这里；开着菜单时不抢它的键
+    if (providerMenuOpen) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setProviderMenuOpen(false)
+        providerTriggerRef.current?.focus()
+      }
+      return
+    }
     if (event.key === 'Escape') {
       event.preventDefault()
       if (!specific) handleDisable()
@@ -217,19 +266,63 @@ export function WebsearchDock({
             <div className="px-4 py-3 space-y-3 max-h-[45vh] overflow-y-auto custom-scrollbar">
               <div>
                 <p className="text-[length:var(--fs-sm)] text-text-400 mb-2">{t('chat:websearch.description')}</p>
-                <select
-                  aria-label={t('chat:websearch.provider')}
-                  value={selected}
-                  onChange={e => setSelected(e.target.value)}
-                  disabled={busy || unavailable}
-                  className="w-full bg-bg-000 border border-border-200 rounded-md px-2.5 py-2 text-[length:var(--fs-base)] text-text-100 focus:outline-none focus:border-accent-main-100/50 disabled:opacity-50"
-                >
-                  {allOptions.map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+
+                <div className="relative">
+                  <button
+                    ref={providerTriggerRef}
+                    type="button"
+                    onClick={() => {
+                      providerMenuFocusRef.current = 'selected'
+                      setProviderMenuOpen(open => !open)
+                    }}
+                    onKeyDown={event => {
+                      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                        event.preventDefault()
+                        providerMenuFocusRef.current = event.key === 'ArrowUp' ? 'last' : 'first'
+                        setProviderMenuOpen(true)
+                      }
+                    }}
+                    disabled={busy || unavailable}
+                    aria-haspopup="menu"
+                    aria-expanded={providerMenuOpen}
+                    aria-label={t('chat:websearch.provider')}
+                    className="flex w-full items-center justify-between gap-1.5 px-2.5 py-2 text-[length:var(--fs-base)] rounded-lg border border-border-200 bg-bg-000 transition-all duration-150 hover:bg-bg-200 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span className="truncate text-text-200">{currentOptionLabel}</span>
+                    <span className="text-text-400 shrink-0">
+                      <ChevronDownIcon />
+                    </span>
+                  </button>
+
+                  <DropdownMenu
+                    triggerRef={providerTriggerRef}
+                    isOpen={providerMenuOpen}
+                    position="top"
+                    align="left"
+                    minWidth="min(320px, 80vw)"
+                  >
+                    <div
+                      ref={providerMenuRef}
+                      role="menu"
+                      aria-label={t('chat:websearch.provider')}
+                      className="max-h-[40vh] overflow-y-auto custom-scrollbar"
+                    >
+                      {allOptions.map(option => (
+                        <MenuItem
+                          key={option.value}
+                          label={option.label}
+                          selected={selected === option.value}
+                          selectionRole="menuitemradio"
+                          onClick={() => {
+                            setSelected(option.value)
+                            setProviderMenuOpen(false)
+                            providerTriggerRef.current?.focus()
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </DropdownMenu>
+                </div>
               </div>
 
               <div className="text-[length:var(--fs-xs)] text-text-400" aria-live="polite">

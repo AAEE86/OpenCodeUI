@@ -61,9 +61,6 @@ export function EditConfirmDialog({
             {t('fileExplorer.confirmSaveConflict')}
           </p>
         )}
-        <p className="text-[length:var(--fs-sm)] text-text-400">
-          {mode === 'save' ? t('fileExplorer.confirmSaveHint') : t('fileExplorer.confirmDiscardHint')}
-        </p>
 
         {tooLarge ? (
           <p className="text-[length:var(--fs-xs)] text-text-500">{t('fileExplorer.confirmDiffTooLarge')}</p>

@@ -101,13 +101,17 @@ describe('MarkdownRenderer', () => {
     render(<MarkdownRenderer content={'Use `code` here'} />)
 
     const codeEl = screen.getByText('code')
-    // 传统样式：等宽 + 淡底色 chip；颜色继承正文（不自己指定，免得比正文亮）
+    // 传统 chip 样式：等宽 + 淡底色 + 内边距 + 外侧间距；颜色继承正文
     expect(codeEl.className).toMatch(/font-mono/)
     expect(codeEl.className).not.toMatch(/text-text-\d/)
     // 底色必须是前景色叠加（背景色阶在各主题下会和页面底色糊在一起）
     expect(codeEl.className).toMatch(/bg-text-100\/\d+/)
     expect(codeEl.className).not.toMatch(/bg-bg-200/)
-    expect(codeEl.className).toMatch(/rounded/)
+    expect(codeEl.className).toMatch(/rounded-md/)
+    // 内边距与外侧间距：chip 紧贴前后文字会很挤
+    expect(codeEl.className).toMatch(/px-1\.5/)
+    expect(codeEl.className).toMatch(/py-0\.5/)
+    expect(codeEl.className).toMatch(/mx-0\.5/)
     expect(codeEl.className).not.toMatch(/text-accent-main/)
     expect(codeEl.className).not.toMatch(/border/)
   })

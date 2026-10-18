@@ -696,12 +696,12 @@ function renderInlineTokensToReact(tokens: unknown[], _isReasoning: boolean): Re
       return <del key={index} className={_isReasoning ? 'text-text-500 line-through decoration-text-500/50' : 'text-text-400 line-through decoration-text-400/50'}>{renderInlineTokensToReact((item.tokens as unknown[]) ?? [], _isReasoning)}</del>
     }
     if (item.type === 'codespan') {
-      // 与 markdownHtmlRenderer 的 codespan 保持一致：等宽 + 淡底色 chip，
-      // 颜色继承正文（不自己指定，免得比正文亮，也不抢主题色）
+      // 与 markdownHtmlRenderer 的 codespan 保持一致（两条路径不一致的话，
+      // 同一条消息里会出现两种内联代码样式）
       return (
         <code
           key={index}
-          className="font-mono text-[0.9em] align-baseline break-words bg-text-100/15 rounded px-[0.35em] py-[0.1em]"
+          className="font-mono text-[length:var(--fs-code)] align-baseline break-words bg-text-100/15 rounded-md mx-0.5 px-1.5 py-0.5"
         >
           {String(item.text ?? '')}
         </code>

@@ -18,6 +18,7 @@
 
 import { getSDKClient } from './sdk'
 import { locationParam } from './location'
+import { fileBaseName } from '../utils/pathUtils'
 import type { FileContent, FileNode, FileStatusItem } from './types'
 import { serverStore } from '../store/serverStore'
 
@@ -285,6 +286,38 @@ export async function uploadAttachment(
 
   const resolved = result?.data?.path
   return { path: resolved || target, size: bytes.byteLength }
+}
+
+/**
+ * 服务端能不能读到这个路径。
+ *
+ * 桌面端拖入的文件里存的是**客户端**的绝对路径；能不能直接把它交给服务端引用，
+ * 取决于服务端进程是否也看得见这个路径——这与「URL 是不是 localhost」并不等价：
+ * - 本机但用**局域网地址**连自己 → URL 判非本地，实际同机（能读到）
+ * - 容器把端口映射到回环 → URL 判本地，容器里读不到宿主路径（读不到）
+ * 所以直接问服务端最可靠：列一次父目录，看目标条目在不在。
+ *
+ * 任何异常（目录不存在、无权限、服务端不可达）都按「读不到」处理。
+ */
+export async function probeServerPath(path: string, directory?: string, serverId?: string): Promise<boolean> {
+  const name = fileBaseName(path)
+  const separatorIndex = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  if (!name || separatorIndex <= 0) return false
+
+  const parent = path.slice(0, separatorIndex)
+
+  try {
+    const sdk = getSDKClient(serverId)
+    const result = await sdk.file.list({
+      location: locationParam(directory, serverId),
+      path: parent,
+    })
+    // 条目 path 可能是 location 相对路径，也可能是绝对路径（越界列举时实测如此），
+    // 所以只比最后一段；symlink 也算读得到（服务端能顺着读）。
+    return result.data.some(entry => entry.type !== 'directory' && fileBaseName(entry.path) === name)
+  } catch {
+    return false
+  }
 }
 
 /**

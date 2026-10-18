@@ -11,7 +11,7 @@
 // 访问（见 buildAttachmentReferences）。
 // ============================================
 
-import { createUploadId, uploadAttachment } from '../../../api/file'
+import { createUploadId, probeServerPath, uploadAttachment } from '../../../api/file'
 import { getMimeFromPath, routeAttachment } from './inputUtils'
 import { toFileUrl } from '../../mention'
 import type { FileCapabilities } from '../../../api'
@@ -117,6 +117,31 @@ export function decideNativeFileRoute(input: {
       return { kind: 'reject' }
     default:
       return { kind: 'upload', pathOnly: route.pathOnly }
+  }
+}
+
+/**
+ * 能否把本机路径直接交给服务端引用。
+ *
+ * 「URL 是不是 localhost」不足以回答这个问题（本机也可以用局域网地址连自己，
+ * 容器也会把端口映射到回环），所以除了应用自己拉起的服务（必然同机）之外，
+ * 一律直接问服务端：这个路径你读得到吗（`probeServerPath`）。
+ */
+export async function canReferenceLocalPath(input: {
+  path: string
+  /** 应用自己拉起的服务（`local` 条目）：必然同机，免探测 */
+  pinnedLocal: boolean
+  directory?: string
+  serverId?: string
+  /** 便于单测注入 */
+  probe?: (path: string, directory?: string, serverId?: string) => Promise<boolean>
+}): Promise<boolean> {
+  if (input.pinnedLocal) return true
+
+  try {
+    return await (input.probe ?? probeServerPath)(input.path, input.directory, input.serverId)
+  } catch {
+    return false
   }
 }
 

@@ -15,15 +15,17 @@ const infoMock = vi.fn(async () => ({
   urls: [],
   paths: { tmp: '/srv/tmp' },
 }))
+const listMock = vi.fn(async (_input: unknown) => ({ data: [] as Array<{ path: string; type: string }> }))
 
 vi.mock('./sdk', () => ({
   getSDKClient: () => ({
-    file: { write: writeMock },
+    file: { write: writeMock, list: listMock },
     server: { info: infoMock },
   }),
 }))
 
-const { clearServerTmpDirectoryCache, createUploadId, getServerTmpDirectory, uploadAttachment } = await import('./file')
+const { clearServerTmpDirectoryCache, createUploadId, getServerTmpDirectory, probeServerPath, uploadAttachment } =
+  await import('./file')
 
 function lastWriteInput() {
   return writeMock.mock.calls.at(-1)?.[0] as {
@@ -123,5 +125,62 @@ describe('createUploadId', () => {
     } finally {
       if (original) Object.defineProperty(globalThis, 'crypto', original)
     }
+  })
+})
+
+// ============================================
+// probeServerPath：服务端能不能读到这个本机路径
+//
+// 「URL 是不是 localhost」回答不了这个问题（本机也可能用局域网地址连自己，
+// 容器也会把端口映射到回环），所以直接问服务端。
+// ============================================
+
+describe('probeServerPath', () => {
+  beforeEach(() => {
+    listMock.mockReset()
+    listMock.mockResolvedValue({ data: [] })
+  })
+
+  it('父目录里存在同名文件 → 读得到（Windows 路径与 `../` 形态条目都能匹配）', async () => {
+    listMock.mockResolvedValue({
+      data: [
+        { path: '../../../Temp/opencode/uploads/u1/probe.zip', type: 'file' },
+        { path: '../../../Temp/opencode/uploads/u1/sub', type: 'directory' },
+      ],
+    })
+
+    await expect(
+      probeServerPath('C:\\Users\\x\\AppData\\Local\\Temp\\opencode\\uploads\\u1\\probe.zip', '/repo', 'local'),
+    ).resolves.toBe(true)
+
+    expect(listMock).toHaveBeenCalledWith({
+      location: { directory: '/repo' },
+      path: 'C:\\Users\\x\\AppData\\Local\\Temp\\opencode\\uploads\\u1',
+    })
+  })
+
+  it('目录里没有该条目 → 读不到', async () => {
+    listMock.mockResolvedValue({ data: [{ path: '../other/thing.zip', type: 'file' }] })
+    await expect(probeServerPath('/host/dl/report.zip')).resolves.toBe(false)
+  })
+
+  it('同名但类型是目录 → 读不到', async () => {
+    listMock.mockResolvedValue({ data: [{ path: '../dl/report.zip', type: 'directory' }] })
+    await expect(probeServerPath('/host/dl/report.zip')).resolves.toBe(false)
+  })
+
+  it('符号链接也算读得到（服务端能顺着读）', async () => {
+    listMock.mockResolvedValue({ data: [{ path: '../dl/report.zip', type: 'symlink' }] })
+    await expect(probeServerPath('/host/dl/report.zip')).resolves.toBe(true)
+  })
+
+  it('服务端不可达 / 目录不存在 → 按读不到处理，不抛错', async () => {
+    listMock.mockRejectedValue(new Error('Failed to fetch'))
+    await expect(probeServerPath('/host/dl/report.zip')).resolves.toBe(false)
+  })
+
+  it('没有父目录的裸文件名 → 读不到（不去列服务端根目录）', async () => {
+    await expect(probeServerPath('report.zip')).resolves.toBe(false)
+    expect(listMock).not.toHaveBeenCalled()
   })
 })

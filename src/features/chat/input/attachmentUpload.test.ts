@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { buildPathAttachment, decideNativeFileRoute } from './attachmentUpload'
+import { describe, expect, it, vi } from 'vitest'
+import { buildPathAttachment, canReferenceLocalPath, decideNativeFileRoute } from './attachmentUpload'
 
 // ============================================
 // 桌面端拖入的本机文件该走哪条路（需求二）
@@ -143,5 +143,44 @@ describe('buildPathAttachment', () => {
     })
     expect(attachment.pathOnly).toBe(true)
     expect(attachment.url).toBe('file:///tmp/uploads/u1/big.bin')
+  })
+})
+
+// ============================================
+// 能否直接引用本机路径（「是不是本地」的最终判据）
+//
+// URL 判本地不够：本机也能用局域网地址连自己；容器也会把端口映射到回环。
+// 所以除了应用自己拉起的服务（必然同机，免探测），一律问服务端读不读得到。
+// ============================================
+
+describe('canReferenceLocalPath', () => {
+  it('应用自己拉起的服务（local）必然同机：免探测直接可用', async () => {
+    const probe = vi.fn(async () => false)
+
+    await expect(
+      canReferenceLocalPath({ path: 'C:/x/a.zip', pinnedLocal: true, probe }),
+    ).resolves.toBe(true)
+    expect(probe).not.toHaveBeenCalled()
+  })
+
+  it('本机但用局域网地址连自己：探测通过 → 可直接引用（不上传）', async () => {
+    const probe = vi.fn(async () => true)
+
+    await expect(
+      canReferenceLocalPath({ path: 'C:/x/a.zip', pinnedLocal: false, serverId: 'lan', probe }),
+    ).resolves.toBe(true)
+    expect(probe).toHaveBeenCalledWith('C:/x/a.zip', undefined, 'lan')
+  })
+
+  it('容器/远端读不到宿主路径：探测失败 → 必须上传', async () => {
+    const probe = vi.fn(async () => false)
+    await expect(canReferenceLocalPath({ path: 'C:/x/a.zip', pinnedLocal: false, probe })).resolves.toBe(false)
+  })
+
+  it('探测本身抛错（服务端不可达）：按读不到处理，不抛出去', async () => {
+    const probe = vi.fn(async () => {
+      throw new Error('Failed to fetch')
+    })
+    await expect(canReferenceLocalPath({ path: 'C:/x/a.zip', pinnedLocal: false, probe })).resolves.toBe(false)
   })
 })

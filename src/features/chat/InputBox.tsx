@@ -33,10 +33,17 @@ import {
   routeAttachment,
 } from './input/inputUtils'
 import { formatFileSize } from '../../utils/formatUtils'
-import { uploadBytesAsAttachment, uploadFileAsAttachment, decideNativeFileRoute, type UploadFailure } from './input/attachmentUpload'
+import {
+  canReferenceLocalPath,
+  uploadBytesAsAttachment,
+  uploadFileAsAttachment,
+  decideNativeFileRoute,
+  type NativeFileDecision,
+  type UploadFailure,
+} from './input/attachmentUpload'
 import { createUploadId } from '../../api/file'
 import { notificationStore } from '../../store/notificationStore'
-import { serverStore } from '../../store/serverStore'
+import { LOCAL_SERVER_ID, serverStore } from '../../store/serverStore'
 import { sessionKeyToServerId } from '../../utils/sessionKey'
 import { keybindingStore, matchesKeybinding } from '../../store/keybindingStore'
 import { themeStore } from '../../store/themeStore'
@@ -285,6 +292,12 @@ function InputBoxComponent({
    * 浏览器里永远拿不到真实路径，所以同机也照旧上传（issue #182 的主场景）。
    */
   const serverIsLocal = useMemo(() => serverStore.isLocalServer(uploadTarget.serverId), [uploadTarget.serverId])
+
+  /** 应用自己拉起的服务（`local` 条目）：必然同机，引用时免探测 */
+  const pinnedLocalServer = useMemo(
+    () => (uploadTarget.serverId ?? serverStore.getActiveServerId()) === LOCAL_SERVER_ID,
+    [uploadTarget.serverId],
+  )
 
   /** 在途上传（id → 完成信号）。发送前必须清空，避免把半个附件发出去 */
   const pendingUploadsRef = useRef(new Map<string, Promise<void>>())
@@ -1484,9 +1497,28 @@ function InputBoxComponent({
             nativePath: fileInfo.path,
           })
 
+        // 判定 + 确认，只算一次：'mention' 分支还要问服务端「这个路径你读得到吗」，
+        // 读不到就不能沿用本机引用（容器转发 / 真远端），改走上传。
+        let decided: NativeFileDecision | null = null
+        const resolveRoute = async (byteLength: number) => {
+          if (!decided) {
+            const route = decideRoute(byteLength)
+            decided =
+              route.kind === 'mention' && !(await canReferenceLocalPath({
+                path: fileInfo.path,
+                pinnedLocal: pinnedLocalServer,
+                directory: uploadTarget.directory,
+                serverId: uploadTarget.serverId,
+              }))
+                ? { kind: 'upload', pathOnly: true }
+                : route
+          }
+          return decided
+        }
+
         if (size >= 0) {
-          const route = decideRoute(size)
-          // 'mention' = 服务端同机且不满足内联条件 → 交回调用方退化成 @ 引用（原行为）
+          const route = await resolveRoute(size)
+          // 'mention' = 服务端读得到这个本机路径 → 交回调用方退化成 @ 引用（原行为）
           if (route.kind === 'mention') return null
           if (route.kind === 'reject') return rejectTooLarge()
           if (route.kind === 'inline') return inlineAttachment(await readFile(fileInfo.path), size)
@@ -1495,7 +1527,7 @@ function InputBoxComponent({
         const bytes = await readFile(fileInfo.path)
         size = size >= 0 ? size : bytes.byteLength
 
-        const route = decideRoute(size)
+        const route = await resolveRoute(size)
         if (route.kind === 'mention') return null
         if (route.kind === 'reject') return rejectTooLarge()
         if (route.kind === 'inline') return inlineAttachment(bytes, size)
@@ -1517,7 +1549,7 @@ function InputBoxComponent({
         return null
       }
     },
-    [fileCaps, notifyAttachmentError, serverIsLocal, t, uploadFailureBody, uploadTarget],
+    [fileCaps, notifyAttachmentError, pinnedLocalServer, serverIsLocal, t, uploadFailureBody, uploadTarget],
   )
 
   const handleTauriExternalDrop = useCallback(

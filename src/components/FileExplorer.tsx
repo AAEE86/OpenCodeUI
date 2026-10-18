@@ -1146,6 +1146,41 @@ function FilePreview({
             <AlertCircleIcon size={16} />
             <span className="text-center">{error}</span>
           </div>
+        ) : isEditing ? (
+          // 编辑态优先于"预览类型"分发：md / html / svg 这类带预览的文件，
+          // 进编辑态要直接切到源码编辑（而不是继续渲染预览）
+          <div className="min-h-full flex flex-col">
+            {saveError && (
+              <div className="px-3 py-2 text-danger-100 text-[length:var(--fs-xs)] flex items-center justify-between gap-3">
+                <span>{saveError}</span>
+                {saveConflict && (
+                  <span className="flex gap-2 shrink-0">
+                    <button
+                      className="text-text-200 hover:text-text-100"
+                      onClick={() => {
+                        setIsEditing(false)
+                        setSaveError(null)
+                        setSaveConflict(false)
+                        if (path) void onReload?.(path)
+                      }}
+                    >
+                      {t('fileExplorer.reload')}
+                    </button>
+                    <button className="text-danger-100 hover:text-danger-200" onClick={() => void saveEditing(true)}>
+                      {t('fileExplorer.overwrite')}
+                    </button>
+                  </span>
+                )}
+              </div>
+            )}
+            <CodePreview
+              code={draft}
+              language={language || 'text'}
+              isResizing={isResizing}
+              readOnly={false}
+              onChange={setDraft}
+            />
+          </div>
         ) : displayContent?.type === 'media' ? (
           <MediaPreview
             category={displayContent.category}
@@ -1193,51 +1228,16 @@ function FilePreview({
         ) : // diff 渲染已移至 Changes 面板
         // ) : displayContent?.type === 'diff' ? (
         //   <DiffPreview hunks={displayContent.hunks} isResizing={isResizing} />
-        displayContent?.type === 'text' ? (
-          isEditing ? (
-            <div className="min-h-full flex flex-col">
-              {saveError && (
-                <div className="px-3 py-2 text-danger-100 text-[length:var(--fs-xs)] flex items-center justify-between gap-3">
-                  <span>{saveError}</span>
-                  {saveConflict && (
-                    <span className="flex gap-2 shrink-0">
-                      <button
-                        className="text-text-200 hover:text-text-100"
-                        onClick={() => {
-                          setIsEditing(false)
-                          setSaveError(null)
-                          setSaveConflict(false)
-                          if (path) void onReload?.(path)
-                        }}
-                      >
-                        {t('fileExplorer.reload')}
-                      </button>
-                      <button className="text-danger-100 hover:text-danger-200" onClick={() => void saveEditing(true)}>
-                        {t('fileExplorer.overwrite')}
-                      </button>
-                    </span>
-                  )}
-                </div>
-              )}
-              <CodePreview
-                code={draft}
-                language={language || 'text'}
-                isResizing={isResizing}
-                readOnly={false}
-                onChange={setDraft}
-              />
-            </div>
-          ) : (
-            <CodePreview
-              code={displayContent.text}
-              language={language || 'text'}
-              isResizing={isResizing}
-              targetLine={targetLine}
-              targetKey={targetKey}
-              targetRanges={targetRanges}
-            />
-          )
-        ) : (
+        displayContent?.type === 'text' && !isEditing ? (
+          <CodePreview
+            code={displayContent.text}
+            language={language || 'text'}
+            isResizing={isResizing}
+            targetLine={targetLine}
+            targetKey={targetKey}
+            targetRanges={targetRanges}
+          />
+        ) : displayContent?.type === 'text' ? null : (
           <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
             {t('common:noContent')}
           </div>

@@ -35,8 +35,8 @@ import {
 import { formatFileSize } from '../../utils/formatUtils'
 import {
   canReferenceLocalPath,
-  uploadBytesAsAttachment,
   uploadFileAsAttachment,
+  uploadPathAsAttachment,
   decideNativeFileRoute,
   type NativeFileDecision,
   type UploadFailure,
@@ -132,6 +132,30 @@ export interface CollapsedDialogInfo {
   queueLength: number
   onExpand: () => void
 }
+
+/**
+ * 一次待上传的来源。
+ *
+ * 浏览器/粘贴只能给 `File`；桌面端拖入与选择器给的是**本机绝对路径**——
+ * 那条走 Rust 流式上传（不读进渲染进程，也有进度）。
+ */
+type PendingUpload =
+  | {
+      kind: 'file'
+      file: File
+      filename: string
+      mime: string
+      size: number
+      pathOnly: boolean
+    }
+  | {
+      kind: 'path'
+      path: string
+      filename: string
+      mime: string
+      size: number
+      pathOnly: boolean
+    }
 
 export interface InputBoxProps {
   paneId: string
@@ -301,8 +325,8 @@ function InputBoxComponent({
 
   /** 在途上传（id → 完成信号）。发送前必须清空，避免把半个附件发出去 */
   const pendingUploadsRef = useRef(new Map<string, Promise<void>>())
-  /** 失败后可重试的源文件（id → File + 路由结果） */
-  const uploadSourcesRef = useRef(new Map<string, { file: File; pathOnly: boolean }>())
+  /** 失败后可重试的上传源（id → 源 + 路由结果） */
+  const uploadSourcesRef = useRef(new Map<string, PendingUpload>())
   const [uploadingCount, setUploadingCount] = useState(0)
 
   const notifyAttachmentError = useCallback(
@@ -327,14 +351,14 @@ function InputBoxComponent({
    * 失败则标记 failed 并弹出可见错误——issue #182 明确要求不静默吞掉。
    */
   const runAttachmentUpload = useCallback(
-    (attachmentId: string, file: File, pathOnly: boolean) => {
+    (attachmentId: string, entry: PendingUpload) => {
       const task = (async () => {
-        const { attachment, failure } = await uploadFileAsAttachment(file, {
+        const options = {
           ...uploadTarget,
-          pathOnly,
-          // 浏览器侧会走 XHR 拿到真实进度；桌面端（经 Rust 发包）没有进度事件，
-          // 回调不触发 → 胶囊保持不确定态转圈
-          onProgress: fraction => {
+          pathOnly: entry.pathOnly,
+          // 浏览器走 XHR、桌面端走 Rust 命令，两条都能推真实进度；
+          // 拿不到进度时回调不触发 → 胶囊保持不确定态转圈
+          onProgress: (fraction: number) => {
             setAttachments(prev =>
               prev.map(item => {
                 if (item.id !== attachmentId) return item
@@ -346,7 +370,12 @@ function InputBoxComponent({
               }),
             )
           },
-        })
+        }
+
+        const { attachment, failure } =
+          entry.kind === 'file'
+            ? await uploadFileAsAttachment(entry.file, options)
+            : await uploadPathAsAttachment(entry.path, entry.filename, entry.mime, options)
 
         if (attachment) {
           setAttachments(prev =>
@@ -359,8 +388,8 @@ function InputBoxComponent({
           prev.map(item => (item.id === attachmentId ? { ...item, uploadStatus: 'failed' as const } : item)),
         )
         notifyAttachmentError(
-          t('attachment.uploadFailed.title', { name: file.name }),
-          uploadFailureBody(file.name, failure ?? { reason: 'unknown', message: '' }),
+          t('attachment.uploadFailed.title', { name: entry.filename }),
+          uploadFailureBody(entry.filename, failure ?? { reason: 'unknown', message: '' }),
         )
       })()
 
@@ -384,24 +413,24 @@ function InputBoxComponent({
    * 占位还没落地 → 进度丢失"的竞态。
    */
   const startAttachmentUpload = useCallback(
-    (file: File, pathOnly: boolean) => {
+    (entry: PendingUpload) => {
       const attachmentId = createUploadId()
-      uploadSourcesRef.current.set(attachmentId, { file, pathOnly })
+      uploadSourcesRef.current.set(attachmentId, entry)
 
       setAttachments(prev => [
         ...prev,
         {
           id: attachmentId,
           type: 'file',
-          displayName: file.name,
-          mime: file.type || getMimeFromPath(file.name) || 'application/octet-stream',
-          size: file.size,
+          displayName: entry.filename,
+          mime: entry.mime,
+          size: entry.size,
           uploadStatus: 'uploading',
-          ...(pathOnly ? { pathOnly: true } : {}),
+          ...(entry.pathOnly ? { pathOnly: true } : {}),
         },
       ])
 
-      runAttachmentUpload(attachmentId, file, pathOnly)
+      runAttachmentUpload(attachmentId, entry)
     },
     [runAttachmentUpload],
   )
@@ -409,13 +438,13 @@ function InputBoxComponent({
   /** 重试失败的上传（保留同一个 chip 与 id） */
   const retryAttachmentUpload = useCallback(
     (attachmentId: string) => {
-      const source = uploadSourcesRef.current.get(attachmentId)
-      if (!source) return
+      const entry = uploadSourcesRef.current.get(attachmentId)
+      if (!entry) return
 
       setAttachments(prev =>
         prev.map(item => (item.id === attachmentId ? { ...item, uploadStatus: 'uploading' as const } : item)),
       )
-      runAttachmentUpload(attachmentId, source.file, source.pathOnly)
+      runAttachmentUpload(attachmentId, entry)
     },
     [runAttachmentUpload],
   )
@@ -1298,7 +1327,14 @@ function InputBoxComponent({
         }
 
         // 上传：占位与启动都在 startAttachmentUpload 里（保证进度不会先于占位落地）
-        startAttachmentUpload(file, route.pathOnly)
+        startAttachmentUpload({
+          kind: 'file',
+          file,
+          filename: file.name,
+          mime,
+          size: file.size,
+          pathOnly: route.pathOnly,
+        })
       }
 
       if (inlineAttachments.length > 0) {
@@ -1560,16 +1596,16 @@ function InputBoxComponent({
         if (route.kind === 'reject') return rejectTooLarge()
         if (route.kind === 'inline') return inlineAttachment(bytes, size)
 
-        const { attachment, failure } = await uploadBytesAsAttachment(bytes, name, mime, {
-          ...uploadTarget,
+        // 上传：不把字节交给渲染进程，直接把本机路径交给 Rust 流式发送
+        // （占位 chip 与进度都由 startAttachmentUpload 负责）
+        startAttachmentUpload({
+          kind: 'path',
+          path: fileInfo.path,
+          filename: name,
+          mime,
+          size,
           pathOnly: route.pathOnly,
         })
-        if (attachment) return attachment
-
-        notifyAttachmentError(
-          t('attachment.uploadFailed.title', { name }),
-          uploadFailureBody(name, failure ?? { reason: 'unknown', message: '' }),
-        )
         return 'skip'
       } catch (err) {
         // 读取失败可能是权限/瞬时问题：退化为 @mention（本机服务端仍可能读到）
@@ -1577,7 +1613,15 @@ function InputBoxComponent({
         return null
       }
     },
-    [fileCaps, notifyAttachmentError, pinnedLocalServer, serverIsLocal, t, uploadFailureBody, uploadTarget],
+    [
+      fileCaps,
+      notifyAttachmentError,
+      pinnedLocalServer,
+      serverIsLocal,
+      startAttachmentUpload,
+      t,
+      uploadTarget,
+    ],
   )
 
   /**
@@ -1604,8 +1648,10 @@ function InputBoxComponent({
 
           const result = await createUploadAttachmentFromDroppedPath(info)
           if (result === 'skip') {
-            // 已处理但无附件可加（超限 / 上传失败）：已弹过可见提示，
-            // 不能再退化成 @mention —— 服务端在远端时那个本机路径读不到
+            // 两种「不用再加东西」的情况：
+            // 1) 走上传：占位 chip 已由 startAttachmentUpload 插入，进度也归它管
+            // 2) 超限 / 上传失败：已弹过可见提示，不能再退化成 @mention
+            //    （服务端在远端时那个本机路径读不到）
             continue
           }
           if (result) {

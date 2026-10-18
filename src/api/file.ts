@@ -320,6 +320,63 @@ function writeWithXhr(input: {
   })
 }
 
+/** 上传目标：`{tmp}/uploads/<uuid>/<清洗后的文件名>`（每次单独一层 uuid 目录） */
+async function buildUploadTarget(serverId: string | undefined, filename: string): Promise<string> {
+  const tmp = await getServerTmpDirectory(serverId)
+  return `${tmp.replace(/[/\\]+$/, '')}/uploads/${createUploadId()}/${sanitizeUploadFilename(filename)}`
+}
+
+/** Tauri 侧 Rust 上传命令的进度事件（见 src-tauri/src/app/commands/upload.rs） */
+interface RustUploadEvent {
+  type: 'progress'
+  loaded: number
+  total: number
+}
+
+/**
+ * 上传**本机文件**（桌面端拖入 / 选择器拿到的是绝对路径）。
+ *
+ * Tauri 下走 Rust 命令：reqwest 流式发送 + 进度事件。这样做有三个好处：
+ * 不把整份文件读进渲染进程、不受 webview 同源策略约束、有真实进度。
+ * 非 Tauri 环境理论到不了这里（浏览器拿不到真实路径），退化为读字节上传。
+ */
+export async function uploadLocalFile(
+  sourcePath: string,
+  filename: string,
+  directory?: string,
+  serverId?: string,
+  options: UploadAttachmentOptions = {},
+): Promise<{ path: string; size: number }> {
+  const target = await buildUploadTarget(serverId, filename)
+
+  if (isTauri()) {
+    const { Channel, invoke } = await import('@tauri-apps/api/core')
+
+    const channel = new Channel<RustUploadEvent>()
+    channel.onmessage = event => {
+      if (event.type === 'progress' && event.total > 0) {
+        options.onProgress?.(Math.min(1, event.loaded / event.total))
+      }
+    }
+
+    const auth = serverId ? serverStore.getServerAuth(serverId) : serverStore.getActiveAuth()
+    const result = await invoke<{ path: string; size: number }>('upload_attachment', {
+      url: getApiBaseUrl(serverId),
+      target,
+      sourcePath,
+      password: auth?.password ?? null,
+      directory: directory ?? null,
+      onEvent: channel,
+    })
+
+    return { path: result?.path || target, size: result?.size ?? 0 }
+  }
+
+  const { readFile } = await import('@tauri-apps/plugin-fs')
+  const bytes = await readFile(sourcePath)
+  return uploadAttachment(bytes, filename, directory, serverId, options)
+}
+
 /**
  * 上传附件到服务端临时目录，返回**服务端上的绝对路径**与字节数。
  *
@@ -333,8 +390,7 @@ export async function uploadAttachment(
   serverId?: string,
   options: UploadAttachmentOptions = {},
 ): Promise<{ path: string; size: number }> {
-  const tmp = await getServerTmpDirectory(serverId)
-  const target = `${tmp.replace(/[/\\]+$/, '')}/uploads/${createUploadId()}/${sanitizeUploadFilename(filename)}`
+  const target = await buildUploadTarget(serverId, filename)
 
   // 浏览器 + 要进度 → XHR（File 直接交给浏览器流式发送）
   if (options.onProgress && !isTauri() && typeof XMLHttpRequest !== 'undefined') {

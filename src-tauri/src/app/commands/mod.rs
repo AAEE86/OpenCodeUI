@@ -5,6 +5,8 @@ pub mod opencode;
 pub mod service;
 #[cfg(not(target_os = "android"))]
 pub mod utils;
+#[cfg(not(target_os = "android"))]
+pub mod upload;
 #[cfg(target_os = "windows")]
 pub mod wsl_types;
 #[cfg(target_os = "windows")]

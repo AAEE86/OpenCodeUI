@@ -30,6 +30,12 @@ vi.mock('./http', () => ({
   getAuthHeader: () => ({ Authorization: 'Basic test-token' }),
 }))
 
+const readFileMock = vi.fn(async (_path: string) => new Uint8Array([1, 2, 3]))
+
+vi.mock('@tauri-apps/plugin-fs', () => ({
+  readFile: (path: string) => readFileMock(path),
+}))
+
 /** 最小 XHR 假件：记录请求，允许测试驱动 progress/load/error */
 class FakeXhr {
   static instances: FakeXhr[] = []
@@ -105,7 +111,7 @@ class FakeXhr {
   }
 }
 
-const { clearServerTmpDirectoryCache, createUploadId, getServerTmpDirectory, probeServerPath, uploadAttachment } =
+const { clearServerTmpDirectoryCache, createUploadId, getServerTmpDirectory, probeServerPath, uploadAttachment, uploadLocalFile } =
   await import('./file')
 
 function lastWriteInput() {
@@ -284,11 +290,12 @@ describe('uploadAttachment — XHR 进度传输', () => {
     return uploadAttachment(new Blob(['zip-bytes']), 'report.zip', directory, 'local', { onProgress })
   }
 
-  /** 起一个上传并等到 XHR 真的被创建（前面有 await，必须让微任务先跑） */
+  /** 起一个上传并等到**这一次**的 XHR 被创建（前面有 await，必须让微任务先跑） */
   async function startUpload(onProgress: (fraction: number) => void, directory?: string) {
+    const before = FakeXhr.instances.length
     const pending = uploadWithProgress(onProgress, directory)
     await vi.waitFor(() => {
-      expect(FakeXhr.instances.length).toBeGreaterThan(0)
+      expect(FakeXhr.instances.length).toBeGreaterThan(before)
     })
     return { pending, xhr: FakeXhr.last() }
   }
@@ -356,5 +363,71 @@ describe('uploadAttachment — XHR 进度传输', () => {
     } finally {
       Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
     }
+  })
+})
+
+// ============================================
+// 本机文件上传（桌面端）：Tauri 下交给 Rust 流式发送，进度经 Channel 推回
+// ============================================
+
+const invokeMock = vi.fn(async (_command: string, _args: Record<string, unknown>) => ({
+  path: '/srv/tmp/uploads/u7/piui-source.zip',
+  size: 4096,
+}))
+
+vi.mock('@tauri-apps/api/core', () => ({
+  Channel: class {
+    onmessage: ((event: { type: string; loaded: number; total: number }) => void) | null = null
+  },
+  invoke: (command: string, args: Record<string, unknown>) => invokeMock(command, args),
+}))
+
+describe('uploadLocalFile', () => {
+  beforeEach(() => {
+    writeMock.mockClear()
+    infoMock.mockClear()
+    readFileMock.mockClear()
+    clearServerTmpDirectoryCache()
+    invokeMock.mockClear()
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
+  })
+
+  it('Tauri 下调用 Rust 命令，带上 URL / 目标 / 源路径 / 密码，并把进度事件换算成 0~1', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true })
+    try {
+      const onProgress = vi.fn()
+      const result = await uploadLocalFile('C:\\dl\\piui-source.zip', 'piui-source.zip', '/repo', 'local', {
+        onProgress,
+      })
+
+      expect(result).toEqual({ path: '/srv/tmp/uploads/u7/piui-source.zip', size: 4096 })
+
+      const [command, args] = invokeMock.mock.calls[0] as [string, Record<string, unknown>]
+      expect(command).toBe('upload_attachment')
+      expect(args.url).toContain('http://')
+      expect(args.sourcePath).toBe('C:\\dl\\piui-source.zip')
+      expect(args.directory).toBe('/repo')
+      expect(String(args.target)).toContain('uploads')
+      expect(String(args.target)).toContain('piui-source.zip')
+      expect(args.onEvent).toBeTruthy()
+
+      // Rust 侧推事件 → JS 侧换算成比例
+      const channel = args.onEvent as { onmessage: (event: unknown) => void }
+      channel.onmessage({ type: 'progress', loaded: 512, total: 4096 })
+      channel.onmessage({ type: 'progress', loaded: 4096, total: 4096 })
+      expect(onProgress.mock.calls.map(call => call[0])).toEqual([0.125, 1])
+    } finally {
+      Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
+    }
+  })
+
+  it('非 Tauri 环境退化为读字节后走通用上传（浏览器本来也拿不到真实路径）', async () => {
+    readFileMock.mockResolvedValue(new Uint8Array([1, 2, 3]))
+
+    const result = await uploadLocalFile('/host/dl/report.zip', 'report.zip')
+
+    expect(invokeMock).not.toHaveBeenCalled()
+    expect(writeMock).toHaveBeenCalledTimes(1)
+    expect(result.path).toBe('/srv/tmp/uploads/abc/report.zip')
   })
 })

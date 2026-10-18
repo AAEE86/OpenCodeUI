@@ -11,7 +11,7 @@
 // 访问（见 buildAttachmentReferences）。
 // ============================================
 
-import { createUploadId, probeServerPath, uploadAttachment } from '../../../api/file'
+import { createUploadId, probeServerPath, uploadAttachment, uploadLocalFile } from '../../../api/file'
 import { getMimeFromPath, routeAttachment } from './inputUtils'
 import { toFileUrl } from '../../mention'
 import type { FileCapabilities } from '../../../api'
@@ -184,13 +184,33 @@ export async function uploadFileAsAttachment(file: File, options: UploadOptions)
 }
 
 /**
- * 上传已经读入内存的字节（桌面端拖入走的是本机路径，需要先自行读取）。
+ * 上传**本机文件**（桌面端拖入 / 选择器）。
+ *
+ * Tauri 下由 Rust 流式发送并把进度推回来（见 api/file.uploadLocalFile），
+ * 所以这里不会把整份文件读进渲染进程。
  */
-export async function uploadBytesAsAttachment(
-  bytes: Uint8Array,
+export async function uploadPathAsAttachment(
+  sourcePath: string,
   filename: string,
   mime: string,
   options: UploadOptions,
 ): Promise<UploadOutcome> {
-  return uploadAndBuild(bytes, filename, mime || 'application/octet-stream', bytes.byteLength, options)
+  try {
+    const { path, size } = await uploadLocalFile(sourcePath, filename, options.directory, options.serverId, {
+      onProgress: options.onProgress,
+    })
+
+    return {
+      attachment: buildPathAttachment({
+        id: createUploadId(),
+        path,
+        filename,
+        mime: mime || 'application/octet-stream',
+        size,
+        pathOnly: options.pathOnly,
+      }),
+    }
+  } catch (error) {
+    return { failure: classifyUploadFailure(error) }
+  }
 }

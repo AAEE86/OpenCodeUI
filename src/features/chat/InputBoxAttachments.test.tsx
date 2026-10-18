@@ -7,6 +7,7 @@ let selectedFiles: File[] = []
 let selectedPaths: string[] = []
 
 const uploadAttachmentMock = vi.fn()
+const uploadLocalFileMock = vi.fn()
 const createUploadIdMock = vi.fn(() => `upload-${uploadAttachmentMock.mock.calls.length}`)
 const notifyPushMock = vi.fn()
 const getDroppedPathsInfoMock = vi.fn(async (paths: string[]) =>
@@ -21,6 +22,8 @@ vi.mock('../../lib/tauriDragDrop', () => ({
 
 vi.mock('../../api/file', () => ({
   uploadAttachment: (...args: unknown[]) => uploadAttachmentMock(...args),
+  // 桌面端（本机路径）走 Rust 流式上传：这里只验证「路径被交给它」，不测 Rust
+  uploadLocalFile: (...args: unknown[]) => uploadLocalFileMock(...args),
   createUploadId: () => createUploadIdMock(),
   probeServerPath: vi.fn(async () => true),
 }))
@@ -141,6 +144,7 @@ describe('InputBox attachment handling', () => {
     selectedFiles = []
     selectedPaths = []
     uploadAttachmentMock.mockReset()
+    uploadLocalFileMock.mockReset()
     createUploadIdMock.mockClear()
     notifyPushMock.mockReset()
     getDroppedPathsInfoMock.mockClear()
@@ -346,7 +350,7 @@ describe('InputBox attachment handling', () => {
 
   it('非本机实例选文件 → 上传（本机路径对远端服务端无意义）', async () => {
     selectedPaths = ['C:/dl/piui-source.zip']
-    uploadAttachmentMock.mockResolvedValue({ path: '/srv/tmp/uploads/u9/piui-source.zip', size: 3 })
+    uploadLocalFileMock.mockResolvedValue({ path: '/srv/tmp/uploads/u9/piui-source.zip', size: 3 })
 
     const { serverStore } = await import('../../store/serverStore')
     const remote = serverStore.addServer({ name: 'lan', url: 'http://192.168.1.20:4096' })
@@ -356,8 +360,10 @@ describe('InputBox attachment handling', () => {
     fireEvent.click(screen.getByRole('button', { name: 'pick paths' }))
 
     await waitFor(() => {
-      expect(uploadAttachmentMock).toHaveBeenCalledTimes(1)
+      expect(uploadLocalFileMock).toHaveBeenCalledTimes(1)
     })
+    // 桌面端把**本机路径**交给 Rust 流式上传（不再先读进渲染进程）
+    expect(uploadLocalFileMock.mock.calls[0][0]).toBe('C:/dl/piui-source.zip')
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).not.toContain('@')
     expect(screen.getByTestId('attachment-meta')).toHaveTextContent('file:///srv/tmp/uploads/u9/piui-source.zip')
   })

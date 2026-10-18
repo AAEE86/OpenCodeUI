@@ -277,6 +277,49 @@ describe('InputBox attachment handling', () => {
     expect(screen.getByTestId('attachment-count')).toHaveTextContent('1')
   })
 
+  it('选中的是模型支持的媒体（图片）→ 内联，不占用 @，也不上传', async () => {
+    selectedPaths = ['C:/pics/photo.png']
+
+    render(
+      <InputBox
+        paneId="pane-test"
+        onSend={vi.fn()}
+        rootPath="E:/proj"
+        fileCapabilities={{ image: true, pdf: false, audio: false, video: false }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'pick paths' }))
+
+    // 原生媒体走内联（与拖入、与服务器在哪台机器无关）
+    await waitFor(() => {
+      expect(screen.getByTestId('attachment-meta')).toHaveTextContent('data:image/png;base64')
+    })
+    expect(readFileMock).toHaveBeenCalledWith('C:/pics/photo.png')
+    expect(uploadAttachmentMock).not.toHaveBeenCalled()
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).not.toContain('@')
+  })
+
+  it('模型不支持图片时选中图片 → 本机实例仍按 @ 引用处理', async () => {
+    selectedPaths = ['C:/pics/photo.png']
+
+    render(
+      <InputBox
+        paneId="pane-test"
+        onSend={vi.fn()}
+        rootPath="E:/proj"
+        fileCapabilities={{ image: false, pdf: false, audio: false, video: false }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'pick paths' }))
+
+    await waitFor(() => {
+      expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toContain('@C:/pics/photo.png')
+    })
+    expect(uploadAttachmentMock).not.toHaveBeenCalled()
+  })
+
   it('非本机实例选文件 → 上传（本机路径对远端服务端无意义）', async () => {
     selectedPaths = ['C:/dl/piui-source.zip']
     uploadAttachmentMock.mockResolvedValue({ path: '/srv/tmp/uploads/u9/piui-source.zip', size: 3 })

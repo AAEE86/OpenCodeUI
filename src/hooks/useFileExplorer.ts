@@ -345,13 +345,19 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
       const absRoot = canonicalizePath(effectiveDirectory).replace(/[/\\]+$/, "")
       const withinRoot =
         absTarget === absRoot || absTarget.startsWith(`${absRoot}/`) || absTarget.startsWith(`${absRoot}\\`)
-      if (!withinRoot) throw new Error(t("fileExplorer.writeOutsideWorkspace"))
+      if (!withinRoot) {
+        const outside = new Error(t("fileExplorer.writeOutsideWorkspace")) as Error & { code?: string }
+        outside.code = "OUTSIDE_WORKSPACE"
+        throw outside
+      }
       const cacheKey = `${serverId ?? ''}::${effectiveDirectory}::${path}`
       const baseline = previewCacheRef.current.get(cacheKey)
 
       // ① 条件校验：同时保证"只改已存在的文件"——文件没了就地报错，不会凭空创建
       const disk = await getFileContent(path, effectiveDirectory, serverId).catch(() => {
-        throw new Error(t("fileExplorer.fileMissing"))
+        const missing = new Error(t("fileExplorer.fileMissing")) as Error & { code?: string }
+        missing.code = "FILE_MISSING"
+        throw missing
       })
       if (!force && baselineHash && hashBytes(disk.bytes) !== baselineHash) {
         const conflict = new Error(t('fileExplorer.saveConflict')) as Error & { code?: string }

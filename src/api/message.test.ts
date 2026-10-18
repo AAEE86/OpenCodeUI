@@ -35,6 +35,7 @@ vi.mock('./sdk', () => ({
 const { sendMessage } = await import('./message')
 
 type PromptPayload = {
+  text?: string
   files?: Array<{ uri: string; name?: string; mention?: { start: number; end: number; text: string } }>
   agents?: Array<{ name: string; mention?: { start: number; end: number; text: string } }>
   skills?: Array<{ id: string; mention?: { start: number; end: number; text: string } }>
@@ -216,6 +217,127 @@ describe('sendMessage — prompt 载荷（官方 request.ts + submit.ts:395-411 
     await sendMessage({ ...baseParams(), text: 'hello' })
     const payload = lastPromptPayload()
     expect(payload.metadata).toEqual({ displayText: 'hello' })
+  })
+})
+
+// ============================================
+// 路径引用（Issue #182）
+//
+// files[].uri 只让服务端读到字节；model 能否看到取决于服务端嗅探出的 mime
+//（core to-llm-message.ts:75-83 只放行 text/plain 与 image/pdf）。因此上传的
+// zip/docx 必须额外把绝对路径写进 prompt 文本，官方做法同款
+//（packages/app/src/composer/request.ts:173-182）。
+// ============================================
+
+describe('sendMessage — 路径型附件的文本引用', () => {
+  beforeEach(() => {
+    calls.length = 0
+    switchModelMock.mockClear()
+    switchAgentMock.mockClear()
+    promptMock.mockClear()
+  })
+
+  const uploadedAttachment = (overrides: Record<string, unknown> = {}) => ({
+    id: 'up1',
+    type: 'file',
+    displayName: 'report.zip',
+    url: 'file:///tmp/opencode/uploads/u1/report.zip',
+    mime: 'application/zip',
+    relativePath: '/tmp/opencode/uploads/u1/report.zip',
+    ...overrides,
+  })
+
+  it('路径型附件：uri 进 files[]，绝对路径进文本与 metadata.attachments', async () => {
+    await sendMessage({
+      ...baseParams(),
+      text: '帮我看看这个包',
+      attachments: [uploadedAttachment()] as never,
+    })
+
+    const payload = lastPromptPayload()
+    expect(payload.files).toEqual([
+      { uri: 'file:///tmp/opencode/uploads/u1/report.zip', name: 'report.zip' },
+    ])
+    expect(payload.text).toBe('帮我看看这个包\nAttached file: `/tmp/opencode/uploads/u1/report.zip`')
+    expect(payload.metadata?.attachments).toEqual([
+      { name: 'report.zip', mime: 'application/zip', path: '/tmp/opencode/uploads/u1/report.zip' },
+    ])
+    // displayText 保持用户原始输入（时间线展示不被污染）
+    expect(payload.metadata?.displayText).toBe('帮我看看这个包')
+  })
+
+  it('超过 20MB 的附件只作路径引用：不进 files[]，但路径仍进文本', async () => {
+    await sendMessage({
+      ...baseParams(),
+      text: '大文件',
+      attachments: [uploadedAttachment({ pathOnly: true })] as never,
+    })
+
+    const payload = lastPromptPayload()
+    expect(payload.files).toBeUndefined()
+    expect(payload.text).toBe('大文件\nAttached file: `/tmp/opencode/uploads/u1/report.zip`')
+    expect(payload.metadata?.attachments).toHaveLength(1)
+  })
+
+  it('带 mention 的附件（@ 引用）不额外注入路径', async () => {
+    await sendMessage({
+      ...baseParams(),
+      text: '@src/foo.ts 看下',
+      attachments: [
+        {
+          id: 'a1',
+          type: 'file',
+          displayName: 'foo.ts',
+          url: 'file:///proj/src/foo.ts',
+          textRange: { value: '@src/foo.ts', start: 0, end: 11 },
+        },
+      ] as never,
+    })
+
+    const payload = lastPromptPayload()
+    expect(payload.text).toBe('@src/foo.ts 看下')
+    expect(payload.metadata?.attachments).toBeUndefined()
+  })
+
+  it('revert 回填的文本里已有同一引用时不重复追加', async () => {
+    const path = '/tmp/opencode/uploads/u1/report.zip'
+    await sendMessage({
+      ...baseParams(),
+      text: `帮我看看这个包\nAttached file: \`${path}\``,
+      attachments: [uploadedAttachment()] as never,
+    })
+
+    const payload = lastPromptPayload()
+    expect(payload.text).toBe(`帮我看看这个包\nAttached file: \`${path}\``)
+    expect(payload.text?.match(/Attached file:/g)).toHaveLength(1)
+  })
+
+  it('多个附件按顺序各占一行，且路径去重', async () => {
+    await sendMessage({
+      ...baseParams(),
+      text: 'x',
+      attachments: [
+        uploadedAttachment(),
+        uploadedAttachment({ id: 'up2', displayName: 'b.bin', url: 'file:///tmp/opencode/uploads/u2/b.bin', relativePath: '/tmp/opencode/uploads/u2/b.bin' }),
+        uploadedAttachment({ id: 'up3' }),
+      ] as never,
+    })
+
+    const payload = lastPromptPayload()
+    expect(payload.text).toBe(
+      'x\nAttached file: `/tmp/opencode/uploads/u1/report.zip`\nAttached file: `/tmp/opencode/uploads/u2/b.bin`',
+    )
+    expect(payload.metadata?.attachments).toHaveLength(2)
+  })
+
+  it('空文本只有引用行时不留前导换行', async () => {
+    await sendMessage({
+      ...baseParams(),
+      text: '',
+      attachments: [uploadedAttachment()] as never,
+    })
+
+    expect(lastPromptPayload().text).toBe('Attached file: `/tmp/opencode/uploads/u1/report.zip`')
   })
 })
 

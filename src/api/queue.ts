@@ -14,6 +14,13 @@ import { getSDKClient } from './sdk'
 import { resolveSessionTarget } from '../utils/sessionKey'
 import { cancelInboxItem } from './session'
 import { createMessageId } from '../utils/identifier'
+import { fileBaseName } from '../utils/pathUtils'
+import {
+  applyAttachmentReferences,
+  buildAttachmentReferences,
+  dedupeAttachmentReferences,
+  fileUrlToAbsolutePath,
+} from './message'
 import type { QueuedUserPrompt } from '../store/inboxStore'
 import type { Attachment } from './types'
 import type { PromptMention, JsonValue } from '@opencode/client/promise'
@@ -151,6 +158,28 @@ export function buildEditedPromptInput(params: {
       mention: mention(file.mention),
     }))
 
+  // 路径引用（Issue #182）：原条目里 uri 型文件的路径 + 编辑器当前的路径型附件。
+  // 两者都要重新注入文本——编辑确认会重写 text，旧的那一行可能在 notes 里，
+  // 也可能被新文本顶掉；applyAttachmentReferences 会按路径去重，不会重复。
+  const preservedReferences = (payload.files ?? []).flatMap(file => {
+    if (file.source.type !== 'uri') return []
+    const path = fileUrlToAbsolutePath(file.source.uri) ?? file.source.uri
+    return [{ name: file.name ?? fileBaseName(path), mime: file.mime, path }]
+  })
+  // 旧的 composer 路径附件形态是「无 url、有 relativePath」（queue 回填的条目），
+  // 保留兼容；新的上传附件带 file:// url，由 buildAttachmentReferences 收集。
+  const composerReferences = [
+    ...params.attachments
+      .filter(attachment => attachment.type === 'file' && !attachment.url && attachment.relativePath)
+      .map(attachment => ({
+        name: attachment.displayName,
+        mime: attachment.mime ?? 'text/plain',
+        path: attachment.relativePath!,
+      })),
+    ...buildAttachmentReferences(params.attachments),
+  ]
+  const references = dedupeAttachmentReferences([...preservedReferences, ...composerReferences])
+
   const requestAgents = params.request.agents ?? []
   const agents = [
     ...(payload.agents ?? []).filter(
@@ -169,19 +198,10 @@ export function buildEditedPromptInput(params: {
     ...requestSkills,
   ]
 
-  // 编辑器里的 path 附件（无 url 有 relativePath）回 metadata.attachments
-  const pathAttachments = params.attachments
-    .filter(attachment => attachment.type === 'file' && !attachment.url && attachment.relativePath)
-    .map(attachment => ({
-      name: attachment.displayName,
-      mime: attachment.mime ?? 'text/plain',
-      path: attachment.relativePath!,
-    }))
-
   return {
     sessionID: params.sessionId,
     id: createMessageId(),
-    text: params.text + notes,
+    text: applyAttachmentReferences(params.text + notes, references),
     delivery: params.delivery,
     files: [...preservedFiles, ...(params.request.files ?? [])],
     agents: agents.map(agent => ({ name: agent.name, mention: mention(agent.mention) ?? agent.mention })),
@@ -189,7 +209,7 @@ export function buildEditedPromptInput(params: {
     metadata: {
       ...(payload.metadata as Record<string, unknown> | undefined),
       displayText: params.text,
-      attachments: pathAttachments,
+      attachments: references,
     },
     ...(params.delivery === 'queue' ? { resume: false } : {}),
   }

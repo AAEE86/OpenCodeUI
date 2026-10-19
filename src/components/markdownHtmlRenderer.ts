@@ -393,18 +393,17 @@ function createMarkdownHtmlRenderer(isReasoning: boolean, renderHtml: boolean) {
   renderer.codespan = ({ text }) => {
     // 内联代码 chip。要点：
     //  1) **文字颜色继承正文**，不自己指定：正文是 text-text-200，给主题色或更亮的
-    //     色阶都会比正文突出（看着像被"特意强调"）；继承还有个好处——reasoning 里
-    //     正文变暗时它会自动跟着变暗
-    //  2) **inline-flex + items-center，纵向 padding 为 0**：靠 padding 撑高会把
-    //     行盒撑起来，同一行的中文和代码基线对不齐，整行看着起伏；改成 flex 居中
-    //     后，高度跟着行走，纵向只留 0
-    //  3) **淡底色 + 0.5px 细描边**：底色只是比页面底色抬一档，靠描边给边界；
-    //     只给底色（没有描边）在各主题下都会糊在一起
-    //  4) **必须显式给 leading**：段落是 leading-7（28px），inline-flex 的盒子会
-    //     把这个行高继承成自己的高度，于是 chip 高 28px、文字只有 12px，看着比
-    //     正文高一截。给个紧凑行高 + 1px 纵向内边距，高度才和正文文字齐平
+    //     色阶都会比正文突出；继承还有个好处——reasoning 里正文变暗时它自动跟着暗
+    //  2) **居中不能靠调行高**：行高只是把字形上下的留白等比拉长，字体自身
+    //     ascent/descent 的不对称（等宽字体 13px 时 12 / 3）一点没变，所以怎么调
+    //     都不居中。4x 像素实测：13px + 行高 22px 时拉丁偏下 2.25px、中文偏上
+    //     1.5px；把字号降到 0.875em（14px 正文 → 12.25px）配 19px 行高后变成
+    //     拉丁 −1.5px / 中文 +1.5px，两边各让一半，是偏差最小的平衡点。
+    //     配方对齐 DeepSeek Harness 的内联代码（--dsw-font-markdown-code = 12px/19px，
+    //     再用 font-size: 0.875em 覆盖成正文字号的 7/8，上下 padding 都为 0）
+    //  3) **淡底色 + 0.5px 细描边**：靠描边给边界（只给底色在各主题下会和页面糊在一起）
     const className =
-      'inline-flex items-center font-mono text-[0.875em] leading-tight py-px break-words bg-bg-200 border-[0.5px] border-text-100/10 rounded-md px-[5px]'
+      'inline-flex items-center font-mono text-[0.875em] leading-[19px] break-words bg-bg-200 border-[0.5px] border-text-100/10 rounded-md px-[5px]'
     return `<code class="${className}">${escapeHtml(text)}</code>`
   }
 

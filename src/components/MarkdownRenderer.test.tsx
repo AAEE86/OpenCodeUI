@@ -101,17 +101,22 @@ describe('MarkdownRenderer', () => {
     render(<MarkdownRenderer content={'Use `code` here'} />)
 
     const codeEl = screen.getByText('code')
-    // chip 样式：等宽 + 淡底 + 细描边 + flex 垂直居中；颜色继承正文
+    // chip：等宽 + 淡底 + 细描边 + flex 垂直居中；颜色继承正文
     expect(codeEl.className).toMatch(/font-mono/)
     expect(codeEl.className).not.toMatch(/text-text-\d/)
     expect(codeEl.className).toMatch(/bg-bg-200/)
     expect(codeEl.className).toMatch(/border-\[0\.5px\]/)
     expect(codeEl.className).toMatch(/rounded-md/)
     expect(codeEl.className).toMatch(/px-\[5px\]/)
-    // 纵向不能靠继承段落行高（leading-7=28px）：chip 会高出一截，和正文对不上
     expect(codeEl.className).toMatch(/inline-flex/)
     expect(codeEl.className).toMatch(/items-center/)
-    expect(codeEl.className).toMatch(/leading-tight/)
+    // 居中不是靠调行高（行高只等比拉长上下留白，字体 ascent/descent 的不对称不变），
+    // 而是靠字号比例：0.875em（14px 正文 → 12.25px）+ 19px 行高，实测拉丁 −1.5px /
+    // 中文 +1.5px，是偏差最小的平衡点（配方对齐 DeepSeek Harness 的内联代码）
+    expect(codeEl.className).toMatch(/leading-\[19px\]/)
+    expect(codeEl.className).toMatch(/text-\[0\.875em\]/)
+    expect(codeEl.className).not.toMatch(/pb-\[/)
+    expect(codeEl.className).not.toMatch(/leading-none/)
     expect(codeEl.className).not.toMatch(/text-accent-main/)
   })
 
@@ -122,8 +127,8 @@ describe('MarkdownRenderer', () => {
     expect(codeEl).toBeInTheDocument()
     expect(codeEl).toHaveTextContent('单行代码')
     expect(codeEl).toHaveClass('font-mono')
-    expect(codeEl).toHaveClass('bg-bg-200')
     expect(codeEl).toHaveClass('inline-flex')
+    expect(codeEl).toHaveClass('bg-bg-200')
   })
 
   it('keeps inline emphasis styles on the markdown path', () => {
@@ -550,9 +555,10 @@ $$
     expect(paragraph.className).toMatch(/text-text-400/)
 
     const codeEl = screen.getByText('code')
-    // chip 也有描边（0.5px 细边），但底色不能是强调色
-    expect(codeEl.className).toMatch(/border-\[0\.5px\]/)
+    // reasoning 里 chip 与正文同款（不是强调色、行高/内边距与正文版一致）
     expect(codeEl.className).not.toMatch(/bg-accent/)
+    expect(codeEl.className).toMatch(/leading-\[19px\]/)
+    expect(codeEl.className).toMatch(/text-\[0\.875em\]/)
   })
 
   it('passes reasoning variant to CodeBlock', () => {

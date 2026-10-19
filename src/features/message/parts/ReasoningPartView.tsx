@@ -155,6 +155,9 @@ export const ReasoningPartView = memo(function ReasoningPartView({
       '[&_ul]:!my-0 [&_ol]:!my-0 [&_li]:inline [&_li]:!my-0',
       '[&_pre]:!my-0 [&_pre]:inline',
       '[&_code]:inline',
+      // 行内代码在折叠行里只留等宽，去掉盒子（底色/描边/内边距/圆角）：
+      // 折叠行只有 20px 高且 overflow-hidden，带盒子的 chip 会被裁掉上下边框
+      '[&_code]:bg-transparent [&_code]:border-0 [&_code]:px-0 [&_code]:py-0 [&_code]:rounded-none',
       '[&_blockquote]:!my-0 [&_blockquote]:inline',
       '[&_br]:hidden',
     ].join(' ')

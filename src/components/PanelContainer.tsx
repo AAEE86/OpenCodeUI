@@ -658,7 +658,6 @@ const PanelTabButton = memo(function PanelTabButton({
           onMouseDown={e => e.stopPropagation()}
           aria-label={t('common:close')}
           className={`
-            touch-target-sm
             p-1 -mr-0.5 rounded shrink-0
             transition-all duration-150 ease-out
             hover:bg-danger-100/20 text-text-400 hover:text-danger-100

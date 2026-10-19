@@ -843,9 +843,20 @@ body {
  */
 
 @media (max-width: 768px) {
-  /* 移动端触摸目标最小尺寸 - 只对独立按钮生效，不影响紧凑组件内部 */
-  button:not(.touch-target-sm):not([role='tab']):not([role='switch']):not([data-compact]) {
+  /*
+   * 触摸目标改为「显式 opt-in」。
+   *
+   * 以前这里是给所有 button 兜底 min-height: 32px（再早是 36px + min-width），
+   * 本意是保证手机上好点，结果凡是低于 32px 的按钮都会单方面变高：
+   *   - 内联权限 / 提问卡里的「允许、提交」按钮比桌面高一截，整行被撑开
+   *   - 工具卡片、附件胶囊、侧栏会话行里的 20/24px 小按钮被顶成 32px，
+   *     密集行里的对齐全乱，图标按钮还会变成 24×32 的竖长条
+   * 手机和桌面的观感因此对不上。尺寸现在交给组件自己决定（通常是 h-* / py-*），
+   * 只有确实需要更大点击区的独立按钮才加 .touch-target，别再加全局兜底。
+   */
+  button.touch-target {
     min-height: 32px;
+    min-width: 32px;
   }
 
   /*

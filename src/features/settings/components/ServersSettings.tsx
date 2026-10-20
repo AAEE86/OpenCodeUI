@@ -52,43 +52,58 @@ function toEditable(urls: string[]): EditableEndpoint[] {
   return urls.map(url => ({ id: ++editableEndpointSeq, url }))
 }
 
+/** 新建空地址行（添加表单初始状态 / 点「添加地址」） */
+function blankEditable(): EditableEndpoint {
+  return { id: ++editableEndpointSeq, url: '' }
+}
+
 /**
- * 把表单里的地址列表 + 主地址合成为落库的 endpoints。
+ * 从编辑中的列表提取有效地址：去空白、去尾部斜杠、按顺序去重。
  *
- * 与 `buildEndpoints` 的区别：那个用于**配对回填**（主地址固定排第一），
- * 这个用于**手动编辑**（用户排的顺序就是优先级顺序）。
- * 主地址始终排第一：`server.url` 与 endpoints[0] 必须一致，
- * 否则「主地址」和「生效地址」会指向两条不同的记录。
+ * 返回顺序就是优先级顺序——用户排第几就是第几，不需要另一个字段表达。
  */
-function mergeEditableEndpoints(primaryUrl: string, editable: EditableEndpoint[]): ServerEndpoint[] | undefined {
-  const primary = primaryUrl.trim().replace(/\/+$/, '')
-  if (!primary) return undefined
-
-  const ordered: string[] = [primary]
-  for (const item of editable) {
+function collectEndpointUrls(items: EditableEndpoint[]): string[] {
+  const urls: string[] = []
+  for (const item of items) {
     const normalized = item.url.trim().replace(/\/+$/, '')
-    if (normalized && !ordered.includes(normalized)) ordered.push(normalized)
+    if (normalized && !urls.includes(normalized)) urls.push(normalized)
   }
+  return urls
+}
 
-  if (ordered.length <= 1) return undefined
-  return ordered.map((url, index) => ({ url, priority: index === 0 ? 0 : 1 }))
+/**
+ * 把有序地址合成为落库的 endpoints。
+ *
+ * 只有一个地址时返回 undefined（退回单地址语义，不写多余字段）；
+ * 多地址时逐条递增 priority —— 顺序即优先级，支持任意层级。
+ */
+function toServerEndpoints(urls: string[]): ServerEndpoint[] | undefined {
+  if (urls.length <= 1) return undefined
+  return urls.map((url, index) => ({ url, priority: index }))
 }
 
 /**
  * 地址列表编辑器（Issue #183）。
  *
- * 顺序即优先级：第一行是主地址（等价于表单上方的 URL 字段），往下依次备用。
- * 只暴露「顺序」而不暴露 priority 数字——对用户来说「哪个优先」就是排第几，
- * 让人手填优先级数字只会增加误操作。
+ * **这是服务器地址的唯一数据源**：不再有一个单独的「URL」输入框与之并存。
+ * 同一台服务器的多个入口在概念上就是一张有序列表，第一行即主地址
+ * （同时写入 `server.url`，供旧逻辑与 SDK 兜底）。
+ *
+ * 顺序即优先级：只暴露「排第几」，不让用户手填 priority 数字。
  */
 function EndpointListEditor({
-  primaryUrl,
   items,
   onChange,
+  onPairLinkPasted,
 }: {
-  primaryUrl: string
   items: EditableEndpoint[]
   onChange: (next: EditableEndpoint[]) => void
+  /**
+   * 粘贴配对链接的拦截钩子：返回 true 表示已消费（走配对流程）。
+   * 地址输入框现在是唯一的地址入口，配对链接可能被粘到这里，
+   * 不认一下就会当成非法 URL 报错。
+   */
+  onPairLinkPasted?: (value: string) => boolean
 }) {
   const { t } = useTranslation(['settings', 'common'])
   const inputCls = settingsFieldClass
@@ -97,6 +112,8 @@ function EndpointListEditor({
     onChange(items.map(item => (item.id === id ? { ...item, url } : item)))
   }
   const remove = (id: number) => {
+    // 至少保留一行：服务器必须有地址
+    if (items.length <= 1) return
     onChange(items.filter(item => item.id !== id))
   }
   const move = (index: number, delta: -1 | 1) => {
@@ -115,7 +132,7 @@ function EndpointListEditor({
         </label>
         <button
           type="button"
-          onClick={() => onChange([...items, { id: ++editableEndpointSeq, url: '' }])}
+          onClick={() => onChange([...items, blankEditable()])}
           className="flex items-center gap-1 text-[length:var(--fs-xs)] text-accent-main-100 hover:text-accent-main-200 transition-colors"
         >
           <PlusIcon size={10} />
@@ -123,28 +140,25 @@ function EndpointListEditor({
         </button>
       </div>
 
-      {/* 主地址固定第一行、不可删不可移：它就是上面 URL 字段的值 */}
-      <div className="flex items-center gap-1.5 min-w-0">
-        <span className="shrink-0 w-3 text-[length:var(--fs-xs)] text-accent-main-100">1</span>
-        <span
-          className="min-w-0 flex-1 truncate rounded-md border border-border-200/50 bg-bg-200/40 px-2 py-1 font-mono text-[length:var(--fs-xs)] text-text-300"
-          title={primaryUrl}
-        >
-          {primaryUrl || '—'}
-        </span>
-        <span className="shrink-0 text-[length:var(--fs-xxs)] text-text-400">{t('servers.endpointPrimary')}</span>
-      </div>
-
       {items.map((item, index) => (
         <div key={item.id} className="flex items-center gap-1.5 min-w-0">
-          <span className="shrink-0 w-3 text-[length:var(--fs-xs)] text-text-400">{index + 2}</span>
+          <span
+            className={`shrink-0 w-3 text-[length:var(--fs-xs)] ${index === 0 ? 'text-accent-main-100' : 'text-text-400'}`}
+          >
+            {index + 1}
+          </span>
           <input
             type="text"
             value={item.url}
-            onChange={e => update(item.id, e.target.value)}
+            onChange={e => {
+              const value = e.target.value
+              // 配对链接粘到地址框 → 交给配对流程，不当作普通地址
+              if (onPairLinkPasted?.(value)) return
+              update(item.id, value)
+            }}
             placeholder={t('servers.urlPlaceholder')}
             className={`${inputCls} min-w-0 flex-1 font-mono`}
-            aria-label={t('servers.endpointNth', { index: index + 2 })}
+            aria-label={t('servers.endpointNth', { index: index + 1 })}
           />
           <button
             type="button"
@@ -169,9 +183,10 @@ function EndpointListEditor({
           <button
             type="button"
             onClick={() => remove(item.id)}
+            disabled={items.length <= 1}
             title={t('servers.endpointRemove')}
             aria-label={t('servers.endpointRemove')}
-            className="shrink-0 p-1 rounded-md text-text-400 hover:text-danger-100 hover:bg-danger-bg/40"
+            className="shrink-0 p-1 rounded-md text-text-400 hover:text-danger-100 hover:bg-danger-bg/40 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-400"
           >
             <TrashIcon size={11} />
           </button>
@@ -439,29 +454,32 @@ function EditServerForm({
 }) {
   const { t } = useTranslation(['settings', 'common'])
   const [name, setName] = useState(server.name)
-  const [url, setUrl] = useState(server.url)
   /**
-   * 备用地址列表（Issue #183）。与 `url`（主地址）分开存：主地址由上面那个
-   * URL 字段维护，这里有顺序的就是备用地址，顺序即优先级。
-   * 配对回填时整组替换，手动编辑时增删移。
+   * 地址列表（Issue #183）——**唯一的地址数据源**。
+   *
+   * 不再有单独的 URL 输入框：那会变成「同一个值两个入口，一个能改一个不能」。
+   * 第一行即主地址（保存时同时写入 `server.url`），顺序即优先级。
    */
-  const [extraEndpoints, setExtraEndpoints] = useState<EditableEndpoint[]>(() =>
-    toEditable((server.endpoints ?? []).slice(1).map(endpoint => endpoint.url)),
+  const [endpoints, setEndpoints] = useState<EditableEndpoint[]>(() =>
+    toEditable(
+      server.endpoints?.length ? server.endpoints.map(endpoint => endpoint.url) : [server.url],
+    ),
   )
   const [username, setUsername] = useState(server.auth?.username || '')
   const [password, setPassword] = useState(server.auth?.password || '')
   const [showAuth, setShowAuth] = useState(!!server.auth?.password)
   const [error, setError] = useState('')
-  const showHttpsIpWarning = isHttpsIpUrl(url)
+  // 主地址 = 列表第一个有效项（校验与 URL 警告都看它）
+  const primaryUrl = collectEndpointUrls(endpoints)[0] ?? ''
+  const showHttpsIpWarning = isHttpsIpUrl(primaryUrl)
 
   // 与添加表单同一条配对链：重新扫码 / 粘贴 pair 链接兑换后回填地址与凭据，
   // 保存时才落库——适合换了端口 / 重装了服务端后原地更新连接配置
   const applyPairing = useCallback((pairedUrl: string, token: string, urls: string[]) => {
-    // 配对拿到的地址集里，第一个是首选主地址，其余收进备用列表
+    // 配对拿到的地址集整组替换列表，第一个即主地址
     const ordered = [pairedUrl, ...urls].map(item => item.trim().replace(/\/+$/, '')).filter(Boolean)
     const unique = [...new Set(ordered)]
-    setUrl(unique[0] ?? pairedUrl)
-    setExtraEndpoints(toEditable(unique.slice(1)))
+    setEndpoints(toEditable(unique.length > 0 ? unique : [pairedUrl]))
     setUsername('opencode')
     setPassword(token)
     setShowAuth(true)
@@ -487,22 +505,26 @@ function EditServerForm({
       setError(t('servers.nameRequired'))
       return
     }
-    if (!url.trim()) {
+    const urls = collectEndpointUrls(endpoints)
+    if (urls.length === 0) {
       setError(t('servers.urlRequired'))
       return
     }
-    try {
-      new URL(url)
-    } catch {
-      setError(t('servers.invalidUrl'))
-      return
+    for (const candidate of urls) {
+      try {
+        new URL(candidate)
+      } catch {
+        setError(t('servers.invalidUrl'))
+        return
+      }
     }
     onSave({
       name: trimmedName,
-      url: url.trim(),
+      // 主地址写 url：旧逻辑、SDK 兜底、单地址界面都读它
+      url: urls[0]!,
       username: password.trim() ? username.trim() || 'opencode' : undefined,
       password: password.trim() || undefined,
-      endpoints: mergeEditableEndpoints(url, extraEndpoints),
+      endpoints: toServerEndpoints(urls),
     })
   }
 
@@ -534,25 +556,15 @@ function EditServerForm({
           autoFocus
         />
       </div>
-      <div>
-        <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.url')}</label>
-        <input
-          type="text"
-          value={url}
-          onChange={e => {
-            const value = e.target.value
-            // 粘贴到 URL 框的 pair 链接转到配对流程（官方连接对话框同款识别）
-            if (parsePairingLink(value) || isLegacyPairingLink(value)) {
-              handlePairLinkChange(value)
-              return
-            }
-            setUrl(value)
-            setError('')
-          }}
-          placeholder={t('servers.urlPlaceholder')}
-          className={`${inputCls} font-mono`}
-        />
-      </div>
+      <EndpointListEditor
+        items={endpoints}
+        onChange={setEndpoints}
+        onPairLinkPasted={value => {
+          if (!parsePairingLink(value) && !isLegacyPairingLink(value)) return false
+          handlePairLinkChange(value)
+          return true
+        }}
+      />
 
       <button
         type="button"
@@ -600,8 +612,6 @@ function EditServerForm({
         </div>
       )}
 
-      <EndpointListEditor primaryUrl={url.trim()} items={extraEndpoints} onChange={setExtraEndpoints} />
-
       {error && <p className="text-[length:var(--fs-xs)] text-danger-100">{error}</p>}
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
@@ -638,20 +648,19 @@ function AddServerForm({
 }) {
   const { t } = useTranslation(['settings', 'common'])
   const [name, setName] = useState('')
-  const [url, setUrl] = useState('')
-  /** 备用地址列表（顺序即优先级）；主地址由上面的 url 字段维护 */
-  const [extraEndpoints, setExtraEndpoints] = useState<EditableEndpoint[]>([])
+  const [endpoints, setEndpoints] = useState<EditableEndpoint[]>(() => [blankEditable()])
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showAuth, setShowAuth] = useState(false)
   const [error, setError] = useState('')
+  // 主地址 = 列表第一个有效项
+  const primaryUrl = collectEndpointUrls(endpoints)[0] ?? ''
 
   const applyPairing = useCallback((pairedUrl: string, token: string, urls: string[]) => {
-    // 配对地址集：第一个作主地址，其余进备用列表
+    // 配对地址集整组替换列表，第一个即主地址
     const ordered = [pairedUrl, ...urls].map(item => item.trim().replace(/\/+$/, '')).filter(Boolean)
     const unique = [...new Set(ordered)]
-    setUrl(unique[0] ?? pairedUrl)
-    setExtraEndpoints(toEditable(unique.slice(1)))
+    setEndpoints(toEditable(unique.length > 0 ? unique : [pairedUrl]))
     setUsername('opencode')
     setPassword(token)
     setShowAuth(true)
@@ -679,36 +688,39 @@ function AddServerForm({
       setError(t('servers.nameRequired'))
       return
     }
-    if (!url.trim()) {
+    const urls = collectEndpointUrls(endpoints)
+    if (urls.length === 0) {
       setError(t('servers.urlRequired'))
       return
     }
-    try {
-      new URL(url)
-    } catch {
-      setError(t('servers.invalidUrl'))
-      return
+    for (const candidate of urls) {
+      try {
+        new URL(candidate)
+      } catch {
+        setError(t('servers.invalidUrl'))
+        return
+      }
     }
 
     onAdd(
       trimmedName,
-      url.trim(),
+      urls[0]!,
       password.trim() ? username.trim() || 'opencode' : undefined,
       password.trim() || undefined,
-      mergeEditableEndpoints(url, extraEndpoints),
+      toServerEndpoints(urls),
     )
   }
 
   const isCrossOrigin = (() => {
-    if (!url.trim()) return false
+    if (!primaryUrl) return false
     try {
-      const serverUrl = new URL(url)
+      const serverUrl = new URL(primaryUrl)
       return serverUrl.origin !== window.location.origin
     } catch {
       return false
     }
   })()
-  const showHttpsIpWarning = isHttpsIpUrl(url)
+  const showHttpsIpWarning = isHttpsIpUrl(primaryUrl)
 
   const inputCls = settingsFieldClass
 
@@ -735,25 +747,15 @@ function AddServerForm({
           autoFocus
         />
       </div>
-      <div>
-        <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.url')}</label>
-        <input
-          type="text"
-          value={url}
-          onChange={e => {
-            const value = e.target.value
-            // 粘贴到 URL 框的 pair 链接转到配对流程（官方连接对话框同款识别）
-            if (parsePairingLink(value) || isLegacyPairingLink(value)) {
-              handlePairLinkChange(value)
-              return
-            }
-            setUrl(value)
-            setError('')
-          }}
-          placeholder={t('servers.urlPlaceholder')}
-          className={`${inputCls} font-mono`}
-        />
-      </div>
+      <EndpointListEditor
+        items={endpoints}
+        onChange={setEndpoints}
+        onPairLinkPasted={value => {
+          if (!parsePairingLink(value) && !isLegacyPairingLink(value)) return false
+          handlePairLinkChange(value)
+          return true
+        }}
+      />
 
       <button
         type="button"

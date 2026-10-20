@@ -113,10 +113,11 @@ describe('ServersSettings', () => {
   })
 
   /**
-   * 地址编辑 UI（Issue #183）。此前地址只能由配对回填，用户没法手动增删，
-   * 想加第三个入口只能重新扫码 —— 这等于「支持多地址」只做了一半。
+   * 地址编辑 UI（Issue #183）。地址列表是唯一数据源：不再有单独的 URL 输入框
+   * 与只读的主地址镜像 —— 那种「同一个值两个入口，一个能改一个不能」的结构
+   * 本身就不合逻辑。
    */
-  it('编辑表单可增删地址，顺序即优先级', async () => {
+  it('编辑表单里每一行地址都可编辑，顺序即优先级', async () => {
     const updateServerMock = vi.fn()
     const dualServer = {
       id: 'dual',
@@ -144,13 +145,17 @@ describe('ServersSettings', () => {
 
     render(<ServersSettings />)
 
-    // 进编辑
     fireEvent.click(screen.getByTitle('servers.editServer'))
     await waitFor(() => expect(screen.getByText('servers.endpointsLabel')).toBeTruthy())
 
-    // 已有的备用地址出现在输入框里
+    // 两行都在输入框里（包括主地址，它不再是只读镜像）
+    const primaryInput = screen.getByDisplayValue('http://lan.test')
     const wanInput = screen.getByDisplayValue('https://wan.test')
-    expect(wanInput).toBeTruthy()
+    expect(primaryInput.tagName).toBe('INPUT')
+    expect(wanInput.tagName).toBe('INPUT')
+
+    // 主地址也能直接改
+    fireEvent.change(primaryInput, { target: { value: 'http://lan2.test' } })
 
     // 再加一个
     fireEvent.click(screen.getByText('servers.endpointAdd'))
@@ -161,14 +166,16 @@ describe('ServersSettings', () => {
 
     await waitFor(() => expect(updateServerMock).toHaveBeenCalled())
     const [, updates] = updateServerMock.mock.calls[0]!
+    // url 跟随第一行；priority 按行号递增，支持任意层级
+    expect(updates.url).toBe('http://lan2.test')
     expect(updates.endpoints).toEqual([
-      { url: 'http://lan.test', priority: 0 },
+      { url: 'http://lan2.test', priority: 0 },
       { url: 'https://wan.test', priority: 1 },
-      { url: 'https://tailscale.test', priority: 1 },
+      { url: 'https://tailscale.test', priority: 2 },
     ])
   })
 
-  it('删光备用地址后 endpoints 传 undefined（清空而非保持原值）', async () => {
+  it('上移地址会改变优先级顺序', async () => {
     const updateServerMock = vi.fn()
     const dualServer = {
       id: 'dual',
@@ -198,13 +205,63 @@ describe('ServersSettings', () => {
     fireEvent.click(screen.getByTitle('servers.editServer'))
     await waitFor(() => expect(screen.getByText('servers.endpointsLabel')).toBeTruthy())
 
-    fireEvent.click(screen.getByTitle('servers.endpointRemove'))
+    // 第二行上移 → 成为主地址
+    const upButtons = screen.getAllByTitle('servers.endpointMoveUp')
+    fireEvent.click(upButtons[1]!)
+
+    fireEvent.click(screen.getByText('common:save'))
+    await waitFor(() => expect(updateServerMock).toHaveBeenCalled())
+    const [, updates] = updateServerMock.mock.calls[0]!
+    expect(updates.url).toBe('https://wan.test')
+    expect(updates.endpoints).toEqual([
+      { url: 'https://wan.test', priority: 0 },
+      { url: 'http://lan.test', priority: 1 },
+    ])
+  })
+
+  it('删到只剩一个地址时 endpoints 传 undefined（退回单地址语义）', async () => {
+    const updateServerMock = vi.fn()
+    const dualServer = {
+      id: 'dual',
+      name: 'Dual',
+      url: 'http://lan.test',
+      endpoints: [
+        { url: 'http://lan.test', priority: 0 },
+        { url: 'https://wan.test', priority: 1 },
+      ],
+    }
+    useServerStoreMock.mockReturnValue({
+      servers: [dualServer],
+      activeServer: dualServer,
+      addServer: vi.fn(),
+      removeServer: vi.fn(),
+      updateServer: updateServerMock,
+      setActiveServer: setActiveServerMock,
+      setActiveEndpoint: setActiveEndpointMock,
+      setLockedEndpoint: setLockedEndpointMock,
+      checkHealth: checkHealthMock,
+      checkAllHealth: vi.fn(),
+      getHealth: vi.fn(() => null),
+      endpointStates: new Map(),
+    })
+
+    render(<ServersSettings />)
+    fireEvent.click(screen.getByTitle('servers.editServer'))
+    await waitFor(() => expect(screen.getByText('servers.endpointsLabel')).toBeTruthy())
+
+    // 删掉第二行，只剩主地址
+    const removeButtons = screen.getAllByTitle('servers.endpointRemove')
+    fireEvent.click(removeButtons[1]!)
+    // 只剩一行时删除按钮禁用
+    expect((screen.getByTitle('servers.endpointRemove') as HTMLButtonElement).disabled).toBe(true)
+
     fireEvent.click(screen.getByText('common:save'))
 
     await waitFor(() => expect(updateServerMock).toHaveBeenCalled())
     const [, updates] = updateServerMock.mock.calls[0]!
-    // 必须显式传 undefined：store 用 hasOwnProperty 判断才会真的清空
+    // 单地址不写 endpoints（保持旧行为），但字段必须显式出现才能清空
     expect('endpoints' in updates).toBe(true)
     expect(updates.endpoints).toBeUndefined()
+    expect(updates.url).toBe('http://lan.test')
   })
 })

@@ -32,13 +32,13 @@ export interface ServerAuth {
  * 服务器地址（Issue #183：同一台服务器可有多个入口）。
  *
  * 典型场景：`opencode serve` 同时有内网直连和公网隧道两个入口。
- * `priority` 越小越优先（内网 0，公网 1）——这是**主备**语义，不是负载均衡：
- * 高优先级可达就不去比延迟，只有同类地址之间才看 latency。
+ * `priority` 越小越优先，与设置页里的行号一致（第一行 0，往下递增）——
+ * 这是**主备**语义，不是负载均衡：高优先级可达就一直用它，不去比延迟。
  */
 export interface ServerEndpoint {
   /** 归一化后的服务器地址（不含尾部斜杠） */
   url: string
-  /** 优先级，越小越优先；同优先级之间才按延迟比较 */
+  /** 优先级，越小越优先；缺省或并列时按列表顺序 */
   priority: number
   /** 用户可读标签（如「内网」「公网」），仅展示 */
   label?: string
@@ -345,8 +345,16 @@ class ServerStore {
         this.servers = (JSON.parse(stored) as ServerConfig[])
           .filter(server => typeof server?.id === 'string' && !server.id.startsWith(WSL_SERVER_PREFIX))
           // endpoints 归一化：旧数据没有该字段（→ undefined，保持单地址语义），
-          // 手改 / 历史脏值则在此清洗，不让非法地址流进运行时
-          .map(server => ({ ...server, endpoints: normalizeEndpoints(server.endpoints) }))
+          // 手改 / 历史脏值则在此清洗，不让非法地址流进运行时。
+          // 同时把 `url` 拉回与 endpoints[0] 一致（它是主地址的镜像）。
+          .map(server => {
+            const endpoints = normalizeEndpoints(server.endpoints)
+            return {
+              ...server,
+              url: (endpoints?.[0]?.url ?? server.url).replace(/\/+$/, ''),
+              endpoints,
+            }
+          })
       }
 
       // 如果没有服务器，添加默认的本地服务器
@@ -682,11 +690,13 @@ class ServerStore {
    */
   addServer(config: Omit<ServerConfig, 'id'>): ServerConfig {
     const id = `server-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const endpoints = normalizeEndpoints(config.endpoints)
     const server: ServerConfig = {
       ...config,
       id,
-      url: config.url.replace(/\/+$/, ''), // 移除尾部斜杠
-      endpoints: normalizeEndpoints(config.endpoints),
+      // 主地址与地址列表首项必须一致：endpoints 说了算，url 只是镜像
+      url: (endpoints?.[0]?.url ?? config.url).replace(/\/+$/, ''), // 移除尾部斜杠
+      endpoints,
     }
     this.servers.push(server)
     this.saveToStorage()
@@ -699,10 +709,11 @@ class ServerStore {
    * 供 WSL 等由外部模块管理生命周期的服务器使用，id 需要跨重启稳定。
    */
   upsertServer(config: ServerConfig): ServerConfig {
+    const endpoints = normalizeEndpoints(config.endpoints)
     const server: ServerConfig = {
       ...config,
-      url: config.url.replace(/\/+$/, ''), // 移除尾部斜杠
-      endpoints: normalizeEndpoints(config.endpoints),
+      url: (endpoints?.[0]?.url ?? config.url).replace(/\/+$/, ''), // 移除尾部斜杠
+      endpoints,
     }
     const index = this.servers.findIndex(s => s.id === server.id)
     const previous = index === -1 ? undefined : this.servers[index]
@@ -759,14 +770,22 @@ class ServerStore {
      */
     const hasEndpointsUpdate = Object.prototype.hasOwnProperty.call(updates, 'endpoints')
     const nextEndpoints = hasEndpointsUpdate ? normalizeEndpoints(updates.endpoints) : server.endpoints
+    /**
+     * `server.url` 是主地址的镜像，必须与 `endpoints[0]` 一致，否则「主地址」
+     * 与「优先级最高的地址」会指向两条不同记录。调用方没显式给 url 时由
+     * endpoints 反推；显式给了就以调用方为准（local runtime override 走这条路）。
+     */
+    const explicitUrl = updates.url ? updates.url.replace(/\/+$/, '') : undefined
+    const nextUrl =
+      explicitUrl ?? (hasEndpointsUpdate && nextEndpoints?.length ? nextEndpoints[0].url : server.url)
     this.servers[index] = {
       ...server,
       ...updates,
       id: server.id, // 确保 id 不被覆盖
-      url: updates.url ? updates.url.replace(/\/+$/, '') : server.url,
+      url: nextUrl,
       endpoints: nextEndpoints,
     }
-    if (id === this.DEFAULT_SERVER_ID && updates.url) {
+    if (id === this.DEFAULT_SERVER_ID && nextUrl !== server.url) {
       this.localServerUrlOverride = null
     }
     // 地址集变了：已有的生效地址 / 锁定地址可能已不存在，必须回收，
@@ -1184,20 +1203,24 @@ function normalizeServerBackup(raw: unknown): ServerSettingsBackup {
             // WSL 条目含一次性端口/密码，导入即清洗（兼容旧版本导出的备份文件）
             !((item as Record<string, unknown>).id as string).startsWith(WSL_SERVER_PREFIX),
         )
-        .map(item => ({
-          id: item.id,
-          name: item.name,
-          url: item.url.replace(/\/+$/, ''),
-          endpoints: normalizeEndpoints(item.endpoints),
-          isDefault: item.isDefault === true,
-          auth:
-            item.auth &&
-            typeof item.auth === 'object' &&
-            typeof item.auth.username === 'string' &&
-            typeof item.auth.password === 'string'
-              ? { username: item.auth.username, password: item.auth.password }
-              : undefined,
-        }))
+        .map(item => {
+          const endpoints = normalizeEndpoints(item.endpoints)
+          return {
+            id: item.id,
+            name: item.name,
+            // endpoints[0] 是主地址，url 只是镜像
+            url: (endpoints?.[0]?.url ?? item.url).replace(/\/+$/, ''),
+            endpoints,
+            isDefault: item.isDefault === true,
+            auth:
+              item.auth &&
+              typeof item.auth === 'object' &&
+              typeof item.auth.username === 'string' &&
+              typeof item.auth.password === 'string'
+                ? { username: item.auth.username, password: item.auth.password }
+                : undefined,
+          }
+        })
     : []
 
   const normalizedServers = servers.length

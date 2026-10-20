@@ -105,7 +105,6 @@
     "invalidUrl": "URL 格式无效",
     "name": "名称",
     "namePlaceholder": "我的服务器",
-    "url": "URL",
     "urlPlaceholder": "http://192.168.1.100:4096",
     "hideAuth": "隐藏认证",
     "addAuth": "添加认证",
@@ -158,12 +157,11 @@
     "endpointUnlock": "解除锁定",
     "endpointsLabel": "地址",
     "endpointAdd": "添加地址",
-    "endpointPrimary": "主地址",
     "endpointNth": "第 {{index}} 个地址",
     "endpointMoveUp": "上移",
     "endpointMoveDown": "下移",
     "endpointRemove": "删除地址",
-    "endpointOrderHint": "顺序即优先级：优先用靠前的地址，连不上时自动退到后面的。"
+    "endpointOrderHint": "顺序即优先级：优先用靠前的地址，连不上时自动退到后面的。第一行是主地址。"
   },
   "chat": {
     "pathsFormatting": "路径和格式",

@@ -293,6 +293,39 @@ describe('serverStore 多地址', () => {
     expect(serverStore.getServer(server.id)).toBeNull()
     expect(serverStore.getLockedEndpointUrl(server.id)).toBeNull()
   })
+
+  /**
+   * `server.url` 是主地址的镜像。设置页里地址列表是唯一数据源，
+   * 若两者能各走各的，「主地址」和「生效地址」就成了两个概念。
+   */
+  it('server.url 始终等于 endpoints[0]，无论调用方传什么', async () => {
+    const { serverStore } = await import('./serverStore')
+
+    // 添加时 url 与 endpoints[0] 不一致 → 以 endpoints 为准
+    const server = serverStore.addServer({
+      name: 'dual',
+      url: 'http://stale.test',
+      endpoints: [
+        { url: 'http://lan.test', priority: 0 },
+        { url: 'https://wan.test', priority: 1 },
+      ],
+    })
+    expect(server.url).toBe('http://lan.test')
+
+    // 只改 endpoints 不传 url → url 跟着首项走
+    serverStore.updateServer(server.id, {
+      endpoints: [
+        { url: 'https://wan.test', priority: 0 },
+        { url: 'http://lan.test', priority: 1 },
+      ],
+    })
+    expect(serverStore.getServer(server.id)?.url).toBe('https://wan.test')
+
+    // 清空 endpoints → url 保持最后的值（单地址语义）
+    serverStore.updateServer(server.id, { endpoints: undefined })
+    expect(serverStore.getServer(server.id)?.url).toBe('https://wan.test')
+    expect(serverStore.getServer(server.id)?.endpoints).toBeUndefined()
+  })
 })
 
 describe('endpoint-switch 的门控语义', () => {

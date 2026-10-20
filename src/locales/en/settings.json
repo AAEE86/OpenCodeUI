@@ -105,7 +105,6 @@
     "invalidUrl": "Invalid URL",
     "name": "Name",
     "namePlaceholder": "My Server",
-    "url": "URL",
     "urlPlaceholder": "http://192.168.1.100:4096",
     "hideAuth": "Hide authentication",
     "addAuth": "Add authentication",
@@ -158,12 +157,11 @@
     "endpointUnlock": "Unlock",
     "endpointsLabel": "Addresses",
     "endpointAdd": "Add address",
-    "endpointPrimary": "Primary",
     "endpointNth": "Address {{index}}",
     "endpointMoveUp": "Move up",
     "endpointMoveDown": "Move down",
     "endpointRemove": "Remove address",
-    "endpointOrderHint": "Order is priority: the server prefers earlier addresses and falls back to later ones when unreachable."
+    "endpointOrderHint": "Order is priority: earlier addresses are preferred, falling back to later ones when unreachable. The first is the primary address."
   },
   "chat": {
     "pathsFormatting": "Paths & Formatting",

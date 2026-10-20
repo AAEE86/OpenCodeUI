@@ -111,4 +111,100 @@ describe('ServersSettings', () => {
     fireEvent.click(lockButton!)
     expect(setLockedEndpointMock).toHaveBeenCalledWith('dual', 'http://192.168.1.5:4096')
   })
+
+  /**
+   * 地址编辑 UI（Issue #183）。此前地址只能由配对回填，用户没法手动增删，
+   * 想加第三个入口只能重新扫码 —— 这等于「支持多地址」只做了一半。
+   */
+  it('编辑表单可增删地址，顺序即优先级', async () => {
+    const updateServerMock = vi.fn()
+    const dualServer = {
+      id: 'dual',
+      name: 'Dual',
+      url: 'http://lan.test',
+      endpoints: [
+        { url: 'http://lan.test', priority: 0 },
+        { url: 'https://wan.test', priority: 1 },
+      ],
+    }
+    useServerStoreMock.mockReturnValue({
+      servers: [dualServer],
+      activeServer: dualServer,
+      addServer: vi.fn(),
+      removeServer: vi.fn(),
+      updateServer: updateServerMock,
+      setActiveServer: setActiveServerMock,
+      setActiveEndpoint: setActiveEndpointMock,
+      setLockedEndpoint: setLockedEndpointMock,
+      checkHealth: checkHealthMock,
+      checkAllHealth: vi.fn(),
+      getHealth: vi.fn(() => null),
+      endpointStates: new Map(),
+    })
+
+    render(<ServersSettings />)
+
+    // 进编辑
+    fireEvent.click(screen.getByTitle('servers.editServer'))
+    await waitFor(() => expect(screen.getByText('servers.endpointsLabel')).toBeTruthy())
+
+    // 已有的备用地址出现在输入框里
+    const wanInput = screen.getByDisplayValue('https://wan.test')
+    expect(wanInput).toBeTruthy()
+
+    // 再加一个
+    fireEvent.click(screen.getByText('servers.endpointAdd'))
+    const inputs = screen.getAllByLabelText(/servers\.endpointNth/)
+    fireEvent.change(inputs[inputs.length - 1]!, { target: { value: 'https://tailscale.test' } })
+
+    fireEvent.click(screen.getByText('common:save'))
+
+    await waitFor(() => expect(updateServerMock).toHaveBeenCalled())
+    const [, updates] = updateServerMock.mock.calls[0]!
+    expect(updates.endpoints).toEqual([
+      { url: 'http://lan.test', priority: 0 },
+      { url: 'https://wan.test', priority: 1 },
+      { url: 'https://tailscale.test', priority: 1 },
+    ])
+  })
+
+  it('删光备用地址后 endpoints 传 undefined（清空而非保持原值）', async () => {
+    const updateServerMock = vi.fn()
+    const dualServer = {
+      id: 'dual',
+      name: 'Dual',
+      url: 'http://lan.test',
+      endpoints: [
+        { url: 'http://lan.test', priority: 0 },
+        { url: 'https://wan.test', priority: 1 },
+      ],
+    }
+    useServerStoreMock.mockReturnValue({
+      servers: [dualServer],
+      activeServer: dualServer,
+      addServer: vi.fn(),
+      removeServer: vi.fn(),
+      updateServer: updateServerMock,
+      setActiveServer: setActiveServerMock,
+      setActiveEndpoint: setActiveEndpointMock,
+      setLockedEndpoint: setLockedEndpointMock,
+      checkHealth: checkHealthMock,
+      checkAllHealth: vi.fn(),
+      getHealth: vi.fn(() => null),
+      endpointStates: new Map(),
+    })
+
+    render(<ServersSettings />)
+    fireEvent.click(screen.getByTitle('servers.editServer'))
+    await waitFor(() => expect(screen.getByText('servers.endpointsLabel')).toBeTruthy())
+
+    fireEvent.click(screen.getByTitle('servers.endpointRemove'))
+    fireEvent.click(screen.getByText('common:save'))
+
+    await waitFor(() => expect(updateServerMock).toHaveBeenCalled())
+    const [, updates] = updateServerMock.mock.calls[0]!
+    // 必须显式传 undefined：store 用 hasOwnProperty 判断才会真的清空
+    expect('endpoints' in updates).toBe(true)
+    expect(updates.endpoints).toBeUndefined()
+  })
 })

@@ -752,7 +752,13 @@ class ServerStore {
     if (index === -1) return false
 
     const server = this.servers[index]
-    const nextEndpoints = updates.endpoints !== undefined ? normalizeEndpoints(updates.endpoints) : server.endpoints
+    /**
+     * 用 hasOwnProperty 而不是 `!== undefined` 判断：编辑界面删掉最后一个备用
+     * 地址时要能显式清空（传 endpoints: undefined）。用值判断会把「清空」
+     * 误当成「本次没改」，地址永远删不掉。
+     */
+    const hasEndpointsUpdate = Object.prototype.hasOwnProperty.call(updates, 'endpoints')
+    const nextEndpoints = hasEndpointsUpdate ? normalizeEndpoints(updates.endpoints) : server.endpoints
     this.servers[index] = {
       ...server,
       ...updates,

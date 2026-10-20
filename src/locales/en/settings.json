@@ -155,7 +155,15 @@
     "endpointActive": "In use",
     "endpointUse": "Use this address",
     "endpointLock": "Lock to this address (no auto-switch)",
-    "endpointUnlock": "Unlock"
+    "endpointUnlock": "Unlock",
+    "endpointsLabel": "Addresses",
+    "endpointAdd": "Add address",
+    "endpointPrimary": "Primary",
+    "endpointNth": "Address {{index}}",
+    "endpointMoveUp": "Move up",
+    "endpointMoveDown": "Move down",
+    "endpointRemove": "Remove address",
+    "endpointOrderHint": "Order is priority: the server prefers earlier addresses and falls back to later ones when unreachable."
   },
   "chat": {
     "pathsFormatting": "Paths & Formatting",

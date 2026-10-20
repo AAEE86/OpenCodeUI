@@ -4,7 +4,7 @@ import { Button } from '../../../components/ui/Button'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { DropdownMenu } from '../../../components/ui/DropdownMenu'
 import { MenuItem } from '../../../components/ui/MenuItem'
-import { TrashIcon, KeyIcon, PencilIcon, RetryIcon, PlugIcon, CircleIcon, QrCodeIcon, CheckIcon, PinIcon } from '../../../components/Icons'
+import { TrashIcon, KeyIcon, PencilIcon, RetryIcon, PlugIcon, CircleIcon, QrCodeIcon, CheckIcon, PinIcon, PlusIcon, ArrowUpIcon, ArrowDownIcon } from '../../../components/Icons'
 import { useServerStore, useRouter } from '../../../hooks'
 import { messageStore } from '../../../store'
 import { useMultiServerStore, multiServerStore } from '../../../store/multiServerStore'
@@ -38,29 +38,149 @@ function isHttpsIpUrl(url: string): boolean {
 }
 
 /**
- * 把「配对拿到的地址集 + 用户填的主地址」合成 endpoints（Issue #183）。
- *
- * 规则：
- * - 主地址排第一（priority 0）——它是用户当前选中的入口，也是 QR 首选地址
- * - 其余地址 priority 1（收进同一个服务器条目里备用）
- * - 主地址不在地址集里（用户手改过）→ 只有它自己，退回单地址语义
- * - 只有一个地址 → 返回 undefined，不写 endpoints（保持旧行为）
- *
- * 保持 QR 原始顺序：官方特意保留 `urls[0]`（用户挑选的顺序有信息量），
- * 因此除主地址外不做重排。
+ * 表单里编辑中的地址项。`id` 只是 React key，不落库——
+ * 用下标当 key 在删除中间行时会让输入框内容错位。
  */
-function buildEndpoints(primaryUrl: string, pairedUrls: string[]): ServerEndpoint[] | undefined {
+interface EditableEndpoint {
+  id: number
+  url: string
+}
+
+let editableEndpointSeq = 0
+
+function toEditable(urls: string[]): EditableEndpoint[] {
+  return urls.map(url => ({ id: ++editableEndpointSeq, url }))
+}
+
+/**
+ * 把表单里的地址列表 + 主地址合成为落库的 endpoints。
+ *
+ * 与 `buildEndpoints` 的区别：那个用于**配对回填**（主地址固定排第一），
+ * 这个用于**手动编辑**（用户排的顺序就是优先级顺序）。
+ * 主地址始终排第一：`server.url` 与 endpoints[0] 必须一致，
+ * 否则「主地址」和「生效地址」会指向两条不同的记录。
+ */
+function mergeEditableEndpoints(primaryUrl: string, editable: EditableEndpoint[]): ServerEndpoint[] | undefined {
   const primary = primaryUrl.trim().replace(/\/+$/, '')
   if (!primary) return undefined
 
   const ordered: string[] = [primary]
-  for (const candidate of pairedUrls) {
-    const normalized = candidate.trim().replace(/\/+$/, '')
+  for (const item of editable) {
+    const normalized = item.url.trim().replace(/\/+$/, '')
     if (normalized && !ordered.includes(normalized)) ordered.push(normalized)
   }
 
   if (ordered.length <= 1) return undefined
   return ordered.map((url, index) => ({ url, priority: index === 0 ? 0 : 1 }))
+}
+
+/**
+ * 地址列表编辑器（Issue #183）。
+ *
+ * 顺序即优先级：第一行是主地址（等价于表单上方的 URL 字段），往下依次备用。
+ * 只暴露「顺序」而不暴露 priority 数字——对用户来说「哪个优先」就是排第几，
+ * 让人手填优先级数字只会增加误操作。
+ */
+function EndpointListEditor({
+  primaryUrl,
+  items,
+  onChange,
+}: {
+  primaryUrl: string
+  items: EditableEndpoint[]
+  onChange: (next: EditableEndpoint[]) => void
+}) {
+  const { t } = useTranslation(['settings', 'common'])
+  const inputCls = settingsFieldClass
+
+  const update = (id: number, url: string) => {
+    onChange(items.map(item => (item.id === id ? { ...item, url } : item)))
+  }
+  const remove = (id: number) => {
+    onChange(items.filter(item => item.id !== id))
+  }
+  const move = (index: number, delta: -1 | 1) => {
+    const target = index + delta
+    if (target < 0 || target >= items.length) return
+    const next = [...items]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    onChange(next)
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="block text-[length:var(--fs-xs)] font-medium text-text-300">
+          {t('servers.endpointsLabel')}
+        </label>
+        <button
+          type="button"
+          onClick={() => onChange([...items, { id: ++editableEndpointSeq, url: '' }])}
+          className="flex items-center gap-1 text-[length:var(--fs-xs)] text-accent-main-100 hover:text-accent-main-200 transition-colors"
+        >
+          <PlusIcon size={10} />
+          {t('servers.endpointAdd')}
+        </button>
+      </div>
+
+      {/* 主地址固定第一行、不可删不可移：它就是上面 URL 字段的值 */}
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span className="shrink-0 w-3 text-[length:var(--fs-xs)] text-accent-main-100">1</span>
+        <span
+          className="min-w-0 flex-1 truncate rounded-md border border-border-200/50 bg-bg-200/40 px-2 py-1 font-mono text-[length:var(--fs-xs)] text-text-300"
+          title={primaryUrl}
+        >
+          {primaryUrl || '—'}
+        </span>
+        <span className="shrink-0 text-[length:var(--fs-xxs)] text-text-400">{t('servers.endpointPrimary')}</span>
+      </div>
+
+      {items.map((item, index) => (
+        <div key={item.id} className="flex items-center gap-1.5 min-w-0">
+          <span className="shrink-0 w-3 text-[length:var(--fs-xs)] text-text-400">{index + 2}</span>
+          <input
+            type="text"
+            value={item.url}
+            onChange={e => update(item.id, e.target.value)}
+            placeholder={t('servers.urlPlaceholder')}
+            className={`${inputCls} min-w-0 flex-1 font-mono`}
+            aria-label={t('servers.endpointNth', { index: index + 2 })}
+          />
+          <button
+            type="button"
+            onClick={() => move(index, -1)}
+            disabled={index === 0}
+            title={t('servers.endpointMoveUp')}
+            aria-label={t('servers.endpointMoveUp')}
+            className="shrink-0 p-1 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200/70 disabled:opacity-30 disabled:hover:bg-transparent"
+          >
+            <ArrowUpIcon size={11} />
+          </button>
+          <button
+            type="button"
+            onClick={() => move(index, 1)}
+            disabled={index === items.length - 1}
+            title={t('servers.endpointMoveDown')}
+            aria-label={t('servers.endpointMoveDown')}
+            className="shrink-0 p-1 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200/70 disabled:opacity-30 disabled:hover:bg-transparent"
+          >
+            <ArrowDownIcon size={11} />
+          </button>
+          <button
+            type="button"
+            onClick={() => remove(item.id)}
+            title={t('servers.endpointRemove')}
+            aria-label={t('servers.endpointRemove')}
+            className="shrink-0 p-1 rounded-md text-text-400 hover:text-danger-100 hover:bg-danger-bg/40"
+          >
+            <TrashIcon size={11} />
+          </button>
+        </div>
+      ))}
+
+      <p className="text-[length:var(--fs-xxs)] text-text-400 leading-relaxed">{t('servers.endpointOrderHint')}</p>
+    </div>
+  )
 }
 
 // ============================================
@@ -321,11 +441,12 @@ function EditServerForm({
   const [name, setName] = useState(server.name)
   const [url, setUrl] = useState(server.url)
   /**
-   * 配对拿到的全部地址（Issue #183）。与 `url`（主地址）分开存：
-   * 用户手改 url 不会动这个集合，保存时按「url 优先 + 集合去重」合成 endpoints。
+   * 备用地址列表（Issue #183）。与 `url`（主地址）分开存：主地址由上面那个
+   * URL 字段维护，这里有顺序的就是备用地址，顺序即优先级。
+   * 配对回填时整组替换，手动编辑时增删移。
    */
-  const [pairedUrls, setPairedUrls] = useState<string[]>(() =>
-    (server.endpoints ?? []).map(endpoint => endpoint.url),
+  const [extraEndpoints, setExtraEndpoints] = useState<EditableEndpoint[]>(() =>
+    toEditable((server.endpoints ?? []).slice(1).map(endpoint => endpoint.url)),
   )
   const [username, setUsername] = useState(server.auth?.username || '')
   const [password, setPassword] = useState(server.auth?.password || '')
@@ -336,8 +457,11 @@ function EditServerForm({
   // 与添加表单同一条配对链：重新扫码 / 粘贴 pair 链接兑换后回填地址与凭据，
   // 保存时才落库——适合换了端口 / 重装了服务端后原地更新连接配置
   const applyPairing = useCallback((pairedUrl: string, token: string, urls: string[]) => {
-    setUrl(pairedUrl)
-    setPairedUrls(urls)
+    // 配对拿到的地址集里，第一个是首选主地址，其余收进备用列表
+    const ordered = [pairedUrl, ...urls].map(item => item.trim().replace(/\/+$/, '')).filter(Boolean)
+    const unique = [...new Set(ordered)]
+    setUrl(unique[0] ?? pairedUrl)
+    setExtraEndpoints(toEditable(unique.slice(1)))
     setUsername('opencode')
     setPassword(token)
     setShowAuth(true)
@@ -378,7 +502,7 @@ function EditServerForm({
       url: url.trim(),
       username: password.trim() ? username.trim() || 'opencode' : undefined,
       password: password.trim() || undefined,
-      endpoints: buildEndpoints(url, pairedUrls),
+      endpoints: mergeEditableEndpoints(url, extraEndpoints),
     })
   }
 
@@ -476,6 +600,8 @@ function EditServerForm({
         </div>
       )}
 
+      <EndpointListEditor primaryUrl={url.trim()} items={extraEndpoints} onChange={setExtraEndpoints} />
+
       {error && <p className="text-[length:var(--fs-xs)] text-danger-100">{error}</p>}
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
@@ -513,16 +639,19 @@ function AddServerForm({
   const { t } = useTranslation(['settings', 'common'])
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
-  /** 配对拿到的全部地址；与 url（主地址）分开存，保存时合成 endpoints */
-  const [pairedUrls, setPairedUrls] = useState<string[]>([])
+  /** 备用地址列表（顺序即优先级）；主地址由上面的 url 字段维护 */
+  const [extraEndpoints, setExtraEndpoints] = useState<EditableEndpoint[]>([])
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showAuth, setShowAuth] = useState(false)
   const [error, setError] = useState('')
 
   const applyPairing = useCallback((pairedUrl: string, token: string, urls: string[]) => {
-    setUrl(pairedUrl)
-    setPairedUrls(urls)
+    // 配对地址集：第一个作主地址，其余进备用列表
+    const ordered = [pairedUrl, ...urls].map(item => item.trim().replace(/\/+$/, '')).filter(Boolean)
+    const unique = [...new Set(ordered)]
+    setUrl(unique[0] ?? pairedUrl)
+    setExtraEndpoints(toEditable(unique.slice(1)))
     setUsername('opencode')
     setPassword(token)
     setShowAuth(true)
@@ -566,7 +695,7 @@ function AddServerForm({
       url.trim(),
       password.trim() ? username.trim() || 'opencode' : undefined,
       password.trim() || undefined,
-      buildEndpoints(url, pairedUrls),
+      mergeEditableEndpoints(url, extraEndpoints),
     )
   }
 

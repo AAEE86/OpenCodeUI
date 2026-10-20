@@ -164,6 +164,25 @@ describe('serverStore 多地址', () => {
     expect(serverStore.getServerBaseUrl(server.id)).toBe('http://lan.test')
   })
 
+  it('updateServer 传 endpoints: undefined 表示清空（编辑界面删光备用地址）', async () => {
+    const { serverStore } = await import('./serverStore')
+    const server = serverStore.addServer({
+      name: 'dual',
+      url: 'http://lan.test',
+      endpoints: [
+        { url: 'http://lan.test', priority: 0 },
+        { url: 'https://wan.test', priority: 1 },
+      ],
+    })
+    expect(serverStore.getServer(server.id)?.endpoints).toHaveLength(2)
+
+    // 用 hasOwnProperty 判断而不是值判断：否则「清空」会被当成「本次没改」
+    serverStore.updateServer(server.id, { endpoints: undefined })
+
+    expect(serverStore.getServer(server.id)?.endpoints).toBeUndefined()
+    expect(serverStore.getServerBaseUrl(server.id)).toBe('http://lan.test')
+  })
+
   it('upsertServer 删掉地址后同样回收指针（WSL 重启重注册走这条路）', async () => {
     const { serverStore } = await import('./serverStore')
     const server = serverStore.upsertServer({

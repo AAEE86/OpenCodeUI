@@ -155,7 +155,15 @@
     "endpointActive": "使用中",
     "endpointUse": "使用此地址",
     "endpointLock": "锁定此地址（不自动切换）",
-    "endpointUnlock": "解除锁定"
+    "endpointUnlock": "解除锁定",
+    "endpointsLabel": "地址",
+    "endpointAdd": "添加地址",
+    "endpointPrimary": "主地址",
+    "endpointNth": "第 {{index}} 个地址",
+    "endpointMoveUp": "上移",
+    "endpointMoveDown": "下移",
+    "endpointRemove": "删除地址",
+    "endpointOrderHint": "顺序即优先级：优先用靠前的地址，连不上时自动退到后面的。"
   },
   "chat": {
     "pathsFormatting": "路径和格式",

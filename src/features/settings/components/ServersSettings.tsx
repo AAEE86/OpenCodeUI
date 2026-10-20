@@ -4,7 +4,7 @@ import { Button } from '../../../components/ui/Button'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { DropdownMenu } from '../../../components/ui/DropdownMenu'
 import { MenuItem } from '../../../components/ui/MenuItem'
-import { TrashIcon, KeyIcon, PencilIcon, RetryIcon, PlugIcon, CircleIcon, QrCodeIcon, CheckIcon, PinIcon, PlusIcon, ArrowUpIcon, ArrowDownIcon } from '../../../components/Icons'
+import { TrashIcon, KeyIcon, PencilIcon, RetryIcon, PlugIcon, CircleIcon, QrCodeIcon, CheckIcon, PinIcon, PlusIcon, ArrowUpIcon, ArrowDownIcon, ChevronDownIcon, ChevronRightIcon } from '../../../components/Icons'
 import { useServerStore, useRouter } from '../../../hooks'
 import { messageStore } from '../../../store'
 import { useMultiServerStore, multiServerStore } from '../../../store/multiServerStore'
@@ -256,6 +256,12 @@ function ServerItem({
   const { t } = useTranslation(['settings', 'common'])
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  /**
+   * 地址列表默认收起：一台服务器有四五个入口时，全展开会把卡片撑得比
+   * 整个列表还高，其它服务器全被挤到屏幕外。收起时只留一行摘要
+   * （当前生效地址 + 共几个），要换地址再点开。
+   */
+  const [showEndpoints, setShowEndpoints] = useState(false)
 
   if (editing) {
     return (
@@ -373,45 +379,72 @@ function ServerItem({
         </div>
 
         {/* 多地址列表（Issue #183）：仅当服务器配了 >1 个地址时出现，
-            单地址用户看到的界面与旧版完全一致 */}
+            单地址用户看到的界面与旧版完全一致。
+            默认收起——全展开时一张卡片能占掉半屏，其它服务器全被挤下去。 */}
         {server.endpoints && server.endpoints.length > 1 && (
-          <div className="mt-2 pt-2 border-t border-border-200/40 space-y-0.5" onClick={e => e.stopPropagation()}>
-            {server.endpoints.map(endpoint => {
-              const isCurrent = effectiveEndpointUrl(server, endpointState) === endpoint.url
-              const locked = endpointState.lockedUrl === endpoint.url
-              return (
-                <div key={endpoint.url} className="flex items-center gap-1 min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => onUseEndpoint(endpoint.url)}
-                    disabled={isCurrent}
-                    title={isCurrent ? t('servers.endpointActive') : t('servers.endpointUse')}
-                    className={`min-w-0 flex-1 flex items-center gap-1.5 px-1.5 py-1 rounded-md text-left transition-colors
-                      ${isCurrent ? 'text-accent-main-100' : 'text-text-300 hover:bg-bg-200/70'}`}
-                  >
-                    <span className="shrink-0 w-3">
-                      {isCurrent && <CheckIcon size={11} />}
-                    </span>
-                    <span className="truncate min-w-0 font-mono text-[length:var(--fs-xs)]" title={endpoint.url}>
-                      {endpoint.url}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onLockEndpoint(locked ? null : endpoint.url)}
-                    title={locked ? t('servers.endpointUnlock') : t('servers.endpointLock')}
-                    aria-label={locked ? t('servers.endpointUnlock') : t('servers.endpointLock')}
-                    className={`shrink-0 p-1 rounded-md transition-colors ${
-                      locked
-                        ? 'text-accent-main-100 hover:bg-accent-main-100/10'
-                        : 'text-text-400 hover:text-text-200 hover:bg-bg-200/70'
-                    }`}
-                  >
-                    <PinIcon size={12} />
-                  </button>
-                </div>
-              )
-            })}
+          <div className="mt-2 pt-2 border-t border-border-200/40" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setShowEndpoints(!showEndpoints)}
+              aria-expanded={showEndpoints}
+              title={t('servers.endpointToggle', { count: server.endpoints.length })}
+              className="w-full flex items-center gap-1.5 min-w-0 px-1.5 py-1 rounded-md text-left
+                text-text-400 hover:text-text-200 hover:bg-bg-200/70 transition-colors"
+            >
+              {showEndpoints ? (
+                <ChevronDownIcon size={11} className="shrink-0" />
+              ) : (
+                <ChevronRightIcon size={11} className="shrink-0" />
+              )}
+              <span className="text-[length:var(--fs-xs)]">
+                {t('servers.endpointCount', { count: server.endpoints.length })}
+              </span>
+              {/* 收起时也要能看出「手动锁定了某个地址」，否则用户会以为锁定丢了 */}
+              {!showEndpoints && endpointState.lockedUrl && (
+                <PinIcon size={10} className="shrink-0 text-accent-main-100" />
+              )}
+            </button>
+
+            {showEndpoints && (
+              <div className="mt-0.5 space-y-0.5">
+                {server.endpoints.map(endpoint => {
+                  const isCurrent = effectiveEndpointUrl(server, endpointState) === endpoint.url
+                  const locked = endpointState.lockedUrl === endpoint.url
+                  return (
+                    <div key={endpoint.url} className="flex items-center gap-1 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => onUseEndpoint(endpoint.url)}
+                        disabled={isCurrent}
+                        title={isCurrent ? t('servers.endpointActive') : t('servers.endpointUse')}
+                        className={`min-w-0 flex-1 flex items-center gap-1.5 px-1.5 py-1 rounded-md text-left transition-colors
+                          ${isCurrent ? 'text-accent-main-100' : 'text-text-300 hover:bg-bg-200/70'}`}
+                      >
+                        <span className="shrink-0 w-3">
+                          {isCurrent && <CheckIcon size={11} />}
+                        </span>
+                        <span className="truncate min-w-0 font-mono text-[length:var(--fs-xs)]" title={endpoint.url}>
+                          {endpoint.url}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onLockEndpoint(locked ? null : endpoint.url)}
+                        title={locked ? t('servers.endpointUnlock') : t('servers.endpointLock')}
+                        aria-label={locked ? t('servers.endpointUnlock') : t('servers.endpointLock')}
+                        className={`shrink-0 p-1 rounded-md transition-colors ${
+                          locked
+                            ? 'text-accent-main-100 hover:bg-accent-main-100/10'
+                            : 'text-text-400 hover:text-text-200 hover:bg-bg-200/70'
+                        }`}
+                      >
+                        <PinIcon size={12} />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

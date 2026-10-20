@@ -161,7 +161,9 @@
     "endpointMoveUp": "上移",
     "endpointMoveDown": "下移",
     "endpointRemove": "删除地址",
-    "endpointOrderHint": "顺序即优先级：优先用靠前的地址，连不上时自动退到后面的。第一行是主地址。"
+    "endpointOrderHint": "顺序即优先级：优先用靠前的地址，连不上时自动退到后面的。第一行是主地址。",
+    "endpointCount": "{{count}} 个地址",
+    "endpointToggle": "展开 {{count}} 个地址"
   },
   "chat": {
     "pathsFormatting": "路径和格式",

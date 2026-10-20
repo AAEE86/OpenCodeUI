@@ -161,7 +161,9 @@
     "endpointMoveUp": "Move up",
     "endpointMoveDown": "Move down",
     "endpointRemove": "Remove address",
-    "endpointOrderHint": "Order is priority: earlier addresses are preferred, falling back to later ones when unreachable. The first is the primary address."
+    "endpointOrderHint": "Order is priority: earlier addresses are preferred, falling back to later ones when unreachable. The first is the primary address.",
+    "endpointCount": "{{count}} addresses",
+    "endpointToggle": "Show {{count}} addresses"
   },
   "chat": {
     "pathsFormatting": "Paths & Formatting",

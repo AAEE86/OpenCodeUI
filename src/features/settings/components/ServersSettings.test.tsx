@@ -98,6 +98,15 @@ describe('ServersSettings', () => {
 
     render(<ServersSettings />)
 
+    // 默认收起：只显示地址数量，列表内容不渲染
+    const toggle = screen.getByTitle('servers.endpointToggle')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByTitle('servers.endpointUse')).toBeNull()
+
+    // 展开后才看得到全部地址
+    fireEvent.click(toggle)
+    expect(screen.getByTitle('servers.endpointToggle').getAttribute('aria-expanded')).toBe('true')
+
     // 两个地址都渲染出来（主地址在标题行 + 列表各出现一次，故用 getAll）
     expect(screen.getAllByText('http://192.168.1.5:4096').length).toBeGreaterThan(0)
     expect(screen.getByText('https://public.example.com')).toBeTruthy()
@@ -110,6 +119,41 @@ describe('ServersSettings', () => {
     const [lockButton] = screen.getAllByTitle('servers.endpointLock')
     fireEvent.click(lockButton!)
     expect(setLockedEndpointMock).toHaveBeenCalledWith('dual', 'http://192.168.1.5:4096')
+  })
+
+  it('收起状态下仍能看出地址被锁定', async () => {
+    const dualServer = {
+      id: 'dual',
+      name: 'Dual',
+      url: 'http://lan.test',
+      endpoints: [
+        { url: 'http://lan.test', priority: 0 },
+        { url: 'https://wan.test', priority: 1 },
+      ],
+    }
+    useServerStoreMock.mockReturnValue({
+      servers: [dualServer],
+      activeServer: dualServer,
+      addServer: vi.fn(),
+      removeServer: vi.fn(),
+      updateServer: vi.fn(),
+      setActiveServer: setActiveServerMock,
+      setActiveEndpoint: setActiveEndpointMock,
+      setLockedEndpoint: setLockedEndpointMock,
+      checkHealth: checkHealthMock,
+      checkAllHealth: vi.fn(),
+      getHealth: vi.fn(() => null),
+      endpointStates: new Map([['dual', { activeUrl: 'https://wan.test', lockedUrl: 'https://wan.test', lastSwitchAt: 0 }]]),
+    })
+
+    render(<ServersSettings />)
+
+    // 收起状态，但折叠行上带锁定标记
+    const toggle = screen.getByTitle('servers.endpointToggle')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.querySelector('svg')).toBeTruthy()
+    // 至少有两个 svg：折叠箭头 + 图钉
+    expect(toggle.querySelectorAll('svg').length).toBeGreaterThanOrEqual(2)
   })
 
   /**

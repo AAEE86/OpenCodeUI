@@ -20,7 +20,19 @@ export interface PairingLink {
 }
 
 export type RedeemResult =
-  | { type: 'paired'; url: string; token: string }
+  | {
+      type: 'paired'
+      /** 兑换实际使用的地址（竞速赢家 / 首选地址） */
+      url: string
+      /**
+       * QR 载荷里的**全部**地址（归一化去重后，保持原顺序）。
+       *
+       * 兑换只证明 code 有效、token 可用；token 在服务器所有地址上通用，
+       * 因此这里把完整地址集交给调用方保存为多地址（Issue #183）。
+       */
+      urls: string[]
+      token: string
+    }
   | { type: 'expired' }
   | { type: 'unreachable' }
 
@@ -140,7 +152,7 @@ export async function redeemPairingLink(link: PairingLink): Promise<RedeemResult
         winner = { url: preferredAttempt.url, token: preferredAttempt.token }
       }
     }
-    return { type: 'paired', url: winner.url, token: winner.token }
+    return { type: 'paired', url: winner.url, urls: link.urls, token: winner.token }
   }
 
   const settled = await Promise.all(attempts)

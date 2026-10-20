@@ -29,12 +29,33 @@ export interface ServerAuth {
 }
 
 /**
+ * 服务器地址（Issue #183：同一台服务器可有多个入口）。
+ *
+ * 典型场景：`opencode serve` 同时有内网直连和公网隧道两个入口。
+ * `priority` 越小越优先（内网 0，公网 1）——这是**主备**语义，不是负载均衡：
+ * 高优先级可达就不去比延迟，只有同类地址之间才看 latency。
+ */
+export interface ServerEndpoint {
+  /** 归一化后的服务器地址（不含尾部斜杠） */
+  url: string
+  /** 优先级，越小越优先；同优先级之间才按延迟比较 */
+  priority: number
+  /** 用户可读标签（如「内网」「公网」），仅展示 */
+  label?: string
+}
+
+/**
  * 服务器配置
  */
 export interface ServerConfig {
   id: string // 唯一标识
   name: string // 显示名称
-  url: string // 服务器 URL (不含尾部斜杠)
+  url: string // 主地址 (不含尾部斜杠)；等价 endpoints 中优先级最高者
+  /**
+   * 多地址列表（可选）。缺省表示单地址服务器，行为与旧版完全一致。
+   * 存在时 `url` 仍是主地址，`getServerBaseUrl` 会优先返回当前生效地址。
+   */
+  endpoints?: ServerEndpoint[]
   isDefault?: boolean // 是否为默认服务器
   auth?: ServerAuth // 认证信息 (可选)
 }
@@ -64,10 +85,67 @@ interface ServerClockCalibration {
 }
 
 type Listener = () => void
-export type ServerChangeReason = 'server-switch' | 'local-runtime-url' | 'server-runtime-updated'
+export type ServerChangeReason =
+  | 'server-switch'
+  | 'local-runtime-url'
+  | 'server-runtime-updated'
+  /**
+   * 同一台服务器换入口地址（Issue #183：内网 ↔ 公网切换）。
+   *
+   * 与 server-switch 的区别：数据主体（会话/消息/布局）**不变**，
+   * 只是 baseUrl 换了。因此消费方不该走「清空 → 重拉」，
+   * 而应交由 SSE 重连后的 onReconnected 做补偿刷新。
+   */
+  | 'endpoint-switch'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+/**
+ * 归一化单条地址：去尾部斜杠。非字符串 / 空串返回 undefined。
+ */
+function normalizeEndpointUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  return trimmed.replace(/\/+$/, '')
+}
+
+/**
+ * 解析并归一化服务器的多地址列表（持久化与备份导入共用）。
+ *
+ * - 丢弃非法项（非对象 / url 非字符串）
+ * - 按 url 去重（保留首次出现的优先级）
+ * - 按 priority 升序稳定排序
+ * - 空结果返回 undefined（表示退回单地址语义）
+ */
+export function normalizeEndpoints(raw: unknown): ServerEndpoint[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+
+  const seen = new Set<string>()
+  const parsed: ServerEndpoint[] = []
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    const url = normalizeEndpointUrl(item.url)
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    const priority = typeof item.priority === 'number' && Number.isFinite(item.priority) ? item.priority : 0
+    const label = typeof item.label === 'string' && item.label.trim() ? item.label.trim() : undefined
+    parsed.push({ url, priority, ...(label ? { label } : {}) })
+  }
+
+  if (parsed.length === 0) return undefined
+  // 稳定排序：priority 相同的保持录入顺序
+  return parsed.sort((a, b) => a.priority - b.priority)
+}
+
+/**
+ * 取「优先级最高的地址」，即地址列表的主地址。
+ * 无 endpoints 时返回 undefined（调用方退回 `server.url`）。
+ */
+export function primaryEndpointUrl(endpoints: ServerEndpoint[] | undefined): string | undefined {
+  return endpoints?.[0]?.url
 }
 
 /**
@@ -178,6 +256,37 @@ function isSameServerAuth(a: ServerAuth | undefined, b: ServerAuth | undefined):
   return a?.username === b?.username && a?.password === b?.password
 }
 
+/** 多地址列表是否等价（顺序敏感——priority 排序后顺序即语义） */
+function isSameEndpoints(a: ServerEndpoint[] | undefined, b: ServerEndpoint[] | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.length !== b.length) return false
+  return a.every((endpoint, index) => {
+    const other = b[index]
+    return endpoint.url === other.url && endpoint.priority === other.priority && endpoint.label === other.label
+  })
+}
+
+/**
+ * 多地址的运行时状态（**不持久化**）。
+ *
+ * 持久层只存「用户配了哪些地址」；「此刻在用哪个」是运行时事实，
+ * 每次启动都该按网络环境重新探测/回退，存下来反而会让下次启动落在死地址上。
+ */
+export interface EndpointRuntime {
+  /** 当前生效地址；null 表示尚未选定，getter 退化为 server.url */
+  activeUrl: string | null
+  /** 用户手动锁定的地址；非 null 时自动探测完全让位 */
+  lockedUrl: string | null
+  /** 上次自动/手动切地址的单调时刻（performance.now()），升级滞回用 */
+  lastSwitchAt: number
+}
+
+/** 空的运行时状态（新服务器 / 未初始化）。集中构造，避免漏字段 */
+function emptyEndpointRuntime(): EndpointRuntime {
+  return { activeUrl: null, lockedUrl: null, lastSwitchAt: 0 }
+}
+
 /**
  * Server Store
  * 管理多个 OpenCode 后端服务器配置
@@ -192,6 +301,8 @@ class ServerStore {
   private lastClockCalibrationAt = new Map<string, number>()
   private listeners: Set<Listener> = new Set()
   private localServerUrlOverride: string | null = null
+  /** 多地址运行时状态（按 serverId）；见 EndpointRuntime 注释 */
+  private endpointRuntime = new Map<string, EndpointRuntime>()
   // 上次关闭时用户停留的 WSL 服务器 id（wslStore 就绪后据此恢复 active）
   private bootIntentServerId: string | null = null
   // 启动默认服务器偏好（内存缓存，随 notify 快照供 React 订阅）
@@ -204,6 +315,8 @@ class ServerStore {
   private _serversSnapshot: ServerConfig[] = []
   private _activeServerSnapshot: ServerConfig | null = null
   private _healthMapSnapshot: Map<string, ServerHealth> = new Map()
+  /** 多地址运行时状态快照（生效地址 / 锁定地址） */
+  private _endpointStateSnapshot: Map<string, EndpointRuntime> = new Map()
 
   // 默认本地服务器 ID
   private readonly DEFAULT_SERVER_ID = LOCAL_SERVER_ID
@@ -229,9 +342,11 @@ class ServerStore {
       // 遗留的 wsl: 条目，避免老用户下次启动先落在死地址上
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {
-        this.servers = (JSON.parse(stored) as ServerConfig[]).filter(
-          server => typeof server?.id === 'string' && !server.id.startsWith(WSL_SERVER_PREFIX),
-        )
+        this.servers = (JSON.parse(stored) as ServerConfig[])
+          .filter(server => typeof server?.id === 'string' && !server.id.startsWith(WSL_SERVER_PREFIX))
+          // endpoints 归一化：旧数据没有该字段（→ undefined，保持单地址语义），
+          // 手改 / 历史脏值则在此清洗，不让非法地址流进运行时
+          .map(server => ({ ...server, endpoints: normalizeEndpoints(server.endpoints) }))
       }
 
       // 如果没有服务器，添加默认的本地服务器
@@ -339,6 +454,11 @@ class ServerStore {
     this._serversSnapshot = this.servers.map(server => this.withRuntimeServerUrl(server))
     this._activeServerSnapshot = this._serversSnapshot.find(s => s.id === this.activeServerId) ?? null
     this._healthMapSnapshot = new Map(this.healthMap)
+    // 运行时地址状态（生效/锁定）也要有快照：UI 靠它决定「使用中」「已锁定」标记。
+    // 复制成新 Map，保证 useSyncExternalStore 能看出变化
+    this._endpointStateSnapshot = new Map(
+      this.servers.map(server => [server.id, this.endpointRuntime.get(server.id) ?? emptyEndpointRuntime()]),
+    )
   }
 
   private withRuntimeServerUrl(server: ServerConfig): ServerConfig {
@@ -379,11 +499,36 @@ class ServerStore {
   }
 
   /**
-   * 获取指定服务器（含 runtime URL override）的 base URL
+   * 获取指定服务器（含 runtime URL override）的 base URL。
+   *
+   * 多地址服务器返回**当前生效地址**（`activeUrl`），未选定时退回主地址
+   * `server.url`。SDK / http 层的 baseUrl 全部经此读取，因此切换地址
+   * 不需要改动 sdk.ts。
    */
   getServerBaseUrl(serverId: string): string {
+    return this.getActiveEndpointUrl(serverId)
+  }
+
+  /** 读取多地址运行时状态（不存在时返回空对象，不创建） */
+  getEndpointRuntime(serverId: string): Readonly<EndpointRuntime> {
+    return this.endpointRuntime.get(serverId) ?? emptyEndpointRuntime()
+  }
+
+  /** 当前生效地址（含单地址服务器与 local runtime override 的退化） */
+  getActiveEndpointUrl(serverId: string): string {
     const server = this.servers.find(s => s.id === serverId)
-    return server ? this.withRuntimeServerUrl(server).url : API_BASE_URL
+    if (!server) return API_BASE_URL
+    const active = this.endpointRuntime.get(serverId)?.activeUrl
+    if (active) return active
+    // 单地址服务器：local 由运行时注入真实回环地址（见 withRuntimeServerUrl），
+    // 其余服务器取 endpoints 主地址（无 endpoints 时即 url 本身）
+    const runtimeUrl = this.withRuntimeServerUrl(server).url
+    return primaryEndpointUrl(server.endpoints) ?? runtimeUrl
+  }
+
+  /** 已锁定的地址；null 表示未锁定（自动模式） */
+  getLockedEndpointUrl(serverId: string): string | null {
+    return this.endpointRuntime.get(serverId)?.lockedUrl ?? null
   }
 
   /**
@@ -408,6 +553,10 @@ class ServerStore {
    * - 用户手动添加的服务器：按 URL 的 host 判（`localhost` / `127.0.0.1` /
    *   `[::1]`）。
    *
+   * 多地址服务器（Issue #183）判的是**当前生效地址**，不是配置里的主地址：
+   * 同一台服务器走内网 IP 时不同机、走回环隧道时可能同机，取决于此刻连的是
+   * 哪个入口。用主地址会把「已降级到公网」误判成同机。
+   *
    * ⚠️ 已知边界：容器端口转发到回环（Docker `-p 127.0.0.1:4096`）会被判成同机，
    * 但服务端进程在容器里读不到宿主路径。调用方需要能容忍这一点（失败时退化
    * 为上传/引用，不要让它变成"消息发不出去"）。
@@ -416,8 +565,10 @@ class ServerStore {
     const id = serverId ?? this.getActiveServerId()
     if (id === this.DEFAULT_SERVER_ID) return true
     if (id.startsWith(WSL_SERVER_PREFIX)) return false
+    // 未知 id 按非同机处理（宁可上传，别拿本机路径去引用）
+    if (!this.getServer(id)) return false
 
-    return isLocalServerHost(this.getServer(id)?.url)
+    return isLocalServerHost(this.getServerBaseUrl(id))
   }
 
   /**
@@ -429,11 +580,13 @@ class ServerStore {
   }
 
   /**
-   * 获取当前 API Base URL
+   * 获取当前 API Base URL。
+   *
+   * 走 getServerBaseUrl（= 当前生效地址），多地址服务器才能拿到实际在用的入口；
+   * 单地址 / local runtime override 的行为不变。
    */
   getActiveBaseUrl(): string {
-    const server = this.getActiveServer()
-    return server?.url ?? API_BASE_URL
+    return this.getServerBaseUrl(this.getActiveServerId())
   }
 
   /**
@@ -464,6 +617,16 @@ class ServerStore {
    */
   getAllHealth(): Map<string, ServerHealth> {
     return this._healthMapSnapshot
+  }
+
+  /**
+   * 多地址运行时状态快照（按 serverId）。
+   *
+   * 只读快照：UI 用它渲染「使用中 / 已锁定」；业务判断一律走
+   * getServerBaseUrl / getActiveEndpointUrl，避免读到过期副本。
+   */
+  getEndpointStates(): Map<string, Readonly<EndpointRuntime>> {
+    return this._endpointStateSnapshot
   }
 
   getActiveCalibratedNow(): number | undefined {
@@ -523,6 +686,7 @@ class ServerStore {
       ...config,
       id,
       url: config.url.replace(/\/+$/, ''), // 移除尾部斜杠
+      endpoints: normalizeEndpoints(config.endpoints),
     }
     this.servers.push(server)
     this.saveToStorage()
@@ -538,6 +702,7 @@ class ServerStore {
     const server: ServerConfig = {
       ...config,
       url: config.url.replace(/\/+$/, ''), // 移除尾部斜杠
+      endpoints: normalizeEndpoints(config.endpoints),
     }
     const index = this.servers.findIndex(s => s.id === server.id)
     const previous = index === -1 ? undefined : this.servers[index]
@@ -547,19 +712,28 @@ class ServerStore {
       previous &&
       previous.name === server.name &&
       previous.url === server.url &&
-      isSameServerAuth(previous.auth, server.auth)
+      isSameServerAuth(previous.auth, server.auth) &&
+      isSameEndpoints(previous.endpoints, server.endpoints)
     ) {
       return previous
     }
     // 端点/凭据是否变化。新增时 previous 为空，「可用端点从无到有」
     // 对消费方与变更等价（WSL 就绪注册是典型场景）
-    const runtimeChanged = !previous || previous.url !== server.url || !isSameServerAuth(previous.auth, server.auth)
+    const runtimeChanged =
+      !previous ||
+      previous.url !== server.url ||
+      !isSameServerAuth(previous.auth, server.auth) ||
+      !isSameEndpoints(previous.endpoints, server.endpoints)
     if (index === -1) {
       this.servers.push(server)
     } else {
       this.servers[index] = server
     }
     this.saveToStorage()
+    // 地址集变了：已选/已锁的地址可能已被删掉，必须回收，
+    // 否则 getServerBaseUrl 会一直返回一个不存在的地址。
+    // 必须在 notify 之前——notify 负责重建 UI 快照。
+    this.reconcileEndpointRuntime(server.id)
     this.notify()
     // 端点变化无条件广播（不限定 active）：SSE/SDK 消费方建连时现读 serverStore，
     // 收到信号按 serverId 定向重建即拿到新值。active 与否只决定「谁正在用」，
@@ -578,18 +752,122 @@ class ServerStore {
     if (index === -1) return false
 
     const server = this.servers[index]
+    const nextEndpoints = updates.endpoints !== undefined ? normalizeEndpoints(updates.endpoints) : server.endpoints
     this.servers[index] = {
       ...server,
       ...updates,
       id: server.id, // 确保 id 不被覆盖
       url: updates.url ? updates.url.replace(/\/+$/, '') : server.url,
+      endpoints: nextEndpoints,
     }
     if (id === this.DEFAULT_SERVER_ID && updates.url) {
       this.localServerUrlOverride = null
     }
+    // 地址集变了：已有的生效地址 / 锁定地址可能已不存在，必须回收，
+    // 否则 getServerBaseUrl 会一直返回一个用户已经删掉的地址。
+    this.reconcileEndpointRuntime(id)
     this.saveToStorage()
     this.notify()
     return true
+  }
+
+  /**
+   * 回收失效的运行时地址。
+   *
+   * `activeUrl` / `lockedUrl` 必须仍在当前地址集内，否则置空
+   * （置空后 getter 退回主地址 `server.url`）。
+   */
+  private reconcileEndpointRuntime(serverId: string): void {
+    const server = this.servers.find(s => s.id === serverId)
+    const runtime = this.endpointRuntime.get(serverId)
+    if (!server || !runtime) return
+
+    const known = new Set<string>([
+      ...(server.endpoints ?? []).map(endpoint => endpoint.url),
+      server.url,
+    ])
+    const activeUrl = runtime.activeUrl && known.has(runtime.activeUrl) ? runtime.activeUrl : null
+    const lockedUrl = runtime.lockedUrl && known.has(runtime.lockedUrl) ? runtime.lockedUrl : null
+    if (activeUrl === runtime.activeUrl && lockedUrl === runtime.lockedUrl) return
+    this.endpointRuntime.set(serverId, { ...runtime, activeUrl, lockedUrl })
+  }
+
+  /**
+   * 切换生效地址（Issue #183）。
+   *
+   * 地址必须属于该服务器的 endpoints（或等于 `server.url`）。切换后：
+   * - `getServerBaseUrl` 立即返回新地址 → SDK/http 自动指向新入口
+   * - 广播 `endpoint-switch`（不是 server-switch），消费方据此重连 SSE
+   *   但不重置会话/消息（数据主体按 serverId 分片，未变）
+   */
+  setActiveEndpoint(serverId: string, url: string): boolean {
+    const server = this.servers.find(s => s.id === serverId)
+    if (!server) return false
+
+    const normalized = normalizeEndpointUrl(url)
+    if (!normalized) return false
+    const known = new Set<string>([
+      ...(server.endpoints ?? []).map(endpoint => endpoint.url),
+      server.url,
+    ])
+    if (!known.has(normalized)) return false
+
+    const runtime = this.endpointRuntime.get(serverId) ?? emptyEndpointRuntime()
+    if (runtime.activeUrl === normalized) return false
+
+    // 记录切换时刻：自动升级要等滞回窗口（见 endpointProbe）
+    this.endpointRuntime.set(serverId, {
+      ...runtime,
+      activeUrl: normalized,
+      lastSwitchAt: performance.now(),
+    })
+    this.notify()
+    this.notifyServerChange(serverId, 'endpoint-switch')
+    return true
+  }
+
+  /**
+   * 锁定 / 解锁自动切换。
+   *
+   * 传入地址即锁定到该地址（同时把它设为生效地址）；传 null 解锁，
+   * 恢复自动探测。锁定期间探测模块必须完全让位（不得改动 activeUrl）。
+   */
+  setLockedEndpoint(serverId: string, url: string | null): boolean {
+    const server = this.servers.find(s => s.id === serverId)
+    if (!server) return false
+
+    const runtime = this.endpointRuntime.get(serverId) ?? emptyEndpointRuntime()
+
+    if (url === null) {
+      if (runtime.lockedUrl === null) return false
+      // 解锁即重新交给自动探测：滞回窗口从此刻起算，避免刚解锁就立刻被降级
+      this.endpointRuntime.set(serverId, { ...runtime, lockedUrl: null, lastSwitchAt: performance.now() })
+      this.notify()
+      return true
+    }
+
+    const normalized = normalizeEndpointUrl(url)
+    if (!normalized) return false
+    const known = new Set<string>([
+      ...(server.endpoints ?? []).map(endpoint => endpoint.url),
+      server.url,
+    ])
+    if (!known.has(normalized)) return false
+    if (runtime.lockedUrl === normalized && runtime.activeUrl === normalized) return false
+
+    this.endpointRuntime.set(serverId, {
+      activeUrl: normalized,
+      lockedUrl: normalized,
+      lastSwitchAt: performance.now(),
+    })
+    this.notify()
+    this.notifyServerChange(serverId, 'endpoint-switch')
+    return true
+  }
+
+  /** 清理运行时状态（删除服务器时调用，避免 Map 只增不减） */
+  private clearEndpointRuntime(serverId: string): void {
+    this.endpointRuntime.delete(serverId)
   }
 
   setLocalServerRuntimeUrl(url: string): boolean {
@@ -621,6 +899,7 @@ class ServerStore {
     this.healthMap.delete(id)
     this.healthCheckSeqMap.delete(id)
     this.clockCalibrationMap.delete(id)
+    this.clearEndpointRuntime(id)
 
     // 默认服务器偏好指向被删服务器时必须一并清除（只增不减的隐患）：否则下次启动仍会拿一个
     // 已不存在的 id 当默认目标。仅限非 WSL：WSL 的 removeServer 常因瞬时未就绪（starting/stopped）
@@ -843,6 +1122,43 @@ class ServerStore {
   async checkAllHealth(): Promise<void> {
     await Promise.all(this.servers.map(s => this.checkHealth(s.id)))
   }
+
+  /**
+   * 探测单个地址是否可达（Issue #183 多地址探测用）。
+   *
+   * 与 checkHealth 的区别：**不写 healthMap、不通知订阅方**。它是 per-endpoint
+   * 的事实采集，读写它的只有探测循环；把结果塞进 per-server 的 healthMap 会污染
+   * 服务器卡片上的健康灯。探测端点用 GET /api/info（无副作用，且能同时验证
+   * 服务端身份——返回 401 说明地址可达但凭据不对，也算「可达」）。
+   *
+   * @returns 可达时带延迟；不可达返回 null（超时/网络错误/非 JSON 响应）
+   */
+  async probeEndpoint(url: string, auth: ServerAuth | undefined, timeoutMs = 4000): Promise<number | null> {
+    const target = `${url.replace(/\/+$/, '')}/api/info`
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    const startTime = Date.now()
+
+    try {
+      const headers: Record<string, string> = {}
+      if (auth?.password) {
+        headers['Authorization'] = makeBasicAuthHeader(auth)
+      }
+      const f = await getUnifiedFetch()
+      const response = await f(target, { method: 'GET', signal: controller.signal, headers })
+      const latency = Date.now() - startTime
+      // 401 = 地址通、凭据待补，对「能不能连上」而言仍算可达
+      if (response.status === 401) return latency
+      if (!response.ok) return null
+      // 服务器会对未知路径回退 SPA HTML，必须是 JSON 才算真服务端
+      const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+      return contentType.includes('application/json') ? latency : null
+    } catch {
+      return null
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
 }
 
 // 单例导出
@@ -866,6 +1182,7 @@ function normalizeServerBackup(raw: unknown): ServerSettingsBackup {
           id: item.id,
           name: item.name,
           url: item.url.replace(/\/+$/, ''),
+          endpoints: normalizeEndpoints(item.endpoints),
           isDefault: item.isDefault === true,
           auth:
             item.auth &&
@@ -918,6 +1235,7 @@ export function exportServerSettingsBackup(): ServerSettingsBackup {
       .map(server => ({
         ...server,
         auth: server.auth ? { ...server.auth } : undefined,
+        endpoints: server.endpoints ? server.endpoints.map(endpoint => ({ ...endpoint })) : undefined,
       })),
     activeServerId: serverStore.getActiveServerId(),
     defaultServerId: serverStore.getDefaultServerId(),

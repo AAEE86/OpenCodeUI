@@ -4,7 +4,7 @@ import { Button } from '../../../components/ui/Button'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { DropdownMenu } from '../../../components/ui/DropdownMenu'
 import { MenuItem } from '../../../components/ui/MenuItem'
-import { TrashIcon, KeyIcon, PencilIcon, RetryIcon, PlugIcon, CircleIcon, QrCodeIcon } from '../../../components/Icons'
+import { TrashIcon, KeyIcon, PencilIcon, RetryIcon, PlugIcon, CircleIcon, QrCodeIcon, CheckIcon, PinIcon } from '../../../components/Icons'
 import { useServerStore, useRouter } from '../../../hooks'
 import { messageStore } from '../../../store'
 import { useMultiServerStore, multiServerStore } from '../../../store/multiServerStore'
@@ -15,7 +15,7 @@ import { PairServerDialog } from './PairServerDialog'
 import { PairScanDialog } from './PairScanDialog'
 import { PairLinkField } from './PairLinkField'
 import { usePairLinkRedeem } from './usePairLinkRedeem'
-import type { ServerConfig, ServerHealth } from '../../../store/serverStore'
+import type { ServerConfig, ServerEndpoint, ServerHealth, EndpointRuntime } from '../../../store/serverStore'
 import { isTauri, getDesktopPlatform } from '../../../utils/tauri'
 import { isLegacyPairingLink, parsePairingLink } from '../../../utils/pairing'
 import { wslApi } from '../../../api/wsl'
@@ -37,9 +37,46 @@ function isHttpsIpUrl(url: string): boolean {
   }
 }
 
+/**
+ * 把「配对拿到的地址集 + 用户填的主地址」合成 endpoints（Issue #183）。
+ *
+ * 规则：
+ * - 主地址排第一（priority 0）——它是用户当前选中的入口，也是 QR 首选地址
+ * - 其余地址 priority 1（收进同一个服务器条目里备用）
+ * - 主地址不在地址集里（用户手改过）→ 只有它自己，退回单地址语义
+ * - 只有一个地址 → 返回 undefined，不写 endpoints（保持旧行为）
+ *
+ * 保持 QR 原始顺序：官方特意保留 `urls[0]`（用户挑选的顺序有信息量），
+ * 因此除主地址外不做重排。
+ */
+function buildEndpoints(primaryUrl: string, pairedUrls: string[]): ServerEndpoint[] | undefined {
+  const primary = primaryUrl.trim().replace(/\/+$/, '')
+  if (!primary) return undefined
+
+  const ordered: string[] = [primary]
+  for (const candidate of pairedUrls) {
+    const normalized = candidate.trim().replace(/\/+$/, '')
+    if (normalized && !ordered.includes(normalized)) ordered.push(normalized)
+  }
+
+  if (ordered.length <= 1) return undefined
+  return ordered.map((url, index) => ({ url, priority: index === 0 ? 0 : 1 }))
+}
+
 // ============================================
 // Server Item
 // ============================================
+
+/**
+ * 该服务器当前实际显示 / 使用的地址。
+ *
+ * activeUrl 优先（用户手动选过或自动探测选过），否则退回 endpoints 主地址
+ * （priority 最小者），最后退回 `server.url`。与 serverStore.getActiveEndpointUrl
+ * 同语义，但在设置页直接由快照算出，避免逐行调用 getter。
+ */
+function effectiveEndpointUrl(server: ServerConfig, state: Readonly<EndpointRuntime>): string {
+  return state.activeUrl ?? server.endpoints?.[0]?.url ?? server.url
+}
 
 function ServerItem({
   server,
@@ -47,24 +84,39 @@ function ServerItem({
   isActive,
   subscribed,
   multiServerEnabled,
+  endpointState,
   onSelect,
   onDelete,
   onEdit,
   onCheckHealth,
   onPair,
   onToggleSubscribe,
+  onUseEndpoint,
+  onLockEndpoint,
 }: {
   server: ServerConfig
   health: ServerHealth | null
   isActive: boolean
   subscribed: boolean
   multiServerEnabled: boolean
+  /** 多地址运行时状态（生效/锁定） */
+  endpointState: Readonly<EndpointRuntime>
   onSelect: () => void
   onDelete: () => void
-  onEdit: (updates: { name: string; url: string; username?: string; password?: string }) => void
+  onEdit: (updates: {
+    name: string
+    url: string
+    username?: string
+    password?: string
+    endpoints?: ServerEndpoint[]
+  }) => void
   onCheckHealth: () => void
   onPair: () => void
   onToggleSubscribe: () => void
+  /** 切换生效地址（Issue #183） */
+  onUseEndpoint: (url: string) => void
+  /** 锁定到某地址；传 null 解除锁定 */
+  onLockEndpoint: (url: string | null) => void
 }) {
   const { t } = useTranslation(['settings', 'common'])
   const [editing, setEditing] = useState(false)
@@ -87,11 +139,12 @@ function ServerItem({
     <>
       <div
         onClick={onSelect}
-        className={`group flex items-center gap-1.5 p-2.5 rounded-lg border transition-colors min-w-0
+        className={`group p-2.5 rounded-lg border transition-colors min-w-0
           ${
             isActive ? 'border-accent-main-100/40 bg-accent-main-100/5' : 'border-border-200/40 hover:border-border-300'
           }`}
       >
+        <div className="flex items-center gap-1.5 min-w-0">
         <button
           type="button"
           onClick={e => {
@@ -109,8 +162,8 @@ function ServerItem({
               {server.name}
             </div>
             <div className="text-[length:var(--fs-xs)] text-text-400 truncate font-mono flex items-center gap-1 mt-0.5 min-w-0">
-              <span className="truncate min-w-0" title={server.url}>
-                {server.url}
+              <span className="truncate min-w-0" title={effectiveEndpointUrl(server, endpointState)}>
+                {effectiveEndpointUrl(server, endpointState)}
               </span>
               {server.auth?.password && <KeyIcon size={10} className="shrink-0 text-text-400" />}
             </div>
@@ -182,6 +235,50 @@ function ServerItem({
             </>
           )}
         </div>
+        </div>
+
+        {/* 多地址列表（Issue #183）：仅当服务器配了 >1 个地址时出现，
+            单地址用户看到的界面与旧版完全一致 */}
+        {server.endpoints && server.endpoints.length > 1 && (
+          <div className="mt-2 pt-2 border-t border-border-200/40 space-y-0.5" onClick={e => e.stopPropagation()}>
+            {server.endpoints.map(endpoint => {
+              const isCurrent = effectiveEndpointUrl(server, endpointState) === endpoint.url
+              const locked = endpointState.lockedUrl === endpoint.url
+              return (
+                <div key={endpoint.url} className="flex items-center gap-1 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => onUseEndpoint(endpoint.url)}
+                    disabled={isCurrent}
+                    title={isCurrent ? t('servers.endpointActive') : t('servers.endpointUse')}
+                    className={`min-w-0 flex-1 flex items-center gap-1.5 px-1.5 py-1 rounded-md text-left transition-colors
+                      ${isCurrent ? 'text-accent-main-100' : 'text-text-300 hover:bg-bg-200/70'}`}
+                  >
+                    <span className="shrink-0 w-3">
+                      {isCurrent && <CheckIcon size={11} />}
+                    </span>
+                    <span className="truncate min-w-0 font-mono text-[length:var(--fs-xs)]" title={endpoint.url}>
+                      {endpoint.url}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onLockEndpoint(locked ? null : endpoint.url)}
+                    title={locked ? t('servers.endpointUnlock') : t('servers.endpointLock')}
+                    aria-label={locked ? t('servers.endpointUnlock') : t('servers.endpointLock')}
+                    className={`shrink-0 p-1 rounded-md transition-colors ${
+                      locked
+                        ? 'text-accent-main-100 hover:bg-accent-main-100/10'
+                        : 'text-text-400 hover:text-text-200 hover:bg-bg-200/70'
+                    }`}
+                  >
+                    <PinIcon size={12} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       <ConfirmDialog
@@ -211,12 +308,25 @@ function EditServerForm({
   onCancel,
 }: {
   server: ServerConfig
-  onSave: (updates: { name: string; url: string; username?: string; password?: string }) => void
+  onSave: (updates: {
+    name: string
+    url: string
+    username?: string
+    password?: string
+    endpoints?: ServerEndpoint[]
+  }) => void
   onCancel: () => void
 }) {
   const { t } = useTranslation(['settings', 'common'])
   const [name, setName] = useState(server.name)
   const [url, setUrl] = useState(server.url)
+  /**
+   * 配对拿到的全部地址（Issue #183）。与 `url`（主地址）分开存：
+   * 用户手改 url 不会动这个集合，保存时按「url 优先 + 集合去重」合成 endpoints。
+   */
+  const [pairedUrls, setPairedUrls] = useState<string[]>(() =>
+    (server.endpoints ?? []).map(endpoint => endpoint.url),
+  )
   const [username, setUsername] = useState(server.auth?.username || '')
   const [password, setPassword] = useState(server.auth?.password || '')
   const [showAuth, setShowAuth] = useState(!!server.auth?.password)
@@ -225,8 +335,9 @@ function EditServerForm({
 
   // 与添加表单同一条配对链：重新扫码 / 粘贴 pair 链接兑换后回填地址与凭据，
   // 保存时才落库——适合换了端口 / 重装了服务端后原地更新连接配置
-  const applyPairing = useCallback((pairedUrl: string, token: string) => {
+  const applyPairing = useCallback((pairedUrl: string, token: string, urls: string[]) => {
     setUrl(pairedUrl)
+    setPairedUrls(urls)
     setUsername('opencode')
     setPassword(token)
     setShowAuth(true)
@@ -267,6 +378,7 @@ function EditServerForm({
       url: url.trim(),
       username: password.trim() ? username.trim() || 'opencode' : undefined,
       password: password.trim() || undefined,
+      endpoints: buildEndpoints(url, pairedUrls),
     })
   }
 
@@ -395,19 +507,22 @@ function AddServerForm({
   onAdd,
   onCancel,
 }: {
-  onAdd: (name: string, url: string, username?: string, password?: string) => void
+  onAdd: (name: string, url: string, username?: string, password?: string, endpoints?: ServerEndpoint[]) => void
   onCancel: () => void
 }) {
   const { t } = useTranslation(['settings', 'common'])
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
+  /** 配对拿到的全部地址；与 url（主地址）分开存，保存时合成 endpoints */
+  const [pairedUrls, setPairedUrls] = useState<string[]>([])
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showAuth, setShowAuth] = useState(false)
   const [error, setError] = useState('')
 
-  const applyPairing = useCallback((pairedUrl: string, token: string) => {
+  const applyPairing = useCallback((pairedUrl: string, token: string, urls: string[]) => {
     setUrl(pairedUrl)
+    setPairedUrls(urls)
     setUsername('opencode')
     setPassword(token)
     setShowAuth(true)
@@ -451,6 +566,7 @@ function AddServerForm({
       url.trim(),
       password.trim() ? username.trim() || 'opencode' : undefined,
       password.trim() || undefined,
+      buildEndpoints(url, pairedUrls),
     )
   }
 
@@ -619,9 +735,12 @@ export function ServersSettings() {
     removeServer,
     updateServer,
     setActiveServer,
+    setActiveEndpoint,
+    setLockedEndpoint,
     checkHealth,
     checkAllHealth,
     getHealth,
+    endpointStates,
   } = useServerStore()
   const { navigateHome, sessionId: routeSessionId } = useRouter()
   const orderedServers = useMemo(() => {
@@ -803,12 +922,15 @@ export function ServersSettings() {
                   const auth = updates.password
                     ? { username: updates.username || 'opencode', password: updates.password }
                     : undefined
-                  updateServer(s.id, { name: updates.name, url: updates.url, auth })
+                  updateServer(s.id, { name: updates.name, url: updates.url, auth, endpoints: updates.endpoints })
                   void checkHealth(s.id)
                 }}
                 onCheckHealth={() => void checkHealth(s.id)}
                 onPair={() => setPairingServer(s)}
                 onToggleSubscribe={() => multiServerStore.setSubscribed(s.id, !multiServerStore.isSubscribed(s.id))}
+                endpointState={endpointStates.get(s.id) ?? { activeUrl: null, lockedUrl: null, lastSwitchAt: 0 }}
+                onUseEndpoint={url => setActiveEndpoint(s.id, url)}
+                onLockEndpoint={url => setLockedEndpoint(s.id, url)}
               />
             )
           })}
@@ -829,9 +951,9 @@ export function ServersSettings() {
 
         {addingServer && (
           <AddServerForm
-            onAdd={(n, u, user, pass) => {
+            onAdd={(n, u, user, pass, endpoints) => {
               const auth = pass ? { username: user || 'opencode', password: pass } : undefined
-              const s = addServer({ name: n, url: u, auth })
+              const s = addServer({ name: n, url: u, auth, endpoints })
               setAddingServer(false)
               void checkHealth(s.id)
             }}

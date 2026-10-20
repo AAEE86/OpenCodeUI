@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { InputBox } from './InputBox'
 
@@ -366,5 +366,39 @@ describe('InputBox attachment handling', () => {
     expect(uploadLocalFileMock.mock.calls[0][0]).toBe('C:/dl/piui-source.zip')
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).not.toContain('@')
     expect(screen.getByTestId('attachment-meta')).toHaveTextContent('file:///srv/tmp/uploads/u9/piui-source.zip')
+  })
+
+  it('多地址服务器切到内网 IP 后不再同机 → 改为上传（Issue #183）', async () => {
+    selectedPaths = ['C:/dl/piui-source.zip']
+    uploadLocalFileMock.mockResolvedValue({ path: '/srv/tmp/uploads/u9/piui-source.zip', size: 3 })
+
+    const { serverStore } = await import('../../store/serverStore')
+    const dual = serverStore.addServer({
+      name: 'dual',
+      url: 'http://127.0.0.1:4096',
+      endpoints: [
+        { url: 'http://127.0.0.1:4096', priority: 0 },
+        { url: 'http://192.168.1.20:4096', priority: 1 },
+      ],
+    })
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} serverId={dual.id} rootPath="E:/proj" />)
+
+    // 走回环入口时同机：引用本机路径，不上传
+    fireEvent.click(screen.getByRole('button', { name: 'pick paths' }))
+    await waitFor(() => {
+      expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toContain('@C:/dl/piui-source.zip')
+    })
+    expect(uploadLocalFileMock).not.toHaveBeenCalled()
+
+    // 降级到内网 IP 后不再同机 —— 同机判定必须跟着生效地址重算
+    act(() => {
+      serverStore.setActiveEndpoint(dual.id, 'http://192.168.1.20:4096')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'pick paths' }))
+    await waitFor(() => {
+      expect(uploadLocalFileMock).toHaveBeenCalledTimes(1)
+    })
   })
 })

@@ -151,7 +151,11 @@
     "pairScanInvalid": "无效的配对二维码",
     "pairScanLegacy": "旧版配对二维码，请升级服务端后重新生成",
     "pairCameraError": "无法打开摄像头，请检查权限",
-    "pairCameraStarting": "正在启动摄像头…"
+    "pairCameraStarting": "正在启动摄像头…",
+    "endpointActive": "使用中",
+    "endpointUse": "使用此地址",
+    "endpointLock": "锁定此地址（不自动切换）",
+    "endpointUnlock": "解除锁定"
   },
   "chat": {
     "pathsFormatting": "路径和格式",

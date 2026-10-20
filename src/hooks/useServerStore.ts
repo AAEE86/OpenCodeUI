@@ -3,8 +3,8 @@
 // ============================================
 
 import { useSyncExternalStore, useCallback } from 'react'
-import { serverStore, type ServerConfig, type ServerHealth } from '../store/serverStore'
-export type { ServerConfig, ServerHealth }
+import { serverStore, type ServerConfig, type ServerHealth, type EndpointRuntime } from '../store/serverStore'
+export type { ServerConfig, ServerHealth, EndpointRuntime }
 
 /**
  * 订阅 serverStore 的 React hook
@@ -35,6 +35,13 @@ export function useServerStore() {
     () => serverStore.getDefaultServerId(),
   )
 
+  // 多地址运行时状态（生效地址 / 锁定地址）
+  const endpointStates = useSyncExternalStore(
+    serverStore.subscribe.bind(serverStore),
+    () => serverStore.getEndpointStates(),
+    () => serverStore.getEndpointStates(),
+  )
+
   const addServer = useCallback((config: Omit<ServerConfig, 'id'>) => {
     return serverStore.addServer(config)
   }, [])
@@ -49,6 +56,14 @@ export function useServerStore() {
 
   const setActiveServer = useCallback((id: string) => {
     return serverStore.setActiveServer(id)
+  }, [])
+
+  const setActiveEndpoint = useCallback((serverId: string, url: string) => {
+    return serverStore.setActiveEndpoint(serverId, url)
+  }, [])
+
+  const setLockedEndpoint = useCallback((serverId: string, url: string | null) => {
+    return serverStore.setLockedEndpoint(serverId, url)
   }, [])
 
   const checkHealth = useCallback((serverId: string) => {
@@ -71,10 +86,13 @@ export function useServerStore() {
     activeServer,
     healthMap,
     defaultServerId,
+    endpointStates,
     addServer,
     updateServer,
     removeServer,
     setActiveServer,
+    setActiveEndpoint,
+    setLockedEndpoint,
     checkHealth,
     checkAllHealth,
     getHealth,

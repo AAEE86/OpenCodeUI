@@ -23,15 +23,18 @@ export function usePairLinkRedeem({
   onPaired,
   onInput,
 }: {
-  /** 兑换成功：回填 url + token（服务端约定用户名固定为 opencode，token 作密码） */
-  onPaired: (url: string, token: string) => void
+  /**
+   * 兑换成功：回填 url + token（服务端约定用户名固定为 opencode，token 作密码）。
+   * `urls` 是 QR 载荷里的全部地址（Issue #183），调用方保存为多地址。
+   */
+  onPaired: (url: string, token: string, urls: string[]) => void
   /** 配对输入变化（清表单级错误） */
   onInput?: () => void
 }) {
   const [pairLink, setPairLink] = useState('')
   const [pairState, setPairState] = useState<PairRedeemState>({ kind: 'idle' })
   const [pairScanOpen, setPairScanOpen] = useState(false)
-  const redeemedRef = useRef<{ code: string; url: string; token: string } | null>(null)
+  const redeemedRef = useRef<{ code: string; url: string; urls: string[]; token: string } | null>(null)
   const pairSeqRef = useRef(0)
   const pairTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -60,7 +63,8 @@ export function usePairLinkRedeem({
     }
     const cached = redeemedRef.current
     if (cached && cached.code === link.code) {
-      onPaired(link.urls.includes(cached.url) ? cached.url : link.urls[0], cached.token)
+      const preferred = link.urls.includes(cached.url) ? cached.url : link.urls[0]
+      onPaired(preferred, cached.token, link.urls)
       setPairState({ kind: 'paired', url: cached.url })
       return
     }
@@ -72,8 +76,8 @@ export function usePairLinkRedeem({
       void redeemPairingLink(link).then(result => {
         if (seq !== pairSeqRef.current) return
         if (result.type === 'paired') {
-          redeemedRef.current = { code: link.code, url: result.url, token: result.token }
-          onPaired(result.url, result.token)
+          redeemedRef.current = { code: link.code, url: result.url, urls: result.urls, token: result.token }
+          onPaired(result.url, result.token, result.urls)
           setPairState({ kind: 'paired', url: result.url })
           return
         }

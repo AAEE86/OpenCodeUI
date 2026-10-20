@@ -13,9 +13,16 @@ import type { ServerChangeReason } from './serverStore'
  *
  * - boundServerId 为空（数据主体跟随 active 服务器）：
  *   - server-switch：active 本身换了（含删除回退）→ 影响
+ *   - endpoint-switch：同一台服务器换入口地址，数据主体（会话/消息/布局）**不变**，
+ *     补偿刷新交给 SSE 重连后的 onReconnected → 不影响
  *   - 端点变化类 reason（WSL 换端口等）：只有变的这台恰好是当前 active 才影响
  *     （非 active 重启不该让 active 数据「清空 → 重拉」闪烁）
  * - boundServerId 指定（面板/订阅固定绑定这台服务器）：变化发生在这台本身才影响
+ *
+ * 注意 endpoint-switch 对**两种**绑定都返回 false：
+ * 换入口地址时旧地址可能仍然可达，数据也没变，做「清空 → 重拉」只会闪。
+ * 需要跟着新地址走的副作用（SSE / 终端 WebSocket）由 events.ts 与各面板
+ * 自己监听 endpoint-switch 处理，不走这个「数据是否失效」的判据。
  */
 export function affectsBoundServer(
   boundServerId: string | undefined | null,
@@ -23,6 +30,9 @@ export function affectsBoundServer(
   reason: ServerChangeReason,
   activeServerId: string,
 ): boolean {
+  // 换入口地址不改数据主体：避免触发「清空 → 重拉」的可见闪烁，
+  // 由 SSE 重连的 onReconnected 做补偿（见 events.ts 的 endpoint-switch 分支）
+  if (reason === 'endpoint-switch') return false
   if (boundServerId) return changedServerId === boundServerId
   if (reason === 'server-switch') return true
   return activeServerId === changedServerId

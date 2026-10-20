@@ -151,7 +151,11 @@
     "pairScanInvalid": "Not a valid pairing QR code",
     "pairScanLegacy": "Legacy pairing QR — upgrade the server and regenerate",
     "pairCameraError": "Cannot access the camera — check permissions",
-    "pairCameraStarting": "Starting camera…"
+    "pairCameraStarting": "Starting camera…",
+    "endpointActive": "In use",
+    "endpointUse": "Use this address",
+    "endpointLock": "Lock to this address (no auto-switch)",
+    "endpointUnlock": "Unlock"
   },
   "chat": {
     "pathsFormatting": "Paths & Formatting",

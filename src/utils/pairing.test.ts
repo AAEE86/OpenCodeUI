@@ -103,7 +103,13 @@ describe('redeemPairingLink', () => {
 
     const result = await redeemPairingLink({ urls: ['http://server'], code: 'abc' })
 
-    expect(result).toEqual({ type: 'paired', url: 'http://server', token: 'secret-token' })
+    // urls 回传完整地址集（Issue #183：兑换后要保存全部地址）
+    expect(result).toEqual({
+      type: 'paired',
+      url: 'http://server',
+      urls: ['http://server'],
+      token: 'secret-token',
+    })
     const [requestUrl, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(requestUrl).toBe('http://server/auth/connect/abc')
     expect((init.headers as Record<string, string>).Accept).toBe('application/json')
@@ -150,7 +156,12 @@ describe('redeemPairingLink', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     resolveFirst(jsonResponse(200, { token: 'token-from-first' }))
 
-    await expect(pending).resolves.toEqual({ type: 'paired', url: 'http://first', token: 'token-from-first' })
+    await expect(pending).resolves.toEqual({
+      type: 'paired',
+      url: 'http://first',
+      urls: ['http://first', 'http://second'],
+      token: 'token-from-first',
+    })
   })
 
   it('首选地址不可达 → 用竞速赢家的地址', async () => {
@@ -165,6 +176,7 @@ describe('redeemPairingLink', () => {
     await expect(redeemPairingLink({ urls: ['http://first', 'http://second'], code: 'abc' })).resolves.toEqual({
       type: 'paired',
       url: 'http://second',
+      urls: ['http://first', 'http://second'],
       token: 'token-from-second',
     })
   })

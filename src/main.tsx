@@ -9,10 +9,11 @@ import { DirectoryProvider, FullscreenProvider, SessionProvider } from './contex
 import { themeStore } from './store/themeStore'
 import { affectsBoundServer } from './store/serverChangeScope'
 import { serverStore } from './store/serverStore'
+import { startEndpointProbe } from './store/endpointProbe'
 import { autoApproveStore } from './store/autoApproveStore'
 import { serviceStore } from './store/serviceStore'
 import { wslStore } from './store/wslStore'
-import { reconnectSSE } from './api/events'
+import { reconnectSSE, reconnectServerSSE } from './api/events'
 import { getSDKClientAsync, invalidateSDKClient } from './api/sdk'
 import { resetPathModeCache } from './utils/directoryUtils'
 import { isTauri, isTauriMobile } from './utils/tauri'
@@ -72,6 +73,17 @@ serverStore.onServerChange((serverId, reason) => {
   // 多服务器模式：messageStore / childSessionStore 的数据按 `serverId::sessionId`
   // 分片存储，切换 active server 不应清空其他 pane 正在使用的服务器数据，因此不再 clearAll。
 
+  // 换入口地址（Issue #183：内网 ↔ 公网）：同一台服务器、同一份数据，
+  // 只需要让连接跟着新地址走。不走下面的「重置数据类缓存」分支——
+  // 路径模式/autoApprove 都由服务器身份决定，换入口不变。
+  if (reason === 'endpoint-switch') {
+    // 重连的是「这台服务器」的连接，不限于 active：多服务器模式下
+    // 非 active 的订阅连接同样挂在旧地址上，不重连就会一直连着死地址。
+    // reason 'network' 让重连成功后走补偿拉取，而不是按'换服务器'跳过。
+    reconnectServerSSE(serverId, { reason: 'network' })
+    return
+  }
+
   // 以下动作只作用于「当前 active 服务器的数据/连接」，必须按 reason 门控：
   // - server-switch：active 本身变了（含删除回退）→ 缓存与 SSE 目标都换了
   // - server-runtime-updated / local-runtime-url：仅当变的这台就是 active 才相关；
@@ -88,6 +100,10 @@ serverStore.onServerChange((serverId, reason) => {
   // 重连 active server 的 SSE（会自动连到新的 server endpoint）
   reconnectSSE()
 })
+
+// 多地址自动探测（Issue #183）：内网优先、不可达降级、恢复后带滞回升回。
+// 内部只对配了 >1 个地址的服务器发请求，单地址用户零开销。
+startEndpointProbe()
 
 const isNativeTauri = isTauri()
 const isNativeTauriMobile = isNativeTauri && isTauriMobile()

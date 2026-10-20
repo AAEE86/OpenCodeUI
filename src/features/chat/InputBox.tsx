@@ -317,8 +317,23 @@ function InputBoxComponent({
    * 同机时**不走上传**：桌面端拖入的文件直接沿用原有的引用方式
    * （原生媒体内联；其余退化成 `@` 引用，服务端自己能读到那个路径）。
    * 浏览器里永远拿不到真实路径，所以同机也照旧上传（issue #182 的主场景）。
+   *
+   * 依赖生效地址：多地址服务器降级到内网 IP 后不再同机（Issue #183），
+   * 所以订阅运行时状态快照让判定跟着地址变化重算，否则会拿旧结论
+   * 去引用一个服务端根本读不到的宿主路径。
    */
-  const serverIsLocal = useMemo(() => serverStore.isLocalServer(uploadTarget.serverId), [uploadTarget.serverId])
+  const endpointStates = useSyncExternalStore(
+    serverStore.subscribe.bind(serverStore),
+    () => serverStore.getEndpointStates(),
+    () => serverStore.getEndpointStates(),
+  )
+  const serverIsLocal = useMemo(
+    // 判定本身只有一处真源（serverStore.isLocalServer 按生效地址判）；
+    // endpointStates 作为依赖只为在地址切换后触发重算
+    () => serverStore.isLocalServer(uploadTarget.serverId),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上：仅作重算触发器
+    [uploadTarget.serverId, endpointStates],
+  )
 
   /** 应用自己拉起的服务（`local` 条目）：必然同机，引用时免探测 */
   const pinnedLocalServer = useMemo(

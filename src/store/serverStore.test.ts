@@ -592,6 +592,38 @@ describe('serverStore health check', () => {
     expect(staleHealth.status).toBe('error')
     expect(serverStore.getHealth('local')?.status).toBe('online')
   })
+
+  /**
+   * 健康灯探的必须是**当前生效地址**。
+   *
+   * 之前的 bug：checkHealth 打 `server.url`（地址列表第一行的镜像）。
+   * 多地址服务器降到备用入口后，请求全走 getServerBaseUrl，健康灯却还在
+   * 敲那个已经死掉的主地址 —— 面板显示红叉，实际用得好好的。
+   */
+  it('探当前生效地址，而不是地址列表第一行', async () => {
+    const { serverStore } = await import('./serverStore')
+    const server = serverStore.addServer({
+      name: 'dual',
+      url: 'http://dead.test',
+      endpoints: [
+        { url: 'http://dead.test', priority: 0 },
+        { url: 'https://live.test', priority: 1 },
+      ],
+    })
+    // 切到备用地址（等价于探测降级 / 用户手动选）
+    serverStore.setActiveEndpoint(server.id, 'https://live.test')
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ version: '2.0.14', pid: 1234, urls: [], paths: { tmp: '/tmp' } }),
+    )
+
+    const health = await serverStore.checkHealth(server.id)
+
+    expect(health.status).toBe('online')
+    // 确认请求真的打在备用地址上
+    const requestedUrl = vi.mocked(fetch).mock.calls.at(-1)?.[0]
+    expect(String(requestedUrl)).toBe('https://live.test/api/info')
+  })
 })
 
 // ============================================

@@ -428,7 +428,9 @@ export const ChatPane = memo(function ChatPane({
 
     const lines = [
       `Server: ${activeServer.name}`,
-      `URL: ${activeServer.url}`,
+      // 用生效地址而不是 activeServer.url：后者只是地址列表第一行的镜像，
+      // 降级到备用入口时会把报错指向一个当前根本没在用的地址
+      `URL: ${serverStore.getActiveBaseUrl()}`,
       `Status: ${activeServerHealth.status}`,
       activeServerHealth.error ? `Error: ${activeServerHealth.error}` : '',
       activeServerHealth.status === 'error' || activeServerHealth.status === 'offline'

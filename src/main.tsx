@@ -81,6 +81,8 @@ serverStore.onServerChange((serverId, reason) => {
     // 非 active 的订阅连接同样挂在旧地址上，不重连就会一直连着死地址。
     // reason 'network' 让重连成功后走补偿拉取，而不是按'换服务器'跳过。
     reconnectServerSSE(serverId, { reason: 'network' })
+    // 健康灯探的是生效地址，换了地址就得重测，否则会一直挂着旧入口的红叉
+    void serverStore.checkHealth(serverId)
     return
   }
 

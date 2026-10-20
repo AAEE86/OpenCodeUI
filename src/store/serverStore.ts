@@ -1024,7 +1024,12 @@ class ServerStore {
     // v2 没有 v1 的 /global/health；官方客户端用 server.info()
     // （GET /api/info，返回 { version, pid, urls, paths }）做健康探测。
     // v2 服务器会对未知路径回退到 SPA HTML，因此打到 v1 路径会 200 + text/html。
-    const healthUrl = `${server.url}/api/info`
+    //
+    // 必须探**当前生效地址**而非 `server.url`（后者只是第一行的镜像）：
+    // 多地址服务器切到备用入口后，实际请求全走 getServerBaseUrl，
+    // 健康灯却去敲主地址，主地址死、备用活着就会显示红叉——
+    // 面板说连不上，实际用得好好的。
+    const healthUrl = `${this.getActiveEndpointUrl(serverId)}/api/info`
 
     const commitHealth = (health: ServerHealth) => {
       if (this.healthCheckSeqMap.get(serverId) === checkSeq) {

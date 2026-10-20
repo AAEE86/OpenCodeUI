@@ -320,6 +320,50 @@ describe('v2 event dispatch', () => {
   })
 
   /**
+   * 断网又恢复：TCP 半开时流既不报错也不结束，连接状态会一直停在
+   * connected，只能等看门狗（45s 静默 + 15s tick）才发现。期间 UI 完全
+   * 不刷新 —— 用户的观感就是「网回来了但界面死的，得手动刷新」。
+   *
+   * online 事件是外部事实：网络确实变了，此时若连接已静默超过一个心跳
+   * 周期，就该主动掐断重连，而不是相信 state === 'connected'。
+   */
+  it('forces a reconnect on online when the connected stream has gone silent', async () => {
+    vi.useFakeTimers()
+    try {
+      const harnesses: Array<ReturnType<typeof createEventStream>> = []
+      subscribeMock.mockImplementation(() => {
+        const harness = createEventStream()
+        harnesses.push(harness)
+        return harness.stream
+      })
+
+      const { subscribeToServerEvents, getServerConnectionInfo } = await import('./events')
+      const onReconnected = vi.fn()
+      const unsubscribe = subscribeToServerEvents('test-server', { onReconnected })
+      await Promise.resolve()
+
+      // 建立连接并保持有心跳
+      harnesses[0].emit(v2Event('session.idle', { sessionID: 's1' }))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(getServerConnectionInfo('test-server').state).toBe('connected')
+
+      // 断网：心跳停了，连接状态仍是 connected（半开），且已静默超过阈值。
+      // 只推进到不足看门狗阈值，确保不是看门狗救的场。
+      await vi.advanceTimersByTimeAsync(25_000)
+      expect(getServerConnectionInfo('test-server').state).toBe('connected')
+
+      window.dispatchEvent(new Event('online'))
+      await vi.advanceTimersByTimeAsync(6_000)
+
+      // 半开连接被主动掐断并重连（不是等 45s 看门狗）
+      expect(subscribeMock.mock.calls.length).toBeGreaterThanOrEqual(2)
+      unsubscribe()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /**
    * 端点变更重连必须广播 onReconnected：否则订阅者不做补偿拉取，
    * WSL 端口变化等场景下状态/权限/消息全部陈旧。
    */
@@ -380,5 +424,48 @@ describe('v2 event dispatch', () => {
     expect(onReconnected).toHaveBeenCalledWith('server-switch')
 
     unsubscribe()
+  })
+
+  /**
+   * 换入口地址（Issue #183）：重连照做，但补偿广播必须是 'network'。
+   * 广播成 'server-switch' 会被 SessionContext / useSessions 显式跳过
+   * （那条路径假定 onServerChange 链负责重拉），换地址没有那条链，跳过就没人刷。
+   */
+  it('broadcasts onReconnected with network reason on endpoint switch reconnect', async () => {
+    const harnesses: Array<ReturnType<typeof createEventStream>> = []
+    subscribeMock.mockImplementation(() => {
+      const harness = createEventStream()
+      harnesses.push(harness)
+      return harness.stream
+    })
+
+    const { subscribeToServerEvents, reconnectServerSSE } = await import('./events')
+    const onReconnected = vi.fn()
+    const unsubscribe = subscribeToServerEvents('test-server', { onReconnected })
+    await Promise.resolve()
+
+    // 先建立一次连接，让 hasConnectedBefore = true
+    harnesses[0].emit(v2Event('session.idle', { sessionID: 's1' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(onReconnected).not.toHaveBeenCalled()
+
+    reconnectServerSSE('test-server', { reason: 'network' })
+    await Promise.resolve()
+    expect(harnesses.length).toBe(2)
+
+    harnesses[1].emit(v2Event('session.idle', { sessionID: 's1' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(onReconnected).toHaveBeenCalledWith('network')
+
+    unsubscribe()
+  })
+
+  /**
+   * 对没有任何订阅（因此没有连接）的服务器重连是空操作：
+   * 不该凭空创建连接对象，否则多地址探测每次切换都会往 Map 里塞死条目。
+   */
+  it('reconnectServerSSE is a no-op for a server with no connection', async () => {
+    const { reconnectServerSSE } = await import('./events')
+    expect(() => reconnectServerSSE('never-subscribed', { reason: 'network' })).not.toThrow()
   })
 })

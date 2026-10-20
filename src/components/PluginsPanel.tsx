@@ -47,6 +47,10 @@ export const PluginsPanel = memo(function PluginsPanel({ isResizing: _isResizing
       onPluginUpdated: () => {
         void load()
       },
+      // 断线窗口错过的事件不补发，重连后重拉插件列表
+      onReconnected: () => {
+        void load()
+      },
     })
   }, [load])
 

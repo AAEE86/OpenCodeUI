@@ -131,6 +131,12 @@ export const WorktreePanel = memo(function WorktreePanel({ isResizing: _isResizi
       onVcsBranchUpdated: () => {
         refreshVcs()
       },
+      // 断线窗口错过的事件协议不补发（见 api/events.ts 头部说明），
+      // 重连后必须主动重拉，否则面板停在断线前的列表上，只能刷新整页
+      onReconnected: () => {
+        loadWorktrees()
+        refreshVcs()
+      },
     })
   }, [loadWorktrees, refreshVcs])
 

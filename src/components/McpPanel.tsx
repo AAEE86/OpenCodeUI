@@ -28,6 +28,7 @@ import {
   addMcpServer,
 } from '../api/mcp'
 import { getIntegration, connectIntegrationOauth } from '../api/integration'
+import { subscribeToEvents } from '../api/events'
 import { openExternalUrl } from '../utils/externalUrl'
 import type { MCPResourceEntry, MCPStatus, McpServerConfig } from '../types/api/mcp'
 import { useDirectory } from '../hooks'
@@ -106,6 +107,16 @@ export const McpPanel = memo(function McpPanel({ isResizing: _isResizing }: McpP
   // 初始加载
   useEffect(() => {
     loadStatus()
+  }, [loadStatus])
+
+  // 断线重连后重拉：断线窗口错过的事件不补发，不重拉就会停在断线前的状态，
+  // 只能刷新整页 —— 与 PluginsPanel / WorktreePanel 同一条补偿链
+  useEffect(() => {
+    return subscribeToEvents({
+      onReconnected: () => {
+        void loadStatus()
+      },
+    })
   }, [loadStatus])
 
   // 刷新

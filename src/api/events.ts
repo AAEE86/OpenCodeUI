@@ -72,8 +72,11 @@ const serverSwitchFlags = new Map<string, boolean>()
  * 数据刷新由 server-change 监听器负责，首个连接不能重复广播；而这里针对的是
  * 「本地 serve 就绪地址回写 / WSL 换端口后，初始拉取已在端点就绪前失败」，
  * 首个成功连接必须广播让订阅者补偿拉取，否则失败态没有重试入口。
+ *
+ * 存的是 **广播 reason** 而不是布尔：默认 'server-switch'（保持既有行为），
+ * 换入口地址（Issue #183）传 'network'——数据主体没变，不该按换服务器处理。
  */
-const endpointReconnectFlags = new Map<string, boolean>()
+const endpointReconnectFlags = new Map<string, 'network' | 'server-switch'>()
 
 let lifecycleListenersRegistered = false
 let isInBackground = false
@@ -104,6 +107,15 @@ const IDLE_TIMEOUT = 45_000
  * 走重连循环（官方客户端 connectTimeout 2s，这里取更宽容的 15s）。
  */
 const CONNECT_STALL_TIMEOUT = 15_000
+/**
+ * 网络恢复（online）时，连接静默多久就判定为「半开」并主动重连。
+ *
+ * 服务端心跳 15s，正常在线时 lastEventTime 最多落后一个心跳间隔。断网期间
+ * 心跳收不到，恢复时往往已经静默很久——这种情况不能等看门狗 45s，否则
+ * 用户看到的就是「网回来了界面还是死的」。取 20s：比心跳间隔略长，避免
+ * 刚收到心跳就被误判。
+ */
+const ONLINE_RESUME_SILENCE_MS = 20_000
 
 const DEFAULT_CONNECTION_INFO: ConnectionInfo = {
   state: 'disconnected',
@@ -584,7 +596,7 @@ async function connectServer(serverId: string): Promise<void> {
         // 首次连接一般不广播 onReconnected：初始加载由各订阅方自己拉取。
         // 但端点变更触发的重连（本地 serve 就绪 / WSL 换端口），此前的初始
         // 拉取可能已在端点就绪前失败，必须广播让订阅者补偿拉取。
-        const endpointReconnect = endpointReconnectFlags.get(serverId) === true
+        const endpointReconnect = endpointReconnectFlags.get(serverId)
         endpointReconnectFlags.delete(serverId)
         serverSwitchFlags.delete(serverId)
         updateConnectionState(serverId, {
@@ -593,7 +605,7 @@ async function connectServer(serverId: string): Promise<void> {
           error: undefined,
         })
         if (endpointReconnect) {
-          broadcastReconnected(conn, 'server-switch')
+          broadcastReconnected(conn, endpointReconnect)
         }
       } else if (conn.info.state !== 'connected') {
         updateConnectionState(serverId, { state: 'connected', reconnectAttempt: 0, error: undefined })
@@ -707,8 +719,36 @@ function registerLifecycleListeners(): void {
 
   window.addEventListener('online', () => {
     for (const conn of connections.values()) {
-      if (conn.subscribers.size > 0 && conn.info.state !== 'connected') {
+      if (conn.subscribers.size === 0) continue
+
+      if (conn.info.state !== 'connected') {
         connectServer(conn.serverId)
+        continue
+      }
+
+      /**
+       * 状态停在 connected 不等于连着：断网时 TCP 常常是半开的——流既不报错
+       * 也不结束，状态就一直挂着，直到看门狗 45s 后才发现。等那么久，用户看到
+       * 的就是「网回来了但界面不动，得刷新」。
+       *
+       * 网络恢复是外部事实：此时若已有一段时间没收到任何字节（含心跳），
+       * 就当作可疑连接主动掐断重连。阈值取得比看门狗短得多——断网期间心跳
+       * 必然收不到，恢复后按心跳间隔算早该有几个了。
+       */
+      const silentFor = Date.now() - conn.info.lastEventTime
+      if (conn.info.lastEventTime > 0 && silentFor > ONLINE_RESUME_SILENCE_MS) {
+        conn.watchdogDrop = true
+        conn.controller?.abort()
+        setTimeout(() => {
+          if (conn.isConnecting) {
+            conn.generation += 1
+            conn.isConnecting = false
+            conn.watchdogDrop = false
+            conn.connectStartedAt = 0
+            updateConnectionState(conn.serverId, { state: 'disconnected' })
+            scheduleReconnect(conn)
+          }
+        }, 5_000)
       }
     }
   })
@@ -739,9 +779,23 @@ function stopBackgroundKeepalive(): void {
 
 /**
  * 强制重连指定服务器。
+ *
+ * @param options.reason 重连成功后广播给订阅者的 reason。默认 'server-switch'
+ *   （换服务器 / 端点变更，数据由 onServerChange 链负责重拉）。
+ *
+ *   同一台服务器换入口地址（Issue #183）、网络恢复后的自我修复，数据主体
+ *   都没变，必须传 'network'：消费方对 'server-switch' 是显式跳过的
+ *   （换服务器由 onServerChange 链负责），跳过就没人补拉断流窗口里丢的
+ *   消息、权限、会话状态了。
  */
-export function reconnectServerSSE(serverId: string): void {
-  const conn = getOrCreateConnection(serverId)
+export function reconnectServerSSE(
+  serverId: string,
+  options?: { reason?: 'network' | 'server-switch' },
+): void {
+  // 没有连接的服务器（没人订阅）无需重连，也避免凭空创建空的连接对象
+  const existing = connections.get(serverId)
+  if (!existing) return
+  const conn = existing
   conn.info = { ...conn.info, reconnectAttempt: 0 }
   // disconnectServerConnection 会把 hasConnectedBefore 重置为 false，
   // 导致端点变更（如 WSL 端口变化）后的重连被当成「首次连接」，
@@ -750,12 +804,16 @@ export function reconnectServerSSE(serverId: string): void {
   // 让重连成功走「重连 → 补偿拉取」链路。
   const hadConnected = conn.hasConnectedBefore
   disconnectServerConnection(conn)
+  const reason = options?.reason ?? 'server-switch'
   if (hadConnected) {
     conn.hasConnectedBefore = true
-    serverSwitchFlags.set(serverId, true)
+    // server-switch 需要走「换服务器」语义；其余（换入口/网络自愈）按普通重连补偿
+    if (reason === 'server-switch') {
+      serverSwitchFlags.set(serverId, true)
+    }
   } else {
     // 此前从未连上：首个成功连接也要走补偿广播（见 endpointReconnectFlags 注释）
-    endpointReconnectFlags.set(serverId, true)
+    endpointReconnectFlags.set(serverId, reason)
   }
   if (conn.subscribers.size > 0) {
     connectServer(serverId)
@@ -765,8 +823,8 @@ export function reconnectServerSSE(serverId: string): void {
 /**
  * 强制重连活动服务器（兼容旧 API）。
  */
-export function reconnectSSE(): void {
-  reconnectServerSSE(serverStore.getActiveServerId())
+export function reconnectSSE(options?: { reason?: 'network' | 'server-switch' }): void {
+  reconnectServerSSE(serverStore.getActiveServerId(), options)
 }
 
 /**
@@ -874,6 +932,10 @@ export function subscribeToEvents(callbacks: EventCallbacks): () => void {
     if (reason === 'server-runtime-updated') {
       if (newServerId !== currentServerId) return
     } else if (newServerId === currentServerId) {
+      // endpoint-switch 也走这里：同一台服务器换入口地址，serverId 没变，
+      // 订阅无需迁移。连接的重连由 events 模块的中央监听器负责
+      // （reconnectServerSSE(..., { reason: 'network' })），重连成功后
+      // broadcastReconnected 会通知该连接的全部订阅者补偿拉取。
       return
     }
     unsubscribe()

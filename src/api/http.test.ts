@@ -1,5 +1,34 @@
 import { describe, expect, it } from 'vitest'
-import { buildQueryString } from './http'
+import { buildQueryString, toAbsoluteBaseUrl } from './http'
+
+// ============================================
+// toAbsoluteBaseUrl 测试
+// ============================================
+
+describe('toAbsoluteBaseUrl', () => {
+  it('resolves a same-origin prefix against the page origin', () => {
+    expect(toAbsoluteBaseUrl('/api')).toBe(`${window.location.origin}/api`)
+  })
+
+  it('strips trailing slashes from a resolved relative URL', () => {
+    expect(toAbsoluteBaseUrl('/api/')).toBe(`${window.location.origin}/api`)
+  })
+
+  it('resolves a protocol-relative URL against the page protocol', () => {
+    expect(toAbsoluteBaseUrl('//example.com/api')).toBe(`${window.location.protocol}//example.com/api`)
+  })
+
+  it('leaves absolute URLs unchanged', () => {
+    expect(toAbsoluteBaseUrl('http://127.0.0.1:4096')).toBe('http://127.0.0.1:4096')
+    expect(toAbsoluteBaseUrl('https://opencode.example.com:51133/api')).toBe(
+      'https://opencode.example.com:51133/api',
+    )
+  })
+
+  it('returns an empty value unchanged', () => {
+    expect(toAbsoluteBaseUrl('')).toBe('')
+  })
+})
 
 // ============================================
 // buildQueryString 测试

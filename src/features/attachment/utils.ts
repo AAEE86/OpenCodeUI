@@ -114,6 +114,8 @@ export function hasExpandableContent(attachment: Attachment): boolean {
       return !!attachment.relativePath
     case 'agent':
       return !!attachment.agentName
+    case 'skill':
+      return !!attachment.content
     case 'text':
       return !!attachment.content
     default:

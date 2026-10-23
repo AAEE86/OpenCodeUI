@@ -21,6 +21,7 @@ import {
   ToolPartView,
   FilePartView,
   AgentPartView,
+  SkillPartView,
   StepFinishPartView,
   RetryPartView,
   CompactionPartView,
@@ -570,6 +571,7 @@ const UserMessageView = memo(function UserMessageView({
   const messageText = userMessageText(message)
   const files = message.files ?? []
   const agents = message.agents ?? []
+  const skills = message.skills ?? []
   const hasUserHtmlArtifact = renderUserMarkdown && USER_HTML_ARTIFACT_PATTERN.test(messageText)
 
   return (
@@ -590,13 +592,16 @@ const UserMessageView = memo(function UserMessageView({
         )}
 
         {/* 用户附件 */}
-        {(files.length > 0 || agents.length > 0) && (
+        {(files.length > 0 || agents.length > 0 || skills.length > 0) && (
           <div className="mt-1 flex max-w-full min-w-0 flex-wrap gap-2 justify-end">
             {files.map((file, index) => (
               <FilePartView key={`file:${index}`} file={file} index={index} />
             ))}
             {agents.map((agent, index) => (
               <AgentPartView key={`agent:${index}`} agent={agent} index={index} />
+            ))}
+            {skills.map((skill, index) => (
+              <SkillPartView key={`skill:${skill.id || index}`} skill={skill} index={index} />
             ))}
           </div>
         )}

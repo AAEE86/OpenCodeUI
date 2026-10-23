@@ -23,6 +23,7 @@
 import type {
   PromptAgentAttachment as V2PromptAgentAttachment,
   PromptFileAttachment as V2PromptFileAttachment,
+  PromptSkillAttachment as V2PromptSkillAttachment,
   SessionMessageAgentSelected as V2AgentSelected,
   SessionMessageAssistant as V2Assistant,
   SessionMessageAssistantReasoning as V2AssistantReasoning,
@@ -92,6 +93,9 @@ export type PromptFileAttachment = V2PromptFileAttachment
 
 /** 用户消息里的 agent 提及 */
 export type PromptAgentAttachment = V2PromptAgentAttachment
+
+/** 用户消息里的 skill 附件（@ 技能提及） */
+export type PromptSkillAttachment = V2PromptSkillAttachment
 
 // ============================================
 // 助手内容（content 数组元素）

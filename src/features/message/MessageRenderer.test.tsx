@@ -74,6 +74,7 @@ vi.mock('./parts', () => ({
     <div data-testid="file-part">{file.name ?? file.mime}</div>
   ),
   AgentPartView: ({ agent }: { agent: { name: string } }) => <div data-testid="agent-part">{agent.name}</div>,
+  SkillPartView: ({ skill }: { skill: { name: string } }) => <div data-testid="skill-part">{skill.name}</div>,
   StepFinishPartView: () => null,
   RetryPartView: () => null,
   CompactionPartView: ({ message }: { message: { status?: string } }) =>
@@ -180,6 +181,17 @@ describe('MessageRenderer assistant fork', () => {
     render(<MessageRenderer message={message} />)
 
     expect(screen.getByTestId('agent-part')).toHaveTextContent('explore')
+  })
+
+  it('renders skill mentions from the native skills array', () => {
+    const message: UserMessage = {
+      ...createUserTextMessage('use skill'),
+      skills: [{ id: 'commit', name: 'Commit', text: 'skill body' }],
+    }
+
+    render(<MessageRenderer message={message} />)
+
+    expect(screen.getByTestId('skill-part')).toHaveTextContent('Commit')
   })
 
   it('keeps user text plain by default', () => {

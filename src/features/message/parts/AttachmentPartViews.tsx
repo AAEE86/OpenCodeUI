@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { AttachmentItem } from '../../attachment'
-import type { PromptAgentAttachment, PromptFileAttachment } from '../../../types/api/message'
+import type { PromptAgentAttachment, PromptFileAttachment, PromptSkillAttachment } from '../../../types/api/message'
 // ============================================
 // v2 用户消息附件 → 统一 Attachment
 //
@@ -78,6 +78,34 @@ export const AgentPartView = memo(function AgentPartView({ agent, index }: Agent
         displayName: agent.name,
         agentName: agent.name,
         textRange: mentionRange(agent.mention),
+        category: 'user',
+      }}
+      expandable
+      size="sm"
+    />
+  )
+})
+
+// ============================================
+// Skill Attachment View
+// ============================================
+
+interface SkillPartViewProps {
+  skill: PromptSkillAttachment
+  index: number
+}
+
+/** `@skill` 提及：和文件 / agent 附件同一套 chip，展开可看技能正文 */
+export const SkillPartView = memo(function SkillPartView({ skill, index }: SkillPartViewProps) {
+  return (
+    <AttachmentItem
+      attachment={{
+        id: `user-skill:${skill.id || index}`,
+        type: 'skill',
+        displayName: skill.name,
+        skillId: skill.id,
+        content: skill.text,
+        textRange: mentionRange(skill.mention),
         category: 'user',
       }}
       expandable

@@ -69,6 +69,11 @@ function v2Event(type: string, data: unknown) {
   return { id: `evt-${type}`, created: Date.now(), type, data }
 }
 
+/** jsdom 不提供真实的可见性切换：临时覆盖 document.visibilityState 再派发事件 */
+function setDocumentVisibility(state: 'visible' | 'hidden') {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+}
+
 describe('v2 event dispatch', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -359,6 +364,88 @@ describe('v2 event dispatch', () => {
       expect(subscribeMock.mock.calls.length).toBeGreaterThanOrEqual(2)
       unsubscribe()
     } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /**
+   * 切后台再切回来（Issue #184）：后台期间 JS 定时器被冻结，看门狗不 tick，
+   * 半开连接的状态会一直停在 connected。回到前台必须主动复核一次静默时长，
+   * 否则用户要等最多 45s 才看到刷新。
+   *
+   * 但复核不能见 connected 就重连：短时间切屏、连接还活着的时候应该保持
+   * 懒连接，所以静默不足一个心跳阈值时什么都不做。
+   */
+  it('keeps the connection when the app returns quickly from background', async () => {
+    vi.useFakeTimers()
+    try {
+      const harnesses: Array<ReturnType<typeof createEventStream>> = []
+      subscribeMock.mockImplementation(() => {
+        const harness = createEventStream()
+        harnesses.push(harness)
+        return harness.stream
+      })
+
+      const { subscribeToServerEvents, getServerConnectionInfo } = await import('./events')
+      const unsubscribe = subscribeToServerEvents('test-server', {})
+      await Promise.resolve()
+
+      harnesses[0].emit(v2Event('session.idle', { sessionID: 's1' }))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(getServerConnectionInfo('test-server').state).toBe('connected')
+
+      // 短暂切屏：累计静默远小于一个心跳阈值
+      await vi.advanceTimersByTimeAsync(5_000)
+      setDocumentVisibility('hidden')
+      document.dispatchEvent(new Event('visibilitychange'))
+      setDocumentVisibility('visible')
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.advanceTimersByTimeAsync(5_000)
+
+      expect(subscribeMock.mock.calls.length).toBe(1)
+      expect(getServerConnectionInfo('test-server').state).toBe('connected')
+      unsubscribe()
+    } finally {
+      setDocumentVisibility('visible')
+      vi.useRealTimers()
+    }
+  })
+
+  it('reconnects on returning from a long background instead of waiting for the watchdog', async () => {
+    vi.useFakeTimers()
+    try {
+      const harnesses: Array<ReturnType<typeof createEventStream>> = []
+      subscribeMock.mockImplementation(() => {
+        const harness = createEventStream()
+        harnesses.push(harness)
+        return harness.stream
+      })
+
+      const { subscribeToServerEvents, getServerConnectionInfo } = await import('./events')
+      const unsubscribe = subscribeToServerEvents('test-server', {})
+      await Promise.resolve()
+
+      harnesses[0].emit(v2Event('session.idle', { sessionID: 's1' }))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(getServerConnectionInfo('test-server').state).toBe('connected')
+
+      // 后台期间心跳停了，但还没到看门狗阈值（45s）——确保救场的不是看门狗
+      await vi.advanceTimersByTimeAsync(25_000)
+      expect(getServerConnectionInfo('test-server').state).toBe('connected')
+
+      setDocumentVisibility('hidden')
+      document.dispatchEvent(new Event('visibilitychange'))
+      setDocumentVisibility('visible')
+      document.dispatchEvent(new Event('visibilitychange'))
+
+      // 复核窗口 + 半开连接复位兜底 + 退避重连
+      await vi.advanceTimersByTimeAsync(3_000)
+      await vi.advanceTimersByTimeAsync(6_000)
+
+      expect(subscribeMock.mock.calls.length).toBeGreaterThanOrEqual(2)
+      unsubscribe()
+    } finally {
+      setDocumentVisibility('visible')
       vi.useRealTimers()
     }
   })

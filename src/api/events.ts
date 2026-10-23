@@ -81,6 +81,8 @@ const endpointReconnectFlags = new Map<string, 'network' | 'server-switch'>()
 let lifecycleListenersRegistered = false
 let isInBackground = false
 let keepaliveTimer: ReturnType<typeof setInterval> | null = null
+/** 切回前台后的静默复核定时器（见 RESUME_PROBE_DELAY_MS） */
+let resumeProbeTimer: ReturnType<typeof setTimeout> | null = null
 
 // ============================================
 // 常量
@@ -116,6 +118,13 @@ const CONNECT_STALL_TIMEOUT = 15_000
  * 刚收到心跳就被误判。
  */
 const ONLINE_RESUME_SILENCE_MS = 20_000
+/**
+ * 切回前台后的静默复核延迟（Issue #184）。
+ *
+ * 后台期间 JS 定时器会被冻结，回到前台时「静默时长」天然偏大，不能立刻
+ * 据此判死连接——先留一小段时间让恢复后缓冲的事件/心跳落地，再复核。
+ */
+const RESUME_PROBE_DELAY_MS = 2_000
 
 const DEFAULT_CONNECTION_INFO: ConnectionInfo = {
   state: 'disconnected',
@@ -703,6 +712,65 @@ function disconnectServerConnection(conn: ServerConnection): void {
 // 生命周期 / keepalive
 // ============================================
 
+/**
+ * 掐断半开连接，交给重连循环。
+ *
+ * abort 后底层 fetch 通常会让 for-await 退出；但挂起的读可能不认 abort，
+ * isConnecting 会卡在 true 吞掉所有重连入口。5s 后仍卡在同一代次就作废
+ * 本代次强制复位（与看门狗的同款兜底）。
+ */
+function dropSilentConnection(conn: ServerConnection): void {
+  conn.watchdogDrop = true
+  conn.controller?.abort()
+  const generation = conn.generation
+  setTimeout(() => {
+    if (generation !== conn.generation) return
+    if (!conn.isConnecting) return
+    conn.generation += 1
+    conn.isConnecting = false
+    conn.watchdogDrop = false
+    conn.connectStartedAt = 0
+    updateConnectionState(conn.serverId, { state: 'disconnected' })
+    scheduleReconnect(conn)
+  }, 5_000)
+}
+
+/**
+ * 连接自愈：网络恢复（online）与切回前台（visibilitychange）共用。
+ *
+ * - 没连上：立刻建连，不等退避定时器；
+ * - 状态还是 connected 但已静默超过一个心跳：说明是半开连接，主动掐断重连。
+ *
+ * 状态停在 connected 不等于连着：断网时 TCP 常常是半开的——流既不报错也
+ * 不结束，状态就一直挂着，只能等看门狗 45s 才发现。网络恢复 / 回到前台
+ * 都是外部事实，此时按「静默超过一个心跳就判可疑」主动校准，而不是相信
+ * state === 'connected'。阈值取得比看门狗短得多：断网期间心跳必然收不到，
+ * 恢复后按心跳间隔算早该有几个了。
+ *
+ * 静默不足阈值的直接放过——短时间切屏、网络没变时保持懒连接（Issue #184）。
+ */
+function revalidateConnections(): void {
+  for (const conn of connections.values()) {
+    if (conn.subscribers.size === 0) continue
+
+    if (conn.info.state !== 'connected') {
+      if (conn.isConnecting) continue
+      // 退避定时器可能排到 30s 后，回前台时没有干等的必要
+      if (conn.reconnectTimer) {
+        clearTimeout(conn.reconnectTimer)
+        conn.reconnectTimer = null
+      }
+      connectServer(conn.serverId)
+      continue
+    }
+
+    const silentFor = Date.now() - conn.info.lastEventTime
+    if (conn.info.lastEventTime > 0 && silentFor > ONLINE_RESUME_SILENCE_MS) {
+      dropSilentConnection(conn)
+    }
+  }
+}
+
 function registerLifecycleListeners(): void {
   if (lifecycleListenersRegistered) return
   if (typeof document === 'undefined') return
@@ -712,45 +780,28 @@ function registerLifecycleListeners(): void {
     isInBackground = document.visibilityState === 'hidden'
     if (isInBackground) {
       startBackgroundKeepalive()
-    } else {
-      stopBackgroundKeepalive()
+      return
     }
+
+    /**
+     * 后台期间 JS 定时器会被冻结，看门狗不会 tick；回到前台若连接已是半开，
+     * 状态还停在 connected，用户要等最多 45s 才看到界面恢复。
+     *
+     * 先留一个很短的窗口让恢复后缓冲的事件/心跳落地，再复核静默时长：
+     * 连接好好的时候，不该因为「后台没跑定时器」就白重连一次。
+     */
+    stopBackgroundKeepalive()
+    if (resumeProbeTimer) clearTimeout(resumeProbeTimer)
+    resumeProbeTimer = setTimeout(() => {
+      resumeProbeTimer = null
+      // 复核前又切走了：交给后台 keepalive，别在这里抢先重连
+      if (document.visibilityState === 'hidden') return
+      revalidateConnections()
+    }, RESUME_PROBE_DELAY_MS)
   })
 
   window.addEventListener('online', () => {
-    for (const conn of connections.values()) {
-      if (conn.subscribers.size === 0) continue
-
-      if (conn.info.state !== 'connected') {
-        connectServer(conn.serverId)
-        continue
-      }
-
-      /**
-       * 状态停在 connected 不等于连着：断网时 TCP 常常是半开的——流既不报错
-       * 也不结束，状态就一直挂着，直到看门狗 45s 后才发现。等那么久，用户看到
-       * 的就是「网回来了但界面不动，得刷新」。
-       *
-       * 网络恢复是外部事实：此时若已有一段时间没收到任何字节（含心跳），
-       * 就当作可疑连接主动掐断重连。阈值取得比看门狗短得多——断网期间心跳
-       * 必然收不到，恢复后按心跳间隔算早该有几个了。
-       */
-      const silentFor = Date.now() - conn.info.lastEventTime
-      if (conn.info.lastEventTime > 0 && silentFor > ONLINE_RESUME_SILENCE_MS) {
-        conn.watchdogDrop = true
-        conn.controller?.abort()
-        setTimeout(() => {
-          if (conn.isConnecting) {
-            conn.generation += 1
-            conn.isConnecting = false
-            conn.watchdogDrop = false
-            conn.connectStartedAt = 0
-            updateConnectionState(conn.serverId, { state: 'disconnected' })
-            scheduleReconnect(conn)
-          }
-        }, 5_000)
-      }
-    }
+    revalidateConnections()
   })
 }
 

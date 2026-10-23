@@ -74,7 +74,7 @@ describe('sessionIndexStore', () => {
 
     await sessionIndexStore.ensure(SERVER)
 
-    expect(listSessionsPageMock).toHaveBeenCalledWith({ parentID: null, order: 'desc', limit: 500 }, SERVER)
+    expect(listSessionsPageMock).toHaveBeenCalledWith({ parentID: null, order: 'desc', limit: 200 }, SERVER)
     expect(sessionIndexStore.getSnapshot(SERVER).sessions.map(item => item.id)).toEqual(['ses_new', 'ses_old'])
     expect(sessionIndexStore.getSnapshot(SERVER).ready).toBe(true)
   })
@@ -104,35 +104,29 @@ describe('sessionIndexStore', () => {
     expect(sessionIndexStore.getSnapshot(SERVER).sessions.map(item => item.id)).toEqual(['ses_b'])
   })
 
-  it('cursor 续页只追加新的一页，到底后 hasMore=false', async () => {
-    // 首轮自动翻两页（page1 → page2），第三页留给「显示更多」
-    listSessionsPageMock
-      .mockResolvedValueOnce(page([session('ses_1')], 'cursor-2'))
-      .mockResolvedValueOnce(page([session('ses_2')], 'cursor-3'))
+  it('首屏只拉一页，更多靠「显示更多」按 cursor 续页', async () => {
+    listSessionsPageMock.mockResolvedValueOnce(page([session('ses_1')], 'cursor-2'))
     await sessionIndexStore.ensure(SERVER)
-    expect(listSessionsPageMock).toHaveBeenCalledTimes(2)
+    expect(listSessionsPageMock).toHaveBeenCalledTimes(1)
     expect(sessionIndexStore.getSnapshot(SERVER).hasMore).toBe(true)
 
-    listSessionsPageMock.mockResolvedValueOnce(page([session('ses_3')]))
+    listSessionsPageMock.mockResolvedValueOnce(page([session('ses_2')]))
     await sessionIndexStore.loadMore(SERVER)
 
     expect(listSessionsPageMock).toHaveBeenLastCalledWith(
-      { parentID: null, order: 'desc', limit: 500, cursor: 'cursor-3' },
+      { parentID: null, order: 'desc', limit: 200, cursor: 'cursor-2' },
       SERVER,
     )
-    expect(sessionIndexStore.getSnapshot(SERVER).sessions.map(item => item.id)).toEqual([
-      'ses_1',
-      'ses_2',
-      'ses_3',
-    ])
+    expect(sessionIndexStore.getSnapshot(SERVER).sessions.map(item => item.id)).toEqual(['ses_1', 'ses_2'])
     expect(sessionIndexStore.getSnapshot(SERVER).hasMore).toBe(false)
   })
 
   it('续页去重（游标重复时不会出现重复行）', async () => {
-    listSessionsPageMock
-      .mockResolvedValueOnce(page([session('ses_1')], 'cursor-2'))
-      .mockResolvedValueOnce(page([session('ses_1'), session('ses_2')], 'cursor-3'))
+    listSessionsPageMock.mockResolvedValueOnce(page([session('ses_1')], 'cursor-2'))
     await sessionIndexStore.ensure(SERVER)
+
+    listSessionsPageMock.mockResolvedValueOnce(page([session('ses_1'), session('ses_2')], 'cursor-3'))
+    await sessionIndexStore.loadMore(SERVER)
 
     listSessionsPageMock.mockResolvedValueOnce(page([session('ses_2')], null))
     await sessionIndexStore.loadMore(SERVER)

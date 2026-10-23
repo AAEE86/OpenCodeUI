@@ -8,13 +8,17 @@
 // 官方 app 的做法是拉一份「根会话索引」（`loadHomeSessionIndex`），
 // 在本地按目录分组、按时间切片（home/sessions/index.ts）。这里做同一件事：
 //
-//   - `ensure(serverId)` 拉首页（limit 500，首轮最多自动翻两页），30s 内复用
+//   - `ensure(serverId)` 拉首页（limit 200），30s 内复用
 //   - 各列表从 `getSnapshot(serverId)` 里按目录过滤、按需切片，零额外请求
+//   - 某个目录被挤出索引时 `ensureDirectory` 按目录补一次（见下）
 //   - SSE 增量（新增/重命名/删除/移动）直接写进索引，所有列表同步更新
 //   - 重连直接重拉第一页，旧数据保留到新数据到达，列表不会闪一下空态
 //
 // 索引只存根会话（parentID 为空、未归档）：子会话由 childSessionStore
 // 管理，不属于侧栏列表。
+//
+// 不传 `directory` 表示「全服务器」：上游 `session.list` 的 `ListAllInput`
+// 就是不带 location 的那支（packages/core/src/session/store.ts）。
 // ============================================
 
 import { getSession, listSessionsPage } from '../api/session'
@@ -24,10 +28,8 @@ import type { Session } from '../types/api/session'
 
 /** 与官方 home 列表的 staleTime 对齐：30s 内重复挂载不再请求 */
 const TTL_MS = 30_000
-/** 单页条数：常规服务器一页拉完，大库再按 cursor 续页 */
-const PAGE_LIMIT = 500
-/** 首轮最多自动翻几页：保证「别的目录把前 500 条占满」时当前目录仍有数据 */
-const AUTO_PAGES = 2
+/** 单页条数：首屏一页就要出内容，大库靠 cursor 续页 / 目录补拉 */
+const PAGE_LIMIT = 200
 /** 兜底上限：极端情况下也不无限翻页 */
 const MAX_SESSIONS = 2_000
 /** 目录级补拉的条数：只用来把「被挤出全局索引」的那个目录补出来 */
@@ -315,57 +317,36 @@ class SessionIndexStore {
       // 只有首屏值得重试（启动早于服务端就绪是常态）；
       // 续页失败就让用户再点一次「显示更多」，别在后台反复打
       const delays = cursor ? [] : RETRY_DELAYS_MS
-      // 首屏自动续页：一次多拉几页，避免别的目录把第一页占满
-      const maxPages = cursor ? 1 : AUTO_PAGES
 
       for (let attempt = 0; ; attempt++) {
         try {
-          let nextCursor = cursor
-          let collected: Session[] = cursor ? [...entry.sessions] : []
-          let pages = 0
-          let sampleDirectory: string | undefined
+          const page = await listSessionsPage(
+            {
+              parentID: null,
+              order: 'desc',
+              limit: PAGE_LIMIT,
+              ...(cursor ? { cursor } : {}),
+            },
+            serverId,
+          )
+          // 期间被 reset / 重新 ensure 顶掉：丢弃这次结果
+          if (this.entries.get(serverId) !== entry) return
 
-          for (;;) {
-            const page = await listSessionsPage(
-              {
-                parentID: null,
-                order: 'desc',
-                limit: PAGE_LIMIT,
-                ...(nextCursor ? { cursor: nextCursor } : {}),
-              },
-              serverId,
-            )
-            // 期间被 reset / 重新 ensure 顶掉：丢弃这次结果
-            if (this.entries.get(serverId) !== entry) return
-            sampleDirectory ??= page.data[0]?.location?.directory
-            collected = [...collected, ...page.data]
-            nextCursor = page.next
-            pages += 1
-
-            // 首屏第一页先落地：大库要翻第二页时，用户不必等第二页回来才看到列表
-            if (!cursor && pages === 1) {
-              entry.sessions = normalize(collected)
-              entry.cursor = nextCursor
-              entry.exhausted = !nextCursor
-              entry.ready = true
-              entry.error = null
-              entry.fetchedAt = Date.now()
-              if (sampleDirectory) autoDetectPathStyle(sampleDirectory, serverId)
-              this.commit(entry)
-            }
-
-            if (!nextCursor || pages >= maxPages || collected.length >= MAX_SESSIONS) break
-          }
-
-          entry.sessions = normalize(collected)
-          entry.cursor = nextCursor
-          entry.exhausted = !nextCursor || entry.sessions.length >= MAX_SESSIONS
+          // 首屏整页替换，续页追加；normalize 按 id 去重并统一排序
+          entry.sessions = normalize([...(cursor ? entry.sessions : []), ...page.data])
+          entry.cursor = page.next
+          entry.exhausted = !page.next || entry.sessions.length >= MAX_SESSIONS
           entry.ready = true
           entry.error = null
           entry.fetchedAt = Date.now()
+
+          const sampleDirectory = page.data[0]?.location?.directory
+          if (!cursor && sampleDirectory) autoDetectPathStyle(sampleDirectory, serverId)
+
           // 拉取期间排队的增量现在重放（整页替换会覆盖它们）
           for (const mutation of entry.pending) this.applyMutation(entry, mutation)
           entry.pending = []
+          this.commit(entry)
           return
         } catch (error) {
           if (this.entries.get(serverId) !== entry) return
@@ -374,6 +355,7 @@ class SessionIndexStore {
             for (const mutation of entry.pending) this.applyMutation(entry, mutation)
             entry.pending = []
             entry.error = error instanceof Error ? error : new Error('Failed to fetch sessions')
+            this.commit(entry)
             return
           }
           await new Promise<void>(resolve => {

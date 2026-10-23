@@ -1152,10 +1152,13 @@ export function useGlobalEvents(directories?: string[]) {
           }
         },
 
-        onSessionMoved: data => {
+        onSessionMoved: (data, facts) => {
+          const scopedId = scope(data.sessionID)
           // 目录归属变了：交接缓存里的 location 立刻作废，
           // 否则 TTL 内进会话会带着旧目录（undo / 媒体路径都会用错）
           sessionInfoCache.forget(serverId, data.sessionID)
+          // 消息流里补一条 location-switched（官方 data.ts 同款）
+          messageStore.handleSessionMoved({ ...data, sessionID: scopedId }, facts)
         },
 
         onSessionDeleted: data => {

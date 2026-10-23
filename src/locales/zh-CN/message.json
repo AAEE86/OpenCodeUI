@@ -116,7 +116,7 @@
     "agentChanged": "Agent 已切换",
     "modelSwitched": "模型已切换到 {{model}}",
     "modelSwitchedVariant": "模型已切换到 {{model}}（{{variant}}）",
-    "movedTo": "工作目录已切换到 {{directory}}",
+    "movedTo": "会话已移动到 {{directory}}",
     "skill": "技能",
     "failed": "{{actor}} 失败",
     "cancelled": "{{actor}} 已取消",

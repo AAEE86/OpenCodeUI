@@ -216,8 +216,8 @@ function getReconnectDelay(attempt: number): number {
 //         splice 掉 id >= to 的消息（data.ts:1076-1092），本端没做，因此
 //         多客户端同时操作时可能不同步。单客户端使用不受影响。
 //   session.moved
-//       → 官方会插入 location-switched 消息并更新会话 location；本端切换
-//         worktree 走的是整表重拉，因此没做。**已知偏差**，同上属多客户端场景。
+//       → 已接入：更新会话 location 并插入 location-switched 消息
+//         （官方 data.ts 同款；消息流里显示为“移动”提示行）。
 //   filesystem.changed
 //       → 真机验证（v2.0.14）：在监听目录里创建/修改/删除文件，12 秒内
 //         **没有**收到该事件（只有 server.connected）。因此"没消费它"目前

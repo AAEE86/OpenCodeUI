@@ -1418,6 +1418,29 @@ class MessageStore {
   }
 
   /**
+   * `session.moved`：会话被移动到其他目录 / worktree。
+   *
+   * 官方 data.ts 同款：更新会话 location，并在消息流里留一条
+   * `location-switched`。以前本端不做这件事，只有下次重拉消息才看得到切换记录。
+   */
+  handleSessionMoved(data: EventPayload<'session.moved'>, facts?: EventFacts) {
+    const { sessionID, location, projectID, subpath } = data
+    const state = this.ensureSession(sessionID)
+    const previous = state.directory ? { location: { directory: state.directory } } : undefined
+    state.directory = location.directory
+    this.appendMessage(state, {
+      id: messageIDFromFacts(facts),
+      type: 'location-switched',
+      location,
+      projectID,
+      subpath,
+      previous,
+      time: { created: facts?.created ?? Date.now() },
+    })
+    this.notify([sessionID])
+  }
+
+  /**
    * 单条 durable 回读替换（官方 data.ts:677-683 同款）：
    * 事件先合成的乐观行，用 message.get 拉回来的服务端行原位替换；
    * 找不到同 id 则追加。

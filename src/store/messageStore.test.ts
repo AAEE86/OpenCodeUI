@@ -163,6 +163,32 @@ describe('messageStore（原生 v2 消息）', () => {
     expect(messageStore.getSessionState(SESSION)?.model).toEqual({ id: 'gpt-4o', providerID: 'openai' })
   })
 
+  it('handleSessionMoved 更新目录并插入 location-switched（带 previous）', () => {
+    messageStore.setMessages(SESSION, [createUserMessage('msg-1')], { directory: '/repo' })
+
+    messageStore.handleSessionMoved(
+      {
+        sessionID: SESSION,
+        location: { directory: '/repo/wt-feature' },
+        projectID: 'project-1',
+        subpath: 'wt-feature',
+      },
+      { id: 'evt_moved', created: 123 },
+    )
+
+    const state = messageStore.getSessionState(SESSION)
+    expect(state?.directory).toBe('/repo/wt-feature')
+    expect(state?.messages.at(-1)).toMatchObject({
+      id: 'msg_moved',
+      type: 'location-switched',
+      location: { directory: '/repo/wt-feature' },
+      projectID: 'project-1',
+      subpath: 'wt-feature',
+      previous: { location: { directory: '/repo' } },
+      time: { created: 123 },
+    })
+  })
+
 
   // ============================================
   // 整条落库

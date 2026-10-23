@@ -1,5 +1,9 @@
 import { useState, useCallback, useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react'
-import { createSession as apiCreateSession, deleteSession as apiDeleteSession } from '../api'
+import {
+  createSession as apiCreateSession,
+  deleteSession as apiDeleteSession,
+  getSessions,
+} from '../api'
 import { serverStore } from '../store/serverStore'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
 import { sessionIndexStore } from '../store/sessionIndexStore'
@@ -7,6 +11,7 @@ import { useDirectory } from './useDirectory'
 import { isSameDirectory, normalizeToForwardSlash } from '../utils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { SessionContext, type SessionContextValue } from './SessionContext.shared'
+import type { Session } from '../types/api/session'
 
 /** 列表首屏条数；「显示更多」每次多露出这么多 */
 const LIST_PAGE_SIZE = 30
@@ -21,8 +26,11 @@ const getActiveServerId = () => serverStore.getActiveServerId()
  * 列表本身来自 `sessionIndexStore`（每个服务器一份根会话索引，30s 内复用），
  * 这里只做三件事：按当前目录过滤、按搜索词过滤、按需要切片。
  *
- * 好处是切目录/切回来不再发请求，文件夹模式的各个目录也共享同一份索引；
- * 搜索是本地标题匹配（官方 home 的会话搜索同款），不再每个按键打一次服务端。
+ * 好处是切目录/切回来不再发请求，文件夹模式的各个目录也共享同一份索引。
+ *
+ * 搜索先走本地（标题 / id）。但索引只有最近一页，旧会话可能不在里面：
+ * 这时再按目录去服务端搜一次补上（去抖 300ms），只补本地没有的那部分。
+ * 索引已经完整时纯本地，不按键打服务端。
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const { currentDirectory } = useDirectory()
@@ -36,6 +44,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const [search, setSearch] = useState('')
   const [isLoadingMore, setIsLoadingMore] = useState(false)
+  /** 索引没覆盖到的旧会话（服务端按标题搜出来的补充结果） */
+  const [remoteSessions, setRemoteSessions] = useState<Session[]>([])
   // 「显示更多」的展开量跟目录/搜索词绑定：切过去时从第一页开始，不会把
   // 上一个目录的展开量短暂套到新目录上（会出现多显示一截再收回的跳动）
   const listKey = `${currentDirectory ?? ''}\0${search}`
@@ -65,14 +75,60 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     void sessionIndexStore.ensureDirectory(serverId, currentDirectory)
   }, [needsDirectoryFetch, currentDirectory, serverId])
 
+  // 索引只覆盖最近一页：本地搜不到的旧会话再问一次服务端（去抖 300ms）。
+  // 上游 search 只匹配标题，本地是「标题 + id」的超集，所以服务端结果
+  // 按同样的条件再筛一遍，避免上一次搜索的旧结果串到新词下面。
+  useEffect(() => {
+    const term = search.trim()
+    if (!term || !snapshot.hasMore) {
+      setRemoteSessions(previous => (previous.length === 0 ? previous : []))
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      const directory = normalizeToForwardSlash(currentDirectory) || undefined
+      void getSessions(
+        { parentID: null, search: term, limit: 50, ...(directory ? { directory } : {}) },
+        serverId,
+      )
+        .then(data => {
+          if (!cancelled) setRemoteSessions(data)
+        })
+        .catch(() => {
+          if (!cancelled) setRemoteSessions([])
+        })
+    }, 300)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [search, snapshot.hasMore, currentDirectory, serverId])
+
   const filteredSessions = useMemo(() => {
     const term = search.trim().toLowerCase()
     if (!term) return directorySessions
-    return directorySessions.filter(session => {
+
+    const matches = (session: Session) => {
       const title = (session.title ?? '').toLowerCase()
       return title.includes(term) || session.id.toLowerCase().includes(term)
+    }
+
+    const local = directorySessions.filter(matches)
+    if (remoteSessions.length === 0) return local
+
+    // 服务端补来的结果可能包含别处的目录（缺省目录时是全服务器），按当前目录收口
+    const byId = new Map(local.map(session => [session.id, session]))
+    for (const session of remoteSessions) {
+      if (!matches(session)) continue
+      if (currentDirectory && !isSameDirectory(currentDirectory, session.location?.directory)) continue
+      if (!byId.has(session.id)) byId.set(session.id, session)
+    }
+    return [...byId.values()].sort((a, b) => {
+      const left = a.time?.updated ?? a.time?.created ?? 0
+      const right = b.time?.updated ?? b.time?.created ?? 0
+      return right - left
     })
-  }, [directorySessions, search])
+  }, [directorySessions, search, remoteSessions, currentDirectory])
 
   const sessions = useMemo(() => filteredSessions.slice(0, limit), [filteredSessions, limit])
   const searching = search.trim().length > 0

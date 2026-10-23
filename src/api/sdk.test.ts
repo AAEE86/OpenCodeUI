@@ -62,6 +62,19 @@ describe('v2 client request lifecycle', () => {
     expect(client.__options.baseUrl).toBe('http://127.0.0.1:4096')
   })
 
+  it('resolves a relative base URL before handing it to the SDK', async () => {
+    // 回归：standalone 镜像把 VITE_API_BASE_URL 设成 `/api`，SDK 内部
+    // `new URL('/api')` 会抛 Invalid URL。必须按页面 origin 补全。
+    getActiveBaseUrlMock.mockReturnValue('/api')
+
+    const { getSDKClient } = await import('./sdk')
+    const client = getSDKClient() as unknown as MockClient
+
+    expect(client.__options.baseUrl).toBe(`${window.location.origin}/api`)
+    // 缓存 key 也用补全后的地址，重复调用必须命中同一实例
+    expect(getSDKClient()).toBe(client)
+  })
+
   it('aborts in-flight requests when the server endpoint changes', async () => {
     const { abortInFlightApiRequests, getSDKClient } = await import('./sdk')
     const client = getSDKClient() as unknown as MockClient

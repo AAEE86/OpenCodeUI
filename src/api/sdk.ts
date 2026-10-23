@@ -14,6 +14,7 @@ import { OpenCode } from '@opencode/client/promise'
 import type { OpenCodeClient } from '@opencode/client/promise'
 import { serverStore, makeBasicAuthHeader } from '../store/serverStore'
 import { isTauri } from '../utils/tauri'
+import { toAbsoluteBaseUrl } from './http'
 
 /** v2 客户端实例（内部 API 层的唯一形状） */
 export type ServerApi = OpenCodeClient
@@ -151,8 +152,20 @@ interface CachedClientEntry {
 
 const _cachedClients = new Map<string | undefined, CachedClientEntry>()
 
+/**
+ * 读取当前服务器的 baseUrl，并补成 SDK 要求的绝对地址。
+ *
+ * standalone 部署的 `VITE_API_BASE_URL=/api` 是相对前缀，直接用会被
+ * `new URL('/api')` 判为 Invalid URL；缓存 key 也必须用补全后的值，
+ * 否则相对/绝对两种写法会各建一份客户端。
+ */
+function resolveClientBaseUrl(serverId?: string): string {
+  const raw = serverId ? serverStore.getServerBaseUrl(serverId) : serverStore.getActiveBaseUrl()
+  return toAbsoluteBaseUrl(raw)
+}
+
 function buildCacheKey(serverId?: string): string {
-  const baseUrl = serverId ? serverStore.getServerBaseUrl(serverId) : serverStore.getActiveBaseUrl()
+  const baseUrl = resolveClientBaseUrl(serverId)
   const auth = serverId ? serverStore.getServerAuth(serverId) : serverStore.getActiveAuth()
   const authPart = auth?.password ? `${auth.username}:${auth.password}` : ''
   return `${baseUrl}|${authPart}`
@@ -179,7 +192,7 @@ export function getSDKClient(serverId?: string): ServerApi {
     return cached.client
   }
 
-  const baseUrl = serverId ? serverStore.getServerBaseUrl(serverId) : serverStore.getActiveBaseUrl()
+  const baseUrl = resolveClientBaseUrl(serverId)
   const headers = buildHeaders(serverId)
   const generation = _apiRequestGeneration
 

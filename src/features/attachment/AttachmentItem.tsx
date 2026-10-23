@@ -222,7 +222,7 @@ function MetaRow({
 
 function ExpandedContent({ attachment, imageError, onImageError, onOpenDetail }: ExpandedContentProps) {
   const { t } = useTranslation(['commands', 'common'])
-  const { type, url, content, relativePath, mime, agentName, agentDescription } = attachment
+  const { type, url, content, relativePath, mime, agentName, agentDescription, skillId } = attachment
   const isImage = mime?.startsWith('image/')
   const hasContent = !!content
   const hasDownloadable = hasContent || (!!isImage && !!url)
@@ -286,7 +286,21 @@ function ExpandedContent({ attachment, imageError, onImageError, onOpenDetail }:
         />
 
         <MetaRow label={t('attachment.refPath')} value={relativePath} />
-        <MetaRow label={t('attachment.type')} value={type === 'folder' ? t('attachment.directory') : mime} />
+        <MetaRow
+          label={t('attachment.type')}
+          value={
+            type === 'folder'
+              ? t('attachment.directory')
+              : type === 'skill'
+                ? t('attachment.skill')
+                : type === 'command'
+                  ? t('attachment.command')
+                  : type === 'agent'
+                    ? t('attachment.agentLabel')
+                    : mime
+          }
+        />
+        {type === 'skill' && <MetaRow label={t('attachment.skillId')} value={skillId} copyable />}
 
         {attachment.originalSource && typeof attachment.originalSource === 'object' && (
           <>

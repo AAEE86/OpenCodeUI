@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { AttachmentItem } from './AttachmentItem'
 import { FullscreenProvider } from '../../contexts'
@@ -59,5 +59,30 @@ describe('AttachmentItem 上传态', () => {
     expect(screen.queryByTestId('attachment-progress-fill')).toBeNull()
     expect(screen.queryByTestId('attachment-progress-spinner')).toBeNull()
     expect(screen.getByText('262 B')).toBeTruthy()
+  })
+})
+
+describe('AttachmentItem skill 附件', () => {
+  it('展开后显示技能类型和技能 ID，而不是空的信息块', () => {
+    render(
+      <FullscreenProvider>
+        <AttachmentItem
+          attachment={{
+            id: 'skill-1',
+            type: 'skill',
+            displayName: 'Commit',
+            skillId: 'commit',
+            content: 'skill body',
+          }}
+          expandable
+        />
+      </FullscreenProvider>,
+    )
+
+    fireEvent.click(screen.getByText('Commit'))
+
+    expect(screen.getByText('Skill')).toBeTruthy()
+    expect(screen.getByText('commit')).toBeTruthy()
+    expect(screen.getByText('skill body')).toBeTruthy()
   })
 })

@@ -35,18 +35,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   )
 
   const [search, setSearch] = useState('')
-  const [limit, setLimit] = useState(LIST_PAGE_SIZE)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
+  // 「显示更多」的展开量跟目录/搜索词绑定：切过去时从第一页开始，不会把
+  // 上一个目录的展开量短暂套到新目录上（会出现多显示一截再收回的跳动）
+  const listKey = `${currentDirectory ?? ''}\0${search}`
+  const [slice, setSlice] = useState({ key: listKey, limit: LIST_PAGE_SIZE })
+  const limit = slice.key === listKey ? slice.limit : LIST_PAGE_SIZE
+
+  const grow = useCallback(() => {
+    setSlice({ key: listKey, limit: limit + LIST_PAGE_SIZE })
+  }, [listKey, limit])
 
   // 挂载 / 切服务器：确保索引可用（30s 内命中则不请求）
   useEffect(() => {
     void sessionIndexStore.ensure(serverId)
   }, [serverId])
-
-  // 换目录或改搜索词：重新从第一页开始露出
-  useEffect(() => {
-    setLimit(LIST_PAGE_SIZE)
-  }, [currentDirectory, search])
 
   const directorySessions = useMemo(() => {
     if (!currentDirectory) return snapshot.sessions
@@ -78,17 +81,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
       // 本地还有没露出的先露出；本地见底了再向服务端要下一页
       if (filteredSessions.length > limit) {
-        setLimit(current => current + LIST_PAGE_SIZE)
+        grow()
         return
       }
       if (snapshot.hasMore) {
         await sessionIndexStore.loadMore(serverId)
-        setLimit(current => current + LIST_PAGE_SIZE)
+        grow()
       }
     } finally {
       setIsLoadingMore(false)
     }
-  }, [isLoadingMore, hasMore, filteredSessions.length, limit, snapshot.hasMore, serverId])
+  }, [isLoadingMore, hasMore, filteredSessions.length, limit, grow, snapshot.hasMore, serverId])
 
   const createSession = useCallback(
     async (title?: string) => {

@@ -72,13 +72,15 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   )
 
   const [search, setSearch] = useState(initialSearch)
-  const [limit, setLimit] = useState(pageSize)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
+  // 展开量跟「服务器 + 目录 + 搜索词」绑定：切走后不把旧展开量带过去
+  const listKey = `${serverKey}\0${normalizedDirectory ?? ''}\0${search}\0${pageSize}`
+  const [slice, setSlice] = useState({ key: listKey, limit: pageSize })
+  const limit = slice.key === listKey ? slice.limit : pageSize
 
-  // 目录/搜索/分页大小变化：回到第一页
-  useEffect(() => {
-    setLimit(pageSize)
-  }, [normalizedDirectory, search, pageSize, serverKey])
+  const grow = useCallback(() => {
+    setSlice({ key: listKey, limit: limit + pageSize })
+  }, [listKey, limit, pageSize])
 
   // 懒加载：只有 enabled 的文件夹才触发索引拉取（同一服务器仍然只拉一次）
   useEffect(() => {
@@ -110,17 +112,17 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
     setIsLoadingMore(true)
     try {
       if (filteredSessions.length > limit) {
-        setLimit(current => current + pageSize)
+        grow()
         return
       }
       if (snapshot.hasMore) {
         await sessionIndexStore.loadMore(serverKey)
-        setLimit(current => current + pageSize)
+        grow()
       }
     } finally {
       setIsLoadingMore(false)
     }
-  }, [enabled, isLoadingMore, hasMore, filteredSessions.length, limit, pageSize, snapshot.hasMore, serverKey])
+  }, [enabled, isLoadingMore, hasMore, filteredSessions.length, limit, grow, snapshot.hasMore, serverKey])
 
   const refresh = useCallback(async () => {
     if (!enabled) return

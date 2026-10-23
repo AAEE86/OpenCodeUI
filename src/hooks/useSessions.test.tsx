@@ -211,6 +211,33 @@ describe('useSessions', () => {
     expect(storeMock.upsert).toHaveBeenCalledWith('local', created)
   })
 
+  it('切换目录后展开量回到第一页，不把上一个目录的「显示更多」带过去', async () => {
+    storeMock.setSnapshotForTest({
+      ready: true,
+      sessions: Array.from({ length: 8 }, (_, index) => makeSession(`a_${index}`, '/workspace/a')),
+    })
+
+    const { result, rerender } = renderHook(({ directory }) => useSessions({ directory, pageSize: 5 }), {
+      initialProps: { directory: '/workspace/a' },
+    })
+
+    await act(async () => {
+      await result.current.loadMore()
+    })
+    expect(result.current.sessions).toHaveLength(8)
+
+    storeMock.setSnapshotForTest({
+      ready: true,
+      sessions: [
+        ...Array.from({ length: 8 }, (_, index) => makeSession(`a_${index}`, '/workspace/a')),
+        ...Array.from({ length: 8 }, (_, index) => makeSession(`b_${index}`, '/workspace/b')),
+      ],
+    })
+    rerender({ directory: '/workspace/b' })
+
+    expect(result.current.sessions).toHaveLength(5)
+  })
+
   it('索引错误原样透出，refresh 走 force', async () => {
     const error = new Error('down')
     storeMock.setSnapshotForTest({ ready: false, error })

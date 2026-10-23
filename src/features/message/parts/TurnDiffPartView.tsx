@@ -26,6 +26,10 @@ interface TurnDiffPartViewProps {
   /** step 记录到的变更文件（diff 未到时先显示路径） */
   files: string[]
   stateKey?: string
+  /** 外部传入的 diff（预览/测试用；提供时不再请求接口） */
+  diffs?: FileDiff[]
+  /** 预览用：初始是否展开 */
+  defaultExpanded?: boolean
 }
 
 /** 会话内跨虚拟行复用已拉到的 diff（只留最近若干轮，避免补丁长期占内存） */
@@ -46,16 +50,19 @@ export const TurnDiffPartView = memo(function TurnDiffPartView({
   from,
   files,
   stateKey,
+  diffs: diffsProp,
+  defaultExpanded,
 }: TurnDiffPartViewProps) {
   const { t } = useTranslation('message')
   const cacheKey = sessionId ? `${sessionId}:${from}` : ''
-  const [expanded, setExpanded] = useUiDisclosureState(stateKey ?? `turn-diff:${cacheKey}`, false)
+  const [expanded, setExpanded] = useUiDisclosureState(stateKey ?? `turn-diff:${cacheKey}`, defaultExpanded ?? false)
   const [fetched, setFetched] = useState<{ key: string; diffs: FileDiff[] } | null>(null)
   const [showAll, setShowAll] = useState(false)
   const [openFiles, setOpenFiles] = useState<ReadonlySet<string>>(() => new Set())
 
   // 已缓存的 diff 直接在渲染期取，避免在 effect 里同步 setState
-  const diffs = (fetched?.key === cacheKey ? fetched.diffs : undefined) ?? turnDiffCache.get(cacheKey) ?? null
+  const loadedDiffs = (fetched?.key === cacheKey ? fetched.diffs : undefined) ?? turnDiffCache.get(cacheKey) ?? null
+  const diffs = diffsProp ?? loadedDiffs
 
   useEffect(() => {
     // 收起时不请求：历史回合很多，展开哪个才拉哪个

@@ -1,11 +1,11 @@
 import { act, render } from '@testing-library/react'
 import { useContext, useEffect, type ContextType } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SessionContext } from './SessionContext.shared'
 import { SessionProvider } from './SessionContext'
 import type { Session } from '../types/api/session'
 
-const { storeMock, createSessionMock, deleteSessionMock, getSessionsMock, clearSessionRuntimeStateMock, unpinMock } =
+const { storeMock, createSessionMock, deleteSessionMock, getSessionMock, clearSessionRuntimeStateMock, unpinMock } =
   vi.hoisted(() => {
     const listeners = new Set<() => void>()
     let snapshot: {
@@ -43,7 +43,7 @@ const { storeMock, createSessionMock, deleteSessionMock, getSessionsMock, clearS
       storeMock,
       createSessionMock: vi.fn(),
       deleteSessionMock: vi.fn(),
-      getSessionsMock: vi.fn(),
+      getSessionMock: vi.fn(),
       clearSessionRuntimeStateMock: vi.fn(),
       unpinMock: vi.fn(),
     }
@@ -52,7 +52,7 @@ const { storeMock, createSessionMock, deleteSessionMock, getSessionsMock, clearS
 vi.mock('../api', () => ({
   createSession: (...args: unknown[]) => createSessionMock(...args),
   deleteSession: (...args: unknown[]) => deleteSessionMock(...args),
-  getSessions: (...args: unknown[]) => getSessionsMock(...args),
+  getSession: (...args: unknown[]) => getSessionMock(...args),
 }))
 
 vi.mock('../store/sessionIndexStore', () => ({
@@ -132,15 +132,11 @@ describe('SessionProvider', () => {
     storeMock.upsert.mockClear()
     createSessionMock.mockReset()
     deleteSessionMock.mockReset()
-    getSessionsMock.mockReset()
-    getSessionsMock.mockResolvedValue([])
+    getSessionMock.mockReset()
+    getSessionMock.mockRejectedValue(new Error('not found'))
     clearSessionRuntimeStateMock.mockReset()
     unpinMock.mockReset()
     storeMock.resetSnapshotForTest()
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
   })
 
   it('从共享索引按当前目录过滤（不再自己发请求）', async () => {
@@ -170,7 +166,7 @@ describe('SessionProvider', () => {
     expect(latestContext?.isLoading).toBe(false)
   })
 
-  it('搜索在本地过滤标题 / id，索引完整时不发请求', () => {
+  it('搜索在本地过滤标题 / id，不发请求', () => {
     storeMock.setSnapshotForTest({
       ready: true,
       sessions: [makeSession('ses_a', '/workspace/demo'), makeSession('ses_b', '/workspace/demo')],
@@ -185,48 +181,22 @@ describe('SessionProvider', () => {
 
     expect(latestContext?.sessions.map(session => session.id)).toEqual(['ses_b'])
     expect(storeMock.ensure).toHaveBeenCalledTimes(ensureCalls)
-    expect(getSessionsMock).not.toHaveBeenCalled()
+    expect(getSessionMock).not.toHaveBeenCalled()
   })
 
-  it('索引没覆盖全部会话时，本地搜不到的再向服务端补一次', async () => {
-    vi.useFakeTimers()
-    storeMock.setSnapshotForTest({ ready: true, hasMore: true, sessions: [makeSession('ses_a')] })
-    getSessionsMock.mockResolvedValue([makeSession('ses_old', '/workspace/demo', 99)])
+  it('输入完整会话 ID 时直接回读（官方 home 的 lookup 口径）', async () => {
+    const id = `ses_${'a'.repeat(24)}`
+    storeMock.setSnapshotForTest({ ready: true, sessions: [] })
+    getSessionMock.mockResolvedValue(makeSession(id, '/workspace/other'))
 
     renderProvider()
-    act(() => {
-      latestContext?.setSearch('old')
-    })
-    expect(latestContext?.sessions).toEqual([])
-
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(300)
+      latestContext?.setSearch(id)
     })
 
-    expect(getSessionsMock).toHaveBeenCalledWith(
-      { parentID: null, search: 'old', limit: 50, directory: '/workspace/demo' },
-      'local',
-    )
-    expect(latestContext?.sessions.map(session => session.id)).toEqual(['ses_old'])
-  })
-
-  it('服务端补回的结果按当前目录收口', async () => {
-    vi.useFakeTimers()
-    storeMock.setSnapshotForTest({ ready: true, hasMore: true, sessions: [makeSession('ses_a')] })
-    getSessionsMock.mockResolvedValue([
-      makeSession('ses_old', '/workspace/demo', 99),
-      makeSession('ses_elsewhere', '/workspace/other', 100),
-    ])
-
-    renderProvider()
-    act(() => {
-      latestContext?.setSearch('old')
-    })
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(300)
-    })
-
-    expect(latestContext?.sessions.map(session => session.id)).toEqual(['ses_old'])
+    expect(getSessionMock).toHaveBeenCalledWith(id, undefined, 'local')
+    // 不在索引 / 当前目录里也要露出来：用户是拿着 ID 找的
+    expect(latestContext?.sessions.map(session => session.id)).toEqual([id])
   })
 
   it('本地已拉到的会话先切片露出，见底后才向服务端续页', async () => {

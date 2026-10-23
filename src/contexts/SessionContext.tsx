@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useSyncExternalStore, type R
 import {
   createSession as apiCreateSession,
   deleteSession as apiDeleteSession,
-  getSessions,
+  getSession,
 } from '../api'
 import { serverStore } from '../store/serverStore'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
@@ -28,9 +28,8 @@ const getActiveServerId = () => serverStore.getActiveServerId()
  *
  * 好处是切目录/切回来不再发请求，文件夹模式的各个目录也共享同一份索引。
  *
- * 搜索先走本地（标题 / id）。但索引只有最近一页，旧会话可能不在里面：
- * 这时再按目录去服务端搜一次补上（去抖 300ms），只补本地没有的那部分。
- * 索引已经完整时纯本地，不按键打服务端。
+ * 搜索走官方 home 的口径：只在索引里按标题匹配；输入看起来是会话 ID
+ * （长度 > 20 且 `ses_` 开头）时直接回读那一条，补上索引可能没有的会话。
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const { currentDirectory } = useDirectory()
@@ -44,12 +43,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const [search, setSearch] = useState('')
   const [isLoadingMore, setIsLoadingMore] = useState(false)
-  /** 索引没覆盖到的旧会话（服务端按标题搜出来的补充结果）；跟 serverId 绑死，切服务器不串 */
-  const [remoteResults, setRemoteResults] = useState<{ serverId: string; sessions: Session[] }>({
-    serverId,
-    sessions: [],
-  })
-  const remoteSessions = remoteResults.serverId === serverId ? remoteResults.sessions : []
+  /** 输入完整会话 ID 时回读到的会话（官方 home 的 exact lookup） */
+  const [lookedUp, setLookedUp] = useState<{ serverId: string; session: Session } | null>(null)
   // 「显示更多」的展开量跟目录/搜索词绑定：切过去时从第一页开始，不会把
   // 上一个目录的展开量短暂套到新目录上（会出现多显示一截再收回的跳动）
   const listKey = `${currentDirectory ?? ''}\0${search}`
@@ -79,64 +74,45 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     void sessionIndexStore.ensureDirectory(serverId, currentDirectory)
   }, [needsDirectoryFetch, currentDirectory, serverId])
 
-  // 索引只覆盖最近一页：本地搜不到的旧会话再问一次服务端（去抖 300ms）。
-  // 上游 search 只匹配标题，本地是「标题 + id」的超集，所以服务端结果
-  // 按同样的条件再筛一遍，避免上一次搜索的旧结果串到新词下面。
+  // 官方 home 的搜索口径：本地标题匹配 + 会话 ID 精确回读。
+  // 不做服务端标题搜索，也不按键打接口；只有输入像完整 ID 时才 lookup 一次。
+  const searchTerm = search.trim()
+  const looksLikeSessionID = searchTerm.length > 20 && searchTerm.startsWith('ses_')
   useEffect(() => {
-    const term = search.trim()
-    if (!term || !snapshot.hasMore) {
-      setRemoteResults(previous =>
-        previous.sessions.length === 0 && previous.serverId === serverId
-          ? previous
-          : { serverId, sessions: [] },
-      )
+    if (!looksLikeSessionID) {
+      setLookedUp(previous => (previous === null ? previous : null))
       return
     }
     let cancelled = false
-    const timer = window.setTimeout(() => {
-      const directory = normalizeToForwardSlash(currentDirectory) || undefined
-      void getSessions(
-        { parentID: null, search: term, limit: 50, ...(directory ? { directory } : {}) },
-        serverId,
-      )
-        .then(data => {
-          if (!cancelled) setRemoteResults({ serverId, sessions: data })
-        })
-        .catch(() => {
-          if (!cancelled) setRemoteResults({ serverId, sessions: [] })
-        })
-    }, 300)
+    void getSession(searchTerm, undefined, serverId)
+      .then(session => {
+        if (!cancelled) setLookedUp({ serverId, session })
+      })
+      .catch(() => {
+        if (!cancelled) setLookedUp(null)
+      })
     return () => {
       cancelled = true
-      window.clearTimeout(timer)
     }
-  }, [search, snapshot.hasMore, currentDirectory, serverId])
+  }, [searchTerm, looksLikeSessionID, serverId])
 
   const filteredSessions = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    if (!term) return directorySessions
+    const value = search.trim().toLowerCase()
+    if (!value) return directorySessions
 
-    const matches = (session: Session) => {
+    const local = directorySessions.filter(session => {
       const title = (session.title ?? '').toLowerCase()
-      return title.includes(term) || session.id.toLowerCase().includes(term)
-    }
-
-    const local = directorySessions.filter(matches)
-    if (remoteSessions.length === 0) return local
-
-    // 服务端补来的结果可能包含别处的目录（缺省目录时是全服务器），按当前目录收口
-    const byId = new Map(local.map(session => [session.id, session]))
-    for (const session of remoteSessions) {
-      if (!matches(session)) continue
-      if (currentDirectory && !isSameDirectory(currentDirectory, session.location?.directory)) continue
-      if (!byId.has(session.id)) byId.set(session.id, session)
-    }
-    return [...byId.values()].sort((a, b) => {
-      const left = a.time?.updated ?? a.time?.created ?? 0
-      const right = b.time?.updated ?? b.time?.created ?? 0
-      return right - left
+      return title.includes(value) || session.id.toLowerCase().includes(value)
     })
-  }, [directorySessions, search, remoteSessions, currentDirectory])
+
+    // 官方 home：ID 回读到的会话即使不在索引/当前目录里也放到最前面，
+    // 用户是拿着完整 ID 来找的。归档会话不进列表。
+    const exact = lookedUp?.serverId === serverId ? lookedUp.session : undefined
+    if (!exact || typeof exact.time?.archived === 'number' || local.some(item => item.id === exact.id)) {
+      return local
+    }
+    return [exact, ...local]
+  }, [directorySessions, search, lookedUp, serverId])
 
   const sessions = useMemo(() => filteredSessions.slice(0, limit), [filteredSessions, limit])
   const searching = search.trim().length > 0

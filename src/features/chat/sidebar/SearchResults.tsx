@@ -119,8 +119,8 @@ function ServerSearchGroup({
     }
     const timer = window.setTimeout(() => {
       setIsLoadingSessions(true)
-      // v2 没有 roots 开关：只要根会话时传 parentID: null；这里要全部会话故省略
-      getSessions({ search, limit: 50 }, serverId)
+      // 官方命令面板同款：只要根会话（parentID: null），limit 50
+      getSessions({ parentID: null, search, limit: 50 }, serverId)
         .then(data => {
           if (requestId === requestIdRef.current) setSessions(data)
         })

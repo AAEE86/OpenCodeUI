@@ -32,17 +32,39 @@ export function normalizePathSeparators(path: string): string {
 }
 
 /**
+ * 逐段做 URL 编码（官方 `@opencode/util` 的 encodeFilePath 同款）。
+ *
+ * `new URL()` 会把空格自动转成 `%20`，但 `#` / `?` / `%` 会被当成结构字符：
+ * 路径里带这些字符时，服务端 `new URL(uri)` + `fileURLToPath` 会截断或抛
+ * `URI malformed`，附件直接读不到。所以发出去之前必须逐段编码。
+ */
+function encodeFilePath(normalized: string): string {
+  // Windows 盘符补前导斜杠：C:/x → /C:/x
+  const rooted = /^[a-zA-Z]:/.test(normalized)
+    ? `/${normalized}`
+    : normalized.startsWith('/')
+      ? normalized
+      : `/${normalized}`
+
+  return rooted
+    .split('/')
+    .map((segment, index) => {
+      // 保留盘符里的冒号（/C:/...），否则 fileURLToPath 认不出盘符
+      if (index === 1 && /^[a-zA-Z]:$/.test(segment)) return segment
+      return encodeURIComponent(segment)
+    })
+    .join('/')
+}
+
+/**
  * 绝对路径 → `file://` URL（服务端 `readFileAttachment` 只接受 file: 协议，
  * 裸路径会被 `new URL` 解析成盘符协议而 400）。
  *
- * Windows 盘符要三斜杠（`file:///C:/x`），Unix 绝对路径两斜杠（`file:///x` 亦可，
- * 这里保持与官方 `file://${encodeFilePath(path)}` 兼容的形态）。
+ * Windows 盘符要三斜杠（`file:///C:/x`），Unix 绝对路径三斜杠
+ * （`file:///x`）。路径分段做 URL 编码，空格 / `#` / `%` 等字符不会破坏 URI。
  */
 export function absolutePathToFileUrl(path: string): string {
-  const normalized = normalizePathSeparators(path).replace(/\/{2,}/g, '/')
-  if (/^[a-zA-Z]:/.test(normalized)) return `file:///${normalized}`
-  if (normalized.startsWith('/')) return `file://${normalized}`
-  return `file:///${normalized}`
+  return `file://${encodeFilePath(normalizePathSeparators(path))}`
 }
 
 /**

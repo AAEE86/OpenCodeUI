@@ -123,6 +123,8 @@
   },
   "system": {
     "retryAttempt": "Retry attempt {{attempt}}",
+    "retryWaiting": "Retrying in {{seconds}}s (attempt {{attempt}})",
+    "retryNow": "Retrying now (attempt {{attempt}})",
     "retryable": "Retryable",
     "statusCode": "Status: {{code}}",
     "contextCompacted": "History compacted",

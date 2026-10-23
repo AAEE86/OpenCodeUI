@@ -4,6 +4,7 @@ import { RetryIcon, ChevronDownIcon } from '../../../components/Icons'
 import { CopyButton } from '../../../components/ui'
 import { MarkdownRenderer } from '../../../components/MarkdownRenderer'
 import { useDisclosureScrollLock } from '../../../hooks'
+import { useNow } from '../../../hooks/useNow'
 import { useTheme } from '../../../hooks/useTheme'
 import type { SessionMessageAssistant, SessionMessageCompaction, SessionMessageInfo } from '@opencode/client/promise'
 import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
@@ -39,8 +40,16 @@ export const RetryPartView = memo(function RetryPartView({ retry, stateKey }: Re
   const shouldRenderBody = useMessageExpandRender(expanded)
   const { rootRef, headerRef, withScrollLock } = useDisclosureScrollLock()
   const { attempt, error, at } = retry
+  const now = useNow(250)
 
-  const timeStr = new Date(at).toLocaleTimeString()
+  // `at` 是下一次重试的绝对时间戳（与官方 session-retry.tsx 的 `next - Date.now()` 一致）。
+  // 超过 10 分钟视为数据异常（旧版本/脏数据），宁可不显示倒计时。
+  const remainingMs = at - now
+  const showCountdown = remainingMs > 0 && remainingMs <= 10 * 60_000
+  const info = showCountdown
+    ? t('system.retryWaiting', { attempt, seconds: Math.ceil(remainingMs / 1000) })
+    : t('system.retryNow', { attempt })
+
   const isRetryable = isRetryableStatus(error)
 
   return (
@@ -54,8 +63,12 @@ export const RetryPartView = memo(function RetryPartView({ retry, stateKey }: Re
       >
         <RetryIcon className="w-4 h-4 text-warning-100 flex-shrink-0" />
         <div className="flex-1 min-w-0">
-          <span className="text-[length:var(--fs-base)] text-warning-100">{t('system.retryAttempt', { attempt })}</span>
-          <span className="text-[length:var(--fs-sm)] text-text-500 ml-2">{timeStr}</span>
+          <span className="text-[length:var(--fs-base)] text-warning-100">{info}</span>
+          {error.message && (
+            <span className="block truncate text-[length:var(--fs-sm)] text-text-500">
+              {unwrapErrorMessage(error.message)}
+            </span>
+          )}
         </div>
         {isRetryable && (
           <span className="text-[length:var(--fs-xxs)] text-warning-100/70 bg-warning-100/10 px-1.5 py-0.5 rounded">

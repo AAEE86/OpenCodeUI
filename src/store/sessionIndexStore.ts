@@ -19,6 +19,12 @@
 //
 // 不传 `directory` 表示「全服务器」：上游 `session.list` 的 `ListAllInput`
 // 就是不带 location 的那支（packages/core/src/session/store.ts）。
+//
+// 实测（v2.0.29，200 条样本）：
+//   - 不传 `directory` 返回全服务器、多目录的会话，不是只给默认 location
+//   - 不传 `parentID` 会把子会话一起带回来；`parentID: null` 才只要根会话
+//   - `cursor.next` 直接续页，跨页无重复
+// 所以下面每处 list 都显式带 `parentID: null`，别省。
 // ============================================
 
 import { getSession, listSessionsPage } from '../api/session'

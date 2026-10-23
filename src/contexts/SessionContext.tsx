@@ -56,6 +56,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return snapshot.sessions.filter(session => isSameDirectory(currentDirectory, session.location?.directory))
   }, [snapshot.sessions, currentDirectory])
 
+  // 当前目录在索引里一条都没有、而服务端还有没拉到的页：按目录兜底补一次。
+  // 索引只保证最近若干页，旧项目可能整段被挤出；补拉后就有数据了。
+  const needsDirectoryFetch =
+    !!currentDirectory && snapshot.ready && snapshot.hasMore && directorySessions.length === 0
+  useEffect(() => {
+    if (!needsDirectoryFetch || !currentDirectory) return
+    void sessionIndexStore.ensureDirectory(serverId, currentDirectory)
+  }, [needsDirectoryFetch, currentDirectory, serverId])
+
   const filteredSessions = useMemo(() => {
     const term = search.trim().toLowerCase()
     if (!term) return directorySessions

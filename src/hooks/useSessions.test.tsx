@@ -20,6 +20,7 @@ const { storeMock, createSessionMock, deleteSessionMock, unpinMock } = vi.hoiste
     },
     getSnapshot: () => snapshot,
     ensure: vi.fn<(serverId: string, options?: { force?: boolean }) => Promise<void>>(() => Promise.resolve()),
+    ensureDirectory: vi.fn<(serverId: string, directory: string) => Promise<void>>(() => Promise.resolve()),
     loadMore: vi.fn(() => Promise.resolve()),
     remove: vi.fn(),
     patch: vi.fn(),
@@ -86,6 +87,7 @@ function makeSession(id: string, directory = '/workspace/demo', updated = 2): Se
 describe('useSessions', () => {
   beforeEach(() => {
     storeMock.ensure.mockClear()
+    storeMock.ensureDirectory.mockClear()
     storeMock.loadMore.mockClear()
     storeMock.remove.mockClear()
     storeMock.patch.mockClear()
@@ -105,6 +107,18 @@ describe('useSessions', () => {
 
     rerender({ enabled: true })
     expect(storeMock.ensure).toHaveBeenCalledWith('local')
+  })
+
+  it('目录在索引里为空且服务端还有页时，按目录补拉一次', () => {
+    storeMock.setSnapshotForTest({
+      ready: true,
+      hasMore: true,
+      sessions: [makeSession('ses_other', '/workspace/other')],
+    })
+
+    renderHook(() => useSessions({ directory: '/workspace/demo' }))
+
+    expect(storeMock.ensureDirectory).toHaveBeenCalledWith('local', '/workspace/demo')
   })
 
   it('按目录从共享索引过滤，php 风格尾斜杠不影响匹配', () => {

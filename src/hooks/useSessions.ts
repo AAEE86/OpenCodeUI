@@ -93,6 +93,14 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
     return snapshot.sessions.filter(session => isSameDirectory(normalizedDirectory, session.location?.directory))
   }, [snapshot.sessions, normalizedDirectory])
 
+  // 当前目录在索引里一条都没有、而服务端还有没拉到的页：按目录兜底补一次
+  const needsDirectoryFetch =
+    enabled && !!normalizedDirectory && snapshot.ready && snapshot.hasMore && directorySessions.length === 0
+  useEffect(() => {
+    if (!needsDirectoryFetch || !normalizedDirectory) return
+    void sessionIndexStore.ensureDirectory(serverKey, normalizedDirectory)
+  }, [needsDirectoryFetch, normalizedDirectory, serverKey])
+
   const filteredSessions = useMemo(() => {
     const term = search.trim().toLowerCase()
     if (!term) return directorySessions

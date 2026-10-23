@@ -22,6 +22,7 @@ const { storeMock, createSessionMock, deleteSessionMock, clearSessionRuntimeStat
     },
     getSnapshot: () => snapshot,
     ensure: vi.fn(() => Promise.resolve()),
+    ensureDirectory: vi.fn(() => Promise.resolve()),
     loadMore: vi.fn(() => Promise.resolve()),
     remove: vi.fn(),
     patch: vi.fn(),
@@ -120,6 +121,7 @@ describe('SessionProvider', () => {
   beforeEach(() => {
     latestContext = null
     storeMock.ensure.mockClear()
+    storeMock.ensureDirectory.mockClear()
     storeMock.loadMore.mockClear()
     storeMock.remove.mockClear()
     storeMock.patch.mockClear()
@@ -214,6 +216,37 @@ describe('SessionProvider', () => {
 
     expect(storeMock.ensure).toHaveBeenCalledTimes(1)
     expect(latestContext?.sessions.map(session => session.id)).toEqual(['ses_a'])
+  })
+
+  it('当前目录在索引里为空且服务端还有页时，按目录兜底补拉', () => {
+    storeMock.setSnapshotForTest({
+      ready: true,
+      hasMore: true,
+      sessions: [makeSession('ses_other', '/workspace/other')],
+    })
+
+    renderProvider()
+
+    expect(storeMock.ensureDirectory).toHaveBeenCalledWith('local', '/workspace/demo')
+  })
+
+  it('索引已到底或目录本身有数据时不补拉', () => {
+    storeMock.setSnapshotForTest({
+      ready: true,
+      hasMore: false,
+      sessions: [makeSession('ses_other', '/workspace/other')],
+    })
+    renderProvider()
+    expect(storeMock.ensureDirectory).not.toHaveBeenCalled()
+
+    act(() => {
+      storeMock.setSnapshotForTest({
+        ready: true,
+        hasMore: true,
+        sessions: [makeSession('ses_a', '/workspace/demo')],
+      })
+    })
+    expect(storeMock.ensureDirectory).not.toHaveBeenCalled()
   })
 
   it('删除会话：调 API、清运行时状态、清索引', async () => {

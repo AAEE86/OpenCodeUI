@@ -261,4 +261,49 @@ describe('sessionIndexStore', () => {
 
     expect(subscribeMock).toHaveBeenCalledTimes(1)
   })
+
+  it('目录兜底补拉：把被挤出全局索引的目录并回来，30s 内不重复补', async () => {
+    listSessionsPageMock.mockResolvedValueOnce(page([session('ses_recent')]))
+    await sessionIndexStore.ensure(SERVER)
+
+    listSessionsPageMock.mockResolvedValueOnce(page([session('ses_old')]))
+    await sessionIndexStore.ensureDirectory(SERVER, '/workspace/demo')
+
+    expect(listSessionsPageMock).toHaveBeenLastCalledWith(
+      { directory: '/workspace/demo', parentID: null, order: 'desc', limit: 100 },
+      SERVER,
+    )
+    expect(sessionIndexStore.getSnapshot(SERVER).sessions.map(item => item.id).sort()).toEqual([
+      'ses_old',
+      'ses_recent',
+    ])
+
+    // TTL 内再挂载一次（切目录来回）不再请求
+    await sessionIndexStore.ensureDirectory(SERVER, '/workspace/demo')
+    expect(listSessionsPageMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('目录补拉与首屏并发时共享请求，目录之间互不影响', async () => {
+    let resolveFirst!: (value: { data: Session[]; next: string | null }) => void
+    listSessionsPageMock.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          resolveFirst = resolve
+        }),
+    )
+    const first = sessionIndexStore.ensure(SERVER)
+
+    listSessionsPageMock.mockResolvedValueOnce(page([session('ses_old')]))
+    const dirA = sessionIndexStore.ensureDirectory(SERVER, '/workspace/a')
+    const dirB = sessionIndexStore.ensureDirectory(SERVER, '/workspace/a')
+    resolveFirst(page([session('ses_recent')]))
+    await Promise.all([first, dirA, dirB])
+
+    // 首屏一页 + 目录一页（同一个目录的并发调用合并）
+    expect(listSessionsPageMock).toHaveBeenCalledTimes(2)
+    expect(sessionIndexStore.getSnapshot(SERVER).sessions.map(item => item.id).sort()).toEqual([
+      'ses_old',
+      'ses_recent',
+    ])
+  })
 })

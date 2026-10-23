@@ -30,6 +30,8 @@ const PAGE_LIMIT = 500
 const AUTO_PAGES = 2
 /** 兜底上限：极端情况下也不无限翻页 */
 const MAX_SESSIONS = 2_000
+/** 目录级补拉的条数：只用来把「被挤出全局索引」的那个目录补出来 */
+const DIRECTORY_LIMIT = 100
 /** 首屏失败的重试退避（启动可能早于本地服务端就绪） */
 const RETRY_DELAYS_MS = [500, 1_500, 3_000]
 
@@ -81,6 +83,11 @@ function isIndexable(session: Session): boolean {
   return !session.parentID && typeof session.time?.archived !== 'number'
 }
 
+/** 目录键：分隔符与末尾斜杠归一化，避免同一目录重复补拉 */
+function normalizeDirectoryKey(directory: string): string {
+  return directory.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
 function sortSessions(sessions: Session[]): Session[] {
   return [...sessions].sort((a, b) => {
     const diff = updatedAt(b) - updatedAt(a)
@@ -105,6 +112,10 @@ class SessionIndexStore {
   private subscriptions = new Map<string, () => void>()
   /** 单会话回读去重：多个列表同时收到 created/移动事件只打一次 getSession */
   private refreshing = new Map<string, Promise<void>>()
+  /** 目录级补拉的 TTL（key = serverId\0directory） */
+  private directoryFetchedAt = new Map<string, number>()
+  /** 目录级补拉去重（同一目录并发只打一次） */
+  private directoryLoading = new Map<string, Promise<void>>()
 
   // ============================================
   // 订阅（useSyncExternalStore）
@@ -146,6 +157,46 @@ class SessionIndexStore {
     if (entry.loading) return entry.loading
     if (entry.exhausted || !entry.cursor) return Promise.resolve()
     return this.fetchPage(serverId, entry.cursor)
+  }
+
+  /**
+   * 目录兜底补拉。
+   *
+   * 全局索引只保证最近若干页；某个项目的会话如果都比这些页旧，切过去会是空的。
+   * 这时按目录单独问一次（最多 DIRECTORY_LIMIT 条），结果直接并进索引。
+   *
+   * 顺带兜住「服务端在缺省目录时只返回默认 location」的实现差异：真有这种
+   * 服务端，每个目录第一次挂载都会走这里，列表仍然是对的。
+   */
+  ensureDirectory(serverId: string, directory: string): Promise<void> {
+    this.ensureSubscription(serverId)
+    const dir = normalizeDirectoryKey(directory)
+    if (!dir) return Promise.resolve()
+
+    const key = `${serverId}\0${dir}`
+    const loading = this.directoryLoading.get(key)
+    if (loading) return loading
+    const fetchedAt = this.directoryFetchedAt.get(key)
+    if (fetchedAt !== undefined && Date.now() - fetchedAt < TTL_MS) return Promise.resolve()
+
+    const request = (async () => {
+      try {
+        const page = await listSessionsPage(
+          { directory: dir, parentID: null, order: 'desc', limit: DIRECTORY_LIMIT },
+          serverId,
+        )
+        // 走 mutate 而不是直接改：整页刷新在飞时先排队，落地后重放
+        for (const session of page.data) this.mutate(serverId, { type: 'upsert', session })
+        this.directoryFetchedAt.set(key, Date.now())
+      } catch {
+        // 补拉失败不记 TTL：下次挂载还有机会再试
+      } finally {
+        this.directoryLoading.delete(key)
+      }
+    })()
+
+    this.directoryLoading.set(key, request)
+    return request
   }
 
   // ============================================
@@ -191,6 +242,8 @@ class SessionIndexStore {
     for (const unsubscribe of this.subscriptions.values()) unsubscribe()
     this.subscriptions.clear()
     this.refreshing.clear()
+    this.directoryFetchedAt.clear()
+    this.directoryLoading.clear()
     this.entries.clear()
     this.notify()
   }

@@ -1,255 +1,104 @@
-import { useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react'
-import {
-  getSessions,
-  getSession,
-  createSession as apiCreateSession,
-  deleteSession as apiDeleteSession,
-  subscribeToEvents,
-  type ApiSession,
-  type SessionListParams,
-} from '../api'
-import { affectsBoundServer } from '../store/serverChangeScope'
+import { useState, useCallback, useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react'
+import { createSession as apiCreateSession, deleteSession as apiDeleteSession } from '../api'
 import { serverStore } from '../store/serverStore'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
+import { sessionIndexStore } from '../store/sessionIndexStore'
 import { useDirectory } from './useDirectory'
-import { sessionErrorHandler, normalizeToForwardSlash, isSameDirectory, autoDetectPathStyle } from '../utils'
+import { isSameDirectory, normalizeToForwardSlash } from '../utils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { SessionContext, type SessionContextValue } from './SessionContext.shared'
 
+/** 列表首屏条数；「显示更多」每次多露出这么多 */
+const LIST_PAGE_SIZE = 30
+
+/** 稳定引用：useSyncExternalStore 每次渲染拿到同一个 subscribe，避免反复解绑 */
+const subscribeServerStore = serverStore.subscribe.bind(serverStore)
+const getActiveServerId = () => serverStore.getActiveServerId()
+
+/**
+ * 会话列表数据源。
+ *
+ * 列表本身来自 `sessionIndexStore`（每个服务器一份根会话索引，30s 内复用），
+ * 这里只做三件事：按当前目录过滤、按搜索词过滤、按需要切片。
+ *
+ * 好处是切目录/切回来不再发请求，文件夹模式的各个目录也共享同一份索引；
+ * 搜索是本地标题匹配（官方 home 的会话搜索同款），不再每个按键打一次服务端。
+ */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const { currentDirectory } = useDirectory()
+  const serverId = useSyncExternalStore(subscribeServerStore, getActiveServerId, getActiveServerId)
 
-  const [sessions, setSessions] = useState<ApiSession[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isLoadingMore, setIsLoadingMore] = useState(false)
-  const [hasMore, setHasMore] = useState(true)
-  const [search, setSearch] = useState('')
-
-  const requestIdRef = useRef(0)
-  const searchTimerRef = useRef<number | null>(null)
-  const currentDirectoryRef = useRef(currentDirectory)
-  const searchRef = useRef(search)
-  const isLoadingMoreRef = useRef(false) // 防止并发 loadMore
-  const isFetchingRef = useRef(false) // 防止 onReconnected 密集触发时重复请求
-  const queuedReconnectRefreshRef = useRef(false)
-  const retryTimerRef = useRef<number | null>(null)
-  const fetchSessionsRef = useRef<
-    (params?: SessionListParams & { append?: boolean; retryAttempt?: number }) => Promise<void>
-  >(() => Promise.resolve())
-  const currentLimitRef = useRef(30) // 当前 limit，loadMore 时递增
-
-  // 保持 ref 同步
-  useEffect(() => {
-    currentDirectoryRef.current = currentDirectory
-  }, [currentDirectory])
-
-  useEffect(() => {
-    searchRef.current = search
-  }, [search])
-
-  // 核心获取逻辑
-  // 注意：directory 传给 getSessions 时使用正斜杠格式
-  // http 层的 fetchWithBothSlashesAndMerge 会处理两种斜杠格式的兼容
-  const fetchSessions = useCallback(
-    async (params: SessionListParams & { append?: boolean; retryAttempt?: number } = {}) => {
-      const { append = false, retryAttempt = 0, ...queryParams } = params
-      const requestId = ++requestIdRef.current
-      isFetchingRef.current = true
-
-      if (append) {
-        setIsLoadingMore(true)
-      } else {
-        setIsLoading(true)
-      }
-
-      try {
-        // 使用正斜杠格式传给 API（http 层会处理兼容）
-        const targetDir = normalizeToForwardSlash(currentDirectory) || undefined
-
-        const data = await getSessions({
-          // v2 没有 roots 开关：根会话用 parentID: null 表达
-          parentID: null,
-          limit: currentLimitRef.current,
-          directory: targetDir,
-          search: search || undefined,
-          ...queryParams,
-        })
-
-        if (requestId !== requestIdRef.current) return
-
-        // 自动检测路径风格（从后端返回的 directory 字段）
-        if (data.length > 0 && data[0].location?.directory) {
-          autoDetectPathStyle(data[0].location?.directory)
-        }
-
-        if (append) {
-          // 去重：过滤掉已存在的 session
-          setSessions(prev => {
-            const existingIds = new Set(prev.map(s => s.id))
-            const newSessions = data.filter(s => !existingIds.has(s.id))
-            return [...prev, ...newSessions]
-          })
-        } else {
-          setSessions(data)
-        }
-        setHasMore(data.length >= currentLimitRef.current)
-      } catch (e) {
-        if (requestId === requestIdRef.current && !append) {
-          if (retryAttempt < 3) {
-            if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
-            retryTimerRef.current = window.setTimeout(() => {
-              if (requestId !== requestIdRef.current) return
-              void fetchSessions({ ...queryParams, retryAttempt: retryAttempt + 1 })
-            }, [500, 1500, 3000][retryAttempt])
-          } else {
-            setSessions([])
-            setHasMore(false)
-          }
-        }
-        sessionErrorHandler('fetch sessions', e)
-      } finally {
-        if (requestId === requestIdRef.current) {
-          isFetchingRef.current = false
-          setIsLoading(false)
-          setIsLoadingMore(false)
-          if (queuedReconnectRefreshRef.current) {
-            queuedReconnectRefreshRef.current = false
-            setSessions([])
-            void fetchSessionsRef.current({ search: searchRef.current || undefined })
-          }
-        }
-      }
-    },
-    [currentDirectory, search],
+  const snapshot = useSyncExternalStore(
+    sessionIndexStore.subscribe,
+    () => sessionIndexStore.getSnapshot(serverId),
+    () => sessionIndexStore.getSnapshot(serverId),
   )
 
-  // 保持 fetchSessions ref 同步（用于 SSE onReconnected 回调）
-  fetchSessionsRef.current = fetchSessions
+  const [search, setSearch] = useState('')
+  const [limit, setLimit] = useState(LIST_PAGE_SIZE)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
 
-  const matchesCurrentDirectory = useCallback((session: ApiSession) => {
-    return !currentDirectoryRef.current || isSameDirectory(currentDirectoryRef.current, session.location?.directory)
-  }, [])
-
-  // 监听 directory 和 search 变化
+  // 挂载 / 切服务器：确保索引可用（30s 内命中则不请求）
   useEffect(() => {
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    void sessionIndexStore.ensure(serverId)
+  }, [serverId])
 
-    // 切换目录或搜索时重置 limit
-    currentLimitRef.current = 30
-
-    searchTimerRef.current = window.setTimeout(
-      () => {
-        fetchSessions()
-      },
-      search ? 300 : 0,
-    )
-
-    return () => {
-      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
-      if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
-    }
-  }, [fetchSessions, search, currentDirectory])
-
-  // 订阅 SSE 事件，实时更新 session 列表
+  // 换目录或改搜索词：重新从第一页开始露出
   useEffect(() => {
-    const unsubscribe = subscribeToEvents({
-      onSessionCreated: data => {
-        // 忽略子 session（有 parentID 的是子 agent 创建的）
-        if (data.parentID) return
+    setLimit(LIST_PAGE_SIZE)
+  }, [currentDirectory, search])
 
-        // v2 的 session.created 负载是**创建记录**（以 sessionID 为键、带 slug/version），
-        // 不是 SessionInfo，因此回读一次拿到完整会话再入列表。
-        void getSession(data.sessionID, normalizeToForwardSlash(currentDirectory) || undefined, data.location?.directory)
-          .then(session => {
-            if (!session || !matchesCurrentDirectory(session)) return
+  const directorySessions = useMemo(() => {
+    if (!currentDirectory) return snapshot.sessions
+    return snapshot.sessions.filter(session => isSameDirectory(currentDirectory, session.location?.directory))
+  }, [snapshot.sessions, currentDirectory])
 
-            // 搜索态下交给服务端重新给出结果，避免本地过滤和服务端逻辑不一致
-            if (searchRef.current) {
-              fetchSessionsRef.current()
-              return
-            }
-
-            setSessions(prev => {
-              if (prev.some(s => s.id === session.id)) return prev
-              return [session, ...prev]
-            })
-          })
-          .catch(() => {
-            // 回读失败时退回整表刷新，保证列表不落后
-            fetchSessionsRef.current()
-          })
-      },
-      onSessionRenamed: data => {
-        // v2 把 v1 的 session.updated 收敛成 session.renamed（只有标题变化）
-        setSessions(prev => {
-          const index = prev.findIndex(s => s.id === data.sessionID)
-          if (index === -1) return prev
-          const next = [...prev]
-          next[index] = { ...next[index], title: data.title }
-          return next
-        })
-      },
-      onSessionDeleted: data => {
-        // v2 的 session.deleted 负载是 { sessionID }（v1 直接是字符串）
-        clearSessionRuntimeState(data.sessionID)
-        setSessions(prev => prev.filter(s => s.id !== data.sessionID))
-      },
-      onReconnected: reason => {
-        if (reason === 'server-switch') return
-        if (isFetchingRef.current) {
-          queuedReconnectRefreshRef.current = true
-          return
-        }
-        setSessions([])
-        fetchSessionsRef.current()
-      },
+  const filteredSessions = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    if (!term) return directorySessions
+    return directorySessions.filter(session => {
+      const title = (session.title ?? '').toLowerCase()
+      return title.includes(term) || session.id.toLowerCase().includes(term)
     })
+  }, [directorySessions, search])
 
-    return unsubscribe
-  }, [matchesCurrentDirectory])
+  const sessions = useMemo(() => filteredSessions.slice(0, limit), [filteredSessions, limit])
+  const searching = search.trim().length > 0
+  const hasMore = filteredSessions.length > limit || (!searching && snapshot.hasMore)
+  // 首帧还没发起请求时也别显示空态；请求失败后交给空态/重试入口
+  const isLoading = !snapshot.ready && !snapshot.error
 
-  useEffect(() => {
-    return serverStore.onServerChange((serverId, reason) => {
-      // 会话列表跟随 active server：非 active 服务器端点变化（WSL 重启）不影响本列表，
-      // 避免无关事件触发「清空 → 重拉」的可见闪烁；只有 active 数据源真的变了才重置
-      if (!affectsBoundServer(undefined, serverId, reason, serverStore.getActiveServerId())) return
-      currentLimitRef.current = 30
-      setSessions([])
-      void fetchSessionsRef.current()
-    })
-  }, [])
-
-  // Actions
-  const refresh = useCallback(() => fetchSessions(), [fetchSessions])
+  const refresh = useCallback(async () => {
+    await sessionIndexStore.ensure(serverId, { force: true })
+  }, [serverId])
 
   const loadMore = useCallback(async () => {
-    // 使用 ref 检查，防止并发请求
-    if (isLoadingMoreRef.current || !hasMore || sessions.length === 0) return
-    isLoadingMoreRef.current = true
-
+    if (isLoadingMore || !hasMore) return
+    setIsLoadingMore(true)
     try {
-      // 跟官方 webui 一样，递增 limit 重新请求整个列表
-      currentLimitRef.current += 15
-      setIsLoadingMore(true)
-      await fetchSessions()
+      // 本地还有没露出的先露出；本地见底了再向服务端要下一页
+      if (filteredSessions.length > limit) {
+        setLimit(current => current + LIST_PAGE_SIZE)
+        return
+      }
+      if (snapshot.hasMore) {
+        await sessionIndexStore.loadMore(serverId)
+        setLimit(current => current + LIST_PAGE_SIZE)
+      }
     } finally {
-      isLoadingMoreRef.current = false
       setIsLoadingMore(false)
     }
-  }, [hasMore, sessions, fetchSessions])
+  }, [isLoadingMore, hasMore, filteredSessions.length, limit, snapshot.hasMore, serverId])
 
   const createSession = useCallback(
     async (title?: string) => {
-      // 使用正斜杠格式传给后端
       const targetDir = normalizeToForwardSlash(currentDirectory) || undefined
-
-      const newSession = await apiCreateSession({
-        title,
-        directory: targetDir,
-      })
+      const newSession = await apiCreateSession({ title, directory: targetDir })
+      // 直接进索引，不等 SSE（新建会话已经是完整元信息）
+      if (!newSession.parentID) sessionIndexStore.upsert(serverId, newSession)
       return newSession
     },
-    [currentDirectory],
+    [currentDirectory, serverId],
   )
 
   const deleteSession = useCallback(
@@ -258,12 +107,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       await apiDeleteSession(id, targetDir)
       pinnedSessionsStore.unpin(id)
       clearSessionRuntimeState(id)
-      setSessions(prev => prev.filter(s => s.id !== id))
+      sessionIndexStore.remove(serverId, id)
     },
-    [currentDirectory],
+    [currentDirectory, serverId],
   )
 
-  // 稳定化 Provider value，避免每次渲染创建新对象导致子组件不必要重渲染
   const value = useMemo<SessionContextValue>(
     () => ({
       sessions,

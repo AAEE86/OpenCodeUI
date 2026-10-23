@@ -81,12 +81,22 @@ export async function getSessionDiff(sessionId: string, serverId?: string): Prom
 // 会话 CRUD
 // ============================================
 
+/** 一页会话列表；`next` 是下一页游标（null = 到底） */
+export interface SessionListPage {
+  data: Session[]
+  next: string | null
+}
+
 /**
- * 获取会话列表。
+ * 获取一页会话列表，保留服务端游标。
  *
- * v2 返回 `{ data, cursor }`；调用点普遍期望数组，这里返回 `data`。
+ * 翻页（loadMore）走这里：cursor 分页只取新增的一页，不必把整张表
+ * 重新拉一遍（旧实现靠 limit 递增重拉，越翻越慢）。
  */
-export async function getSessions(params: SessionListParams = {}, serverId?: string): Promise<Session[]> {
+export async function listSessionsPage(
+  params: SessionListParams = {},
+  serverId?: string,
+): Promise<SessionListPage> {
   const sdk = getSDKClient(serverId)
   const { directory, parentID, search, limit, order, cursor, project, subpath } = params
   const result = await sdk.session.list({
@@ -99,7 +109,18 @@ export async function getSessions(params: SessionListParams = {}, serverId?: str
     project,
     subpath,
   })
-  return result.data
+  return { data: result.data, next: result.cursor?.next ?? null }
+}
+
+/**
+ * 获取会话列表（数组形态）。
+ *
+ * 只要第一页的调用点（搜索、e2e）继续用它；需要翻页的列表走
+ * `listSessionsPage` 或 `sessionIndexStore`。
+ */
+export async function getSessions(params: SessionListParams = {}, serverId?: string): Promise<Session[]> {
+  const page = await listSessionsPage(params, serverId)
+  return page.data
 }
 
 /**

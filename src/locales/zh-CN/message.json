@@ -1,5 +1,6 @@
 {
   "showLess": "收起",
+  "showAll": "全部显示",
   "showMore": "展开",
   "hideSystemContext": "隐藏",
   "showSystemContext": "显示系统上下文 ({{count}})",
@@ -111,6 +112,21 @@
     "filesChanged": "{{count}} 个文件变更",
     "filesChanged_other": "{{count}} 个文件变更"
   },
+  "notice": {
+    "agentChanged": "Agent 已切换",
+    "modelSwitched": "模型已切换到 {{model}}",
+    "modelSwitchedVariant": "模型已切换到 {{model}}（{{variant}}）",
+    "movedTo": "工作目录已切换到 {{directory}}",
+    "skill": "技能",
+    "failed": "{{actor}} 失败",
+    "cancelled": "{{actor}} 已取消",
+    "finished": "{{actor}} 完成",
+    "actorShell": "Shell",
+    "actorAgent": "Agent",
+    "instructionsUpdated": "指令已更新",
+    "restart": "重启后继续执行",
+    "compactionQueued": "上下文压缩已排队"
+  },
   "subtask": {
     "running": "运行中",
     "done": "Done",
@@ -138,6 +154,8 @@
     "apiError": "API 错误",
     "apiErrorWithCode": "API 错误 ({{code}})",
     "unknownError": "错误",
-    "unknownErrorDesc": "发生未知错误。"
+    "unknownErrorDesc": "发生未知错误。",
+    "freeLimitTitle": "今日免费额度已用完",
+    "freeLimitReset": "今日免费额度已用完，将于 {{time}} 恢复"
   }
 }

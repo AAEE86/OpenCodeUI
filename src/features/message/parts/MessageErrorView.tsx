@@ -5,6 +5,7 @@ import { AlertCircleIcon, ChevronDownIcon } from '../../../components/Icons'
 import { useDisclosureScrollLock } from '../../../hooks'
 import { CodeBlock } from '../../../components/CodeBlock'
 import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
+import { useNow } from '../../../hooks/useNow'
 import { isInterruptedError, unwrapErrorMessage } from '../../../utils/errorMessage'
 import { chevronClass, MessageExpandPanel, useMessageExpandRender } from '../messageExpand'
 
@@ -12,7 +13,62 @@ interface MessageErrorViewProps {
   /** v2 原生结构化错误：`{ type, message, status?, response? }` */
   error: SessionStructuredError
   stateKey?: string
+  /** 消息时间：free-limit 用 created/completed + retryAfterMs 计算恢复时刻 */
+  time?: { created: number; completed?: number }
 }
+
+const MAX_FREE_LIMIT_RETRY_AFTER_MS = 7 * 86_400_000
+
+/** 官方 freeLimit 同款：base + retryAfterMs，越界或非法值就不显示时刻 */
+function freeLimitResetAt(
+  error: SessionStructuredError,
+  time: { created: number; completed?: number } | undefined,
+): number | undefined {
+  const delay = (error as SessionStructuredError & { retryAfterMs?: unknown }).retryAfterMs
+  const base = time?.completed ?? time?.created
+  if (
+    typeof delay !== 'number' ||
+    !Number.isFinite(delay) ||
+    delay < 0 ||
+    delay > MAX_FREE_LIMIT_RETRY_AFTER_MS ||
+    base == null ||
+    !Number.isFinite(base)
+  ) {
+    return undefined
+  }
+  const resetAt = base + delay
+  return Number.isNaN(new Date(resetAt).getTime()) ? undefined : resetAt
+}
+
+/** 免费额度耗尽：官方渲染成静默状态行，而不是错误卡片 */
+const FreeLimitNotice = memo(function FreeLimitNotice({
+  error,
+  time,
+}: {
+  error: SessionStructuredError
+  time?: { created: number; completed?: number }
+}) {
+  const { t, i18n } = useTranslation('message')
+  const resetAt = freeLimitResetAt(error, time)
+  // 恢复时刻的展示只关心“是不是今天”，按分钟刷新足够
+  const now = useNow(60_000)
+
+  let label = t('errors.freeLimitTitle')
+  if (resetAt != null) {
+    const sameDay = new Date(resetAt).toDateString() === new Date(now).toDateString() && resetAt - now < 86_400_000
+    const formatted = new Intl.DateTimeFormat(
+      i18n.language,
+      sameDay ? { timeStyle: 'short' } : { dateStyle: 'medium', timeStyle: 'short' },
+    ).format(resetAt)
+    label = t('errors.freeLimitReset', { time: formatted })
+  }
+
+  return (
+    <div role="status" className="px-3 py-2 text-[length:var(--fs-sm)] text-text-500">
+      {label}
+    </div>
+  )
+})
 
 /**
  * 消息级别的错误显示（紧凑折叠式）
@@ -22,7 +78,7 @@ interface MessageErrorViewProps {
  * `type` 的关键字（abort / length / auth）与是否存在 HTTP status 分支，
  * 与 v1 那套 `MessageError` 联合表达的语义一一对应。
  */
-export const MessageErrorView = memo(function MessageErrorView({ error, stateKey }: MessageErrorViewProps) {
+const StructuredErrorView = memo(function StructuredErrorView({ error, stateKey }: MessageErrorViewProps) {
   const { t } = useTranslation('message')
   const { title, description, details, severity } = getErrorInfo(error, t)
   const hasDetails = !!(details || description)
@@ -76,6 +132,12 @@ export const MessageErrorView = memo(function MessageErrorView({ error, stateKey
       </MessageExpandPanel>
     </div>
   )
+})
+
+export const MessageErrorView = memo(function MessageErrorView({ error, stateKey, time }: MessageErrorViewProps) {
+  if (error.type === 'provider.free-limit') return <FreeLimitNotice error={error} time={time} />
+
+  return <StructuredErrorView error={error} stateKey={stateKey} />
 })
 
 /**

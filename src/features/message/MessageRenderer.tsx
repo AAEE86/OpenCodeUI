@@ -24,8 +24,10 @@ import {
   StepFinishPartView,
   RetryPartView,
   CompactionPartView,
+  TimelineNoticeView,
   MessageErrorView,
   type StepFinishInfo,
+  type NoticeMessage,
 } from './parts'
 import { CollapsibleUserText, USER_HTML_ARTIFACT_PATTERN } from './CollapsibleUserText'
 import { extractToolData, type ToolViewPart } from './tools'
@@ -341,11 +343,28 @@ export const MessageRenderer = memo(function MessageRenderer({
     if (message.outcome === 'failed' && idleError) {
       return (
         <div className="flex flex-col w-full">
-          <MessageErrorView error={idleError} stateKey={`message:${message.id}:error`} />
+          <MessageErrorView
+            error={idleError}
+            stateKey={`message:${message.id}:error`}
+            time={{ created: message.time.created }}
+          />
         </div>
       )
     }
     return null
+  }
+
+  // 提示行：模型 / agent / 工作目录切换、skill、系统指令、synthetic 上下文
+  // （官方 timeline 的 Notice 行；可见性由 chatAreaVisibility.isNoticeMessage 判定）
+  if (
+    message.type === 'system' ||
+    message.type === 'synthetic' ||
+    message.type === 'skill' ||
+    message.type === 'agent-switched' ||
+    message.type === 'model-switched' ||
+    message.type === 'location-switched'
+  ) {
+    return <TimelineNoticeView message={message as NoticeMessage} />
   }
 
   if (message.type !== 'assistant') return null
@@ -694,7 +713,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
     if (messageError) {
       return (
         <div className={`flex flex-col ${MSG_SPACING.stack} w-full`}>
-          <MessageErrorView error={messageError} stateKey={`message:${message.id}:error`} />
+          <MessageErrorView error={messageError} stateKey={`message:${message.id}:error`} time={message.time} />
         </div>
       )
     }
@@ -770,7 +789,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
 
       {/* Message-level error：过程壳内不重复挂错误 */}
       {messageError && processContentScope !== 'process' && processContentScope !== 'inline' && (
-        <MessageErrorView error={messageError} stateKey={`message:${message.id}:error`} />
+        <MessageErrorView error={messageError} stateKey={`message:${message.id}:error`} time={message.time} />
       )}
 
       {processContentScope !== 'process' &&

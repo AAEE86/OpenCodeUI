@@ -1,6 +1,7 @@
 import type { AssistantMessage, SessionMessageInfo, ToolState, UserMessage } from '../../types/api/message'
 import { contentEntries, isAssistantMessage, isFailedIdleMessage, isUserMessage, userMessageText } from '../../types/api/message'
 import { isInterruptedError } from '../../utils/errorMessage'
+import { isNoticeMessage } from './chatAreaVisibility'
 
 export const PAGE_MESSAGE_COUNT = 20
 export const PAGE_EXTREME_RENDER_WEIGHT = 700
@@ -767,6 +768,14 @@ export type ProcessTimelineItem =
       /** 壳外最终回答（结束后才有） */
       finalMessage?: SessionMessageInfo
     }
+  | {
+      /** 回合结束后的文件变更摘要（官方 TurnDiff 行） */
+      kind: 'turn-diff'
+      key: string
+      userMessageId: string
+      /** 该回合里各 step 记录到的变更文件（去重排序） */
+      files: string[]
+    }
 
 /** 两行是否可共享同一对象（VirtualRow 靠 item 引用短路） */
 export function sameProcessTimelineItem(a: ProcessTimelineItem, b: ProcessTimelineItem): boolean {
@@ -796,6 +805,14 @@ export function sameProcessTimelineItem(a: ProcessTimelineItem, b: ProcessTimeli
       }
     }
     return true
+  }
+
+  if (a.kind === 'turn-diff' && b.kind === 'turn-diff') {
+    return (
+      a.userMessageId === b.userMessageId &&
+      a.files.length === b.files.length &&
+      a.files.every((file, index) => file === b.files[index])
+    )
   }
 
   return false
@@ -829,6 +846,72 @@ export function reuseProcessTimelineItems(
   }
 
   return allSame ? previous : result
+}
+
+/** 一个回合里所有 step 记录到的变更文件（去重、排序，官方 sort 同款） */
+function collectTurnFiles(assistants: AssistantMessage[]): string[] {
+  const files = new Set<string>()
+  for (const message of assistants) {
+    for (const file of message.snapshot?.files ?? []) files.add(file)
+  }
+  return [...files].sort()
+}
+
+/**
+ * 平铺模式（processCollapseEnabled=false）：一行一条消息。
+ *
+ * 回合结束后仍要补一条文件变更摘要（官方 TurnDiff 行），否则关掉过程折叠
+ * 就看不出这轮改了什么。`isStreaming` 为 true 时最后一个回合还没结束，
+ * 先不显示（官方也是 idle 之后才追加）。
+ */
+export function buildFlatTimeline(
+  messages: SessionMessageInfo[],
+  sessionIsStreaming: boolean,
+): ProcessTimelineItem[] {
+  const items: ProcessTimelineItem[] = messages.map(message => ({
+    kind: 'message',
+    key: message.id,
+    message,
+  }))
+
+  const turns: Array<{ userId: string; lastIndex: number; files: Set<string> }> = []
+  let current: (typeof turns)[number] | null = null
+
+  messages.forEach((message, index) => {
+    if (isUserMessage(message)) {
+      if (current) turns.push(current)
+      current = { userId: message.id, lastIndex: index, files: new Set() }
+      return
+    }
+    if (!current) return
+    current.lastIndex = index
+    if (isAssistantMessage(message)) {
+      for (const file of message.snapshot?.files ?? []) current.files.add(file)
+    }
+  })
+  if (current) turns.push(current)
+
+  const diffByIndex = new Map<number, { userId: string; files: string[] }>()
+  turns.forEach((turn, index) => {
+    if (turn.files.size === 0) return
+    if (index === turns.length - 1 && sessionIsStreaming) return
+    diffByIndex.set(turn.lastIndex, { userId: turn.userId, files: [...turn.files].sort() })
+  })
+  if (diffByIndex.size === 0) return items
+
+  const result: ProcessTimelineItem[] = []
+  items.forEach((item, index) => {
+    result.push(item)
+    const diff = diffByIndex.get(index)
+    if (!diff) return
+    result.push({
+      kind: 'turn-diff',
+      key: `turn-diff:${diff.userId}`,
+      userMessageId: diff.userId,
+      files: diff.files,
+    })
+  })
+  return result
 }
 
 function assistantHasLiveWork(message: AssistantMessage): boolean {
@@ -899,6 +982,11 @@ export function buildProcessTimeline(
   type TurnBag = {
     user: UserMessage | null
     assistants: AssistantMessage[]
+    /**
+     * 提示行（模型/agent 切换、skill、system、synthetic）。`at` = 出现时的
+     * assistant 数量：0 表示排在本回合过程壳之前，>0 表示之后。
+     */
+    notices: Array<{ at: number; message: SessionMessageInfo }>
     /** 独立成行的消息（shell 命令等）：不进任何回合壳，按原位平铺 */
     standalone?: SessionMessageInfo
     /**
@@ -914,7 +1002,7 @@ export function buildProcessTimeline(
   for (const message of visibleMessages) {
     if (isUserMessage(message)) {
       if (current) turns.push(current)
-      current = { user: message, assistants: [] }
+      current = { user: message, assistants: [], notices: [] }
       continue
     }
     // shell 命令消息独立成行（官方 projection.ts:188：shell 是独立 timeline 行），
@@ -924,7 +1012,13 @@ export function buildProcessTimeline(
         turns.push(current)
         current = null
       }
-      turns.push({ user: null, assistants: [], standalone: message })
+      turns.push({ user: null, assistants: [], notices: [], standalone: message })
+      continue
+    }
+    // 提示行：跟当前回合走（官方放进 turn 的 entries），没有回合就独立平铺
+    if (isNoticeMessage(message)) {
+      if (current) current.notices.push({ at: current.assistants.length, message })
+      else items.push({ kind: 'message', key: message.id, message })
       continue
     }
     // 失败的 idle 标记：会话级错误（如 prompt 没能提升成 assistant 工作）只在这条
@@ -1005,6 +1099,15 @@ export function buildProcessTimeline(
     items.push({ kind: 'message', key: failedIdle.id, message: failedIdle })
   }
 
+  /** 提示行跟随回合：0 的排在过程壳前，其余排在壳后 */
+  const emitNotices = (turn: TurnBag, beforeFirstAssistant: boolean) => {
+    for (const notice of turn.notices) {
+      if ((notice.at === 0) === beforeFirstAssistant) {
+        items.push({ kind: 'message', key: notice.message.id, message: notice.message })
+      }
+    }
+  }
+
   for (const turn of turns) {
     if (turn.standalone) {
       items.push({ kind: 'message', key: turn.standalone.id, message: turn.standalone })
@@ -1016,18 +1119,23 @@ export function buildProcessTimeline(
 
     const assistants = turn.assistants
     if (!turn.user && assistants.length === 0) {
+      emitNotices(turn, true)
       appendFailedIdle(turn)
       continue
     }
 
     // 无 user 的续段：平铺
     if (!turn.user) {
+      emitNotices(turn, true)
       for (const m of assistants) {
         items.push({ kind: 'message', key: m.id, message: m })
       }
+      emitNotices(turn, false)
       appendFailedIdle(turn)
       continue
     }
+
+    emitNotices(turn, true)
 
     const userId = turn.user.id
     const turnIsActive = activeUserId != null && userId === activeUserId
@@ -1083,6 +1191,16 @@ export function buildProcessTimeline(
     } else {
       for (const m of assistants) {
         items.push({ kind: 'message', key: m.id, message: m })
+      }
+    }
+
+    emitNotices(turn, false)
+
+    // 回合结束后追加文件变更摘要（官方 TurnDiff：idle 后按 snapshot.files 汇总）
+    if (!turnIsActive) {
+      const files = collectTurnFiles(assistants)
+      if (files.length > 0) {
+        items.push({ kind: 'turn-diff', key: `turn-diff:${userId}`, userMessageId: userId, files })
       }
     }
 

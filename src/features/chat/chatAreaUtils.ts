@@ -21,7 +21,9 @@ export function getTimelineRowYClass(
   prev?: ProcessTimelineItem,
   next?: ProcessTimelineItem,
 ): string {
-  if (item.kind === 'process-shell' || isUserMessage(item.message)) return ROW_Y_TURN
+  if (item.kind === 'process-shell') return ROW_Y_TURN
+  if (item.kind === 'turn-diff') return ROW_Y_ASSISTANT_STACK
+  if (isUserMessage(item.message)) return ROW_Y_TURN
 
   const prevAssistant = isAssistantMessageItem(prev)
   const nextAssistant = isAssistantMessageItem(next)

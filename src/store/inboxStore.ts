@@ -14,7 +14,9 @@ import type { SessionInboxInfo, SessionInboxDelivery } from '@opencode/client/pr
 
 const EMPTY_ITEMS: SessionInboxInfo[] = []
 type QueuedUserPrompt = Extract<SessionInboxInfo, { type: 'user' }>
+type QueuedCompaction = Extract<SessionInboxInfo, { type: 'compaction' }>
 const EMPTY_QUEUE: QueuedUserPrompt[] = []
+const EMPTY_COMPACTIONS: QueuedCompaction[] = []
 
 class InboxStore {
   private itemsBySession = new Map<string, SessionInboxInfo[]>()
@@ -167,7 +169,7 @@ class InboxStore {
 }
 
 export const inboxStore = new InboxStore()
-export type { QueuedUserPrompt }
+export type { QueuedUserPrompt, QueuedCompaction }
 
 /** 官方 queuedPromptText 同款：优先 metadata.displayText */
 export function queuedPromptText(item: QueuedUserPrompt): string {
@@ -181,6 +183,21 @@ export function useInboxUserPrompts(sessionId: string | null): QueuedUserPrompt[
   return useMemo(() => {
     if (!sessionId) return EMPTY_QUEUE
     return (snapshot.get(sessionId) ?? EMPTY_ITEMS).filter((item): item is QueuedUserPrompt => item.type === 'user')
+  }, [sessionId, snapshot])
+}
+
+/**
+ * 服务端已接收、尚未开始的压缩（官方 `session.pending` 里 type=compaction 的条目）。
+ * 官方在时间线上画一条 "Session compaction queued" 分隔行；不接的话，压缩排队期间
+ * UI 完全没反应，只能等 compaction.started 到达才出现。
+ */
+export function useInboxCompactions(sessionId: string | null): QueuedCompaction[] {
+  const snapshot = useSyncExternalStore(inboxStore.subscribe, inboxStore.getSnapshot)
+  return useMemo(() => {
+    if (!sessionId) return EMPTY_COMPACTIONS
+    return (snapshot.get(sessionId) ?? EMPTY_ITEMS).filter(
+      (item): item is QueuedCompaction => item.type === 'compaction',
+    )
   }, [sessionId, snapshot])
 }
 

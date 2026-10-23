@@ -306,6 +306,7 @@ export const ChatPane = memo(function ChatPane({
     pendingQuestionRequests,
     pendingWebsearchRequest,
     queuedPrompts,
+    queuedCompactions,
     inboxUserPrompts,
     busyDelivery,
     setBusyDelivery,
@@ -1061,6 +1062,7 @@ export const ChatPane = memo(function ChatPane({
                 registerMessage={registerMessage}
                 retryStatus={retryStatus}
                 queuedFollowUps={queuedPrompts}
+                queuedCompactions={queuedCompactions}
                 queueEditingId={queueEditing?.item.id}
                 queueMutation={queueMutation}
                 onQueueSteer={handleSteerQueuedPrompt}

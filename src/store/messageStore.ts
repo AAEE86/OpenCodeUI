@@ -935,7 +935,7 @@ class MessageStore {
     message.providerState = data.providerState
     message.cost = data.cost
     message.tokens = data.tokens
-    if (data.snapshot) message.snapshot = { ...message.snapshot, end: data.snapshot }
+    this.mergeSnapshot(message, data.snapshot, data.files)
 
     this.markMessageDirty(sessionID, assistantMessageID)
     this.notify([sessionID])
@@ -958,6 +958,7 @@ class MessageStore {
       message.cost = data.cost
       message.tokens = data.tokens
     }
+    this.mergeSnapshot(message, data.snapshot, data.files)
 
     this.markMessageDirty(sessionID, assistantMessageID)
     this.notify([sessionID])
@@ -1770,6 +1771,22 @@ class MessageStore {
   private findAssistant(state: SessionState, messageID: string): AssistantMessage | undefined {
     const message = this.findMessage(state, messageID)
     return message?.type === 'assistant' ? message : undefined
+  }
+
+  /**
+   * 合并 step 产出的快照事实。
+   *
+   * `session.step.ended/failed` 的 `snapshot` 是 step 末快照 id，`files` 是本 step
+   * 改动过的文件。回合级「N 个文件变更」提示要用这份列表（官方用
+   * `message.snapshot.files`），所以不能只记住 end。
+   */
+  private mergeSnapshot(message: AssistantMessage, snapshot?: string, files?: string[]) {
+    if (!snapshot && (files?.length ?? 0) === 0) return
+    message.snapshot = {
+      ...message.snapshot,
+      ...(snapshot ? { end: snapshot } : {}),
+      ...(files && files.length > 0 ? { files } : {}),
+    }
   }
 
   /** 官方 `message.activeAssistant`：最后一条还没定稿的助手消息 */

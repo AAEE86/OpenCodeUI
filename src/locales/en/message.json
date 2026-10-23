@@ -1,5 +1,6 @@
 {
   "showLess": "Show less",
+  "showAll": "Show all",
   "showMore": "Show more",
   "hideSystemContext": "Hide",
   "showSystemContext": "Show system context ({{count}})",
@@ -139,6 +140,21 @@
     "filesChanged": "{{count}} file changed",
     "filesChanged_other": "{{count}} files changed"
   },
+  "notice": {
+    "agentChanged": "Agent changed",
+    "modelSwitched": "Switched to {{model}}",
+    "modelSwitchedVariant": "Switched to {{model}} ({{variant}})",
+    "movedTo": "Moved to {{directory}}",
+    "skill": "Skill",
+    "failed": "{{actor}} failed",
+    "cancelled": "{{actor}} cancelled",
+    "finished": "{{actor}} finished",
+    "actorShell": "Shell",
+    "actorAgent": "Agent",
+    "instructionsUpdated": "Instructions updated",
+    "restart": "Continuing after restart",
+    "compactionQueued": "Session compaction queued"
+  },
   "subtask": {
     "running": "Running",
     "done": "Done",
@@ -166,6 +182,8 @@
     "apiError": "API Error",
     "apiErrorWithCode": "API Error ({{code}})",
     "unknownError": "Error",
-    "unknownErrorDesc": "An unknown error occurred."
+    "unknownErrorDesc": "An unknown error occurred.",
+    "freeLimitTitle": "You've used today's free messages.",
+    "freeLimitReset": "You've used today's free messages. They reset at {{time}}."
   }
 }

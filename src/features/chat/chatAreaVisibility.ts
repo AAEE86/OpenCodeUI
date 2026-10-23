@@ -7,6 +7,7 @@ import {
   isUserMessage,
   userMessageText,
 } from '../../types/api/message'
+import { shellResultFailed } from '../../types/api'
 import { isInterruptedError } from '../../utils/errorMessage'
 
 function isVisibleThinking(content: AssistantContent): boolean {
@@ -28,6 +29,35 @@ function userMessageHasRenderableContent(message: UserMessage): boolean {
   )
 }
 
+/** synthetic 的可见性：官方 timelineNoticeRequired（错误 / shell 失败必须露出） */
+function syntheticNoticeRequired(message: Extract<SessionMessageInfo, { type: 'synthetic' }>): boolean {
+  const metadata = message.metadata as Record<string, unknown> | undefined
+  return (
+    metadata?.['state'] === 'error' ||
+    (metadata?.['source'] === 'shell' && metadata?.['state'] === 'completed' && shellResultFailed(metadata))
+  )
+}
+
+/**
+ * 官方 projection.ts 的 `isNotice`：正文之外的记录行（切换记录 / 系统提示 /
+ * 技能 / 合成上下文）。它们也是一条消息，只是渲染成细提示行。
+ *
+ * synthetic 特殊：没有 description 的纯上下文（如注入的规则文本）默认不占行，
+ * 但错误与 shell 失败必须可见，否则信息流里会凭空少一条失败记录。
+ */
+export function isNoticeMessage(message: SessionMessageInfo): boolean {
+  if (message.type === 'synthetic') {
+    return !!message.description?.trim() || syntheticNoticeRequired(message)
+  }
+  return (
+    message.type === 'system' ||
+    message.type === 'skill' ||
+    message.type === 'agent-switched' ||
+    message.type === 'model-switched' ||
+    message.type === 'location-switched'
+  )
+}
+
 /** 对应旧视图模型的 `message.parts.length !== 0`（原始存在性，不做 trim） */
 function hasAnyContent(message: SessionMessageInfo): boolean {
   if (isUserMessage(message)) return userMessageHasAnyContent(message)
@@ -35,6 +65,8 @@ function hasAnyContent(message: SessionMessageInfo): boolean {
   if (message.type === 'compaction') return true
   // `!` shell 命令消息：command + 状态即内容（官方 timeline 里独立成行）
   if (message.type === 'shell') return true
+  // 切换记录 / 系统提示 / 技能 / 合成上下文：官方 timeline 的 Notice 行
+  if (isNoticeMessage(message)) return true
   return false
 }
 
@@ -50,6 +82,7 @@ function hasRenderableContent(message: SessionMessageInfo): boolean {
   }
   if (message.type === 'compaction') return true
   if (message.type === 'shell') return true
+  if (isNoticeMessage(message)) return true
   return false
 }
 

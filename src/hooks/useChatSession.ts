@@ -73,7 +73,7 @@ import { createMessageId } from '../utils/identifier'
 import { serverStore } from '../store/serverStore'
 import { STORAGE_KEY_SELECTED_AGENT } from '../constants'
 import type { ChatAreaHandle } from '../features/chat'
-import { inboxStore, useInboxUserPrompts, queuedPromptText } from '../store/inboxStore'
+import { inboxStore, useInboxUserPrompts, useInboxCompactions, queuedPromptText } from '../store/inboxStore'
 import type { QueuedUserPrompt } from '../store/inboxStore'
 import { themeStore } from '../store/themeStore'
 
@@ -212,6 +212,8 @@ export function useChatSession({
   // 队列视图只列 queue 条目（官方 queue.ts:83 同款过滤）；steer 条目是瞬态的，
   // 其回声由转写投影（projectQueueEchoes）挪到末尾展示
   const queuedPrompts = useMemo(() => inboxUserPrompts.filter(item => item.delivery === 'queue'), [inboxUserPrompts])
+  // 排队中的压缩（官方 CompactionQueued 行）：只在服务端已接收、尚未开始时存在
+  const queuedCompactions = useInboxCompactions(routeSessionId)
 
   const perSessionStateRaw = useSessionState(routeSessionId)
   const perSessionState = perSessionStateRaw ?? EMPTY_SESSION_STATE
@@ -1640,6 +1642,7 @@ export function useChatSession({
     pendingWebsearchRequest,
     queuedPrompts,
     inboxUserPrompts,
+    queuedCompactions,
     busyDelivery,
     setBusyDelivery,
     composerDraft,

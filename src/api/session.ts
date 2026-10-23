@@ -77,6 +77,34 @@ export async function getSessionDiff(sessionId: string, serverId?: string): Prom
   return normalizeFileDiffs(diffs)
 }
 
+/** 单轮 diff 的 in-flight 去重（虚拟列表来回挂载时不重复请求） */
+const inflightTurnDiffs = new Map<string, Promise<FileDiff[]>>()
+
+/**
+ * 取某一轮（从指定 user message 起）的文件 diff。
+ *
+ * 官方 timeline 的 TurnDiff 行用 `session.diff({ sessionID, from })`，
+ * `from` 是该轮用户消息 id。返回的 patch 可直接交给 DiffView 渲染。
+ */
+export async function getTurnDiff(sessionId: string, from: string, serverId?: string): Promise<FileDiff[]> {
+  const target = resolveSessionTarget(sessionId, serverId)
+  const key = `${target.serverId}:${target.sessionId}:${from}`
+  const inflight = inflightTurnDiffs.get(key)
+  if (inflight) return inflight
+
+  const request = (async () => {
+    try {
+      const sdk = getSDKClient(target.serverId)
+      const diffs = await sdk.session.diff({ sessionID: target.sessionId, from })
+      return normalizeFileDiffs(diffs)
+    } finally {
+      inflightTurnDiffs.delete(key)
+    }
+  })()
+  inflightTurnDiffs.set(key, request)
+  return request
+}
+
 // ============================================
 // 会话 CRUD
 // ============================================

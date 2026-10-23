@@ -14,6 +14,7 @@ import {
   reconcileStableChatPages,
   reuseProcessTimelineItems,
   seedMeasuredPageHeightsFromPreviousPages,
+  buildFlatTimeline,
 } from './chatPageModel'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
 import { buildVisibleMessageEntries, getVisibleMessageForkTargetId } from './chatAreaVisibility'
@@ -113,6 +114,45 @@ describe('buildVisibleMessageEntries', () => {
 
     expect(entries.some(e => e.message.id === 'idle-ok')).toBe(false)
     expect(entries.some(e => e.message.id === 'idle-abort')).toBe(false)
+  })
+
+  it('keeps timeline notices visible (switch records / system / skill / synthetic)', () => {
+    const notices = [
+      { id: 'agent-switch', type: 'agent-switched', agent: 'plan', time: { created: 2 } },
+      {
+        id: 'model-switch',
+        type: 'model-switched',
+        model: { providerID: 'openai', id: 'gpt-5' },
+        time: { created: 3 },
+      },
+      { id: 'skill', type: 'skill', skill: 'pdf', name: 'PDF', text: '', time: { created: 4 } },
+      {
+        id: 'system',
+        type: 'system',
+        text: 'x',
+        description: 'Instructions updated: AGENTS.md',
+        time: { created: 5 },
+      },
+      { id: 'synthetic', type: 'synthetic', text: 'ctx', description: 'Explore finished', time: { created: 6 } },
+      // 纯注入上下文没有 description：默认不占行（官方 isNotice 同款）
+      { id: 'synthetic-context', type: 'synthetic', text: 'raw context', time: { created: 7 } },
+      // 但错误状态必须露出
+      {
+        id: 'synthetic-error',
+        type: 'synthetic',
+        text: 'failed',
+        metadata: { state: 'error' },
+        time: { created: 8 },
+      },
+    ] as SessionMessageInfo[]
+
+    const entries = buildVisibleMessageEntries([createUserMessage('user-1', 1, '你好'), ...notices])
+    const ids = entries.map(entry => entry.message.id)
+
+    expect(ids).toEqual(
+      expect.arrayContaining(['agent-switch', 'model-switch', 'skill', 'system', 'synthetic', 'synthetic-error']),
+    )
+    expect(ids).not.toContain('synthetic-context')
   })
 
   it('keeps source ids for merged assistant tool messages', () => {
@@ -668,6 +708,33 @@ describe('buildProcessTimeline', () => {
     }
   })
 
+  it('keeps notices outside the process shell, before/after by position', () => {
+    const agentSwitch = {
+      id: 'agent-switch',
+      type: 'agent-switched',
+      agent: 'plan',
+      time: { created: 1000 },
+    } as SessionMessageInfo
+    const assistant = createAssistantMessage('assistant-1', [createToolPart('tool-1', 'assistant-1')], 1001, 1002)
+    const skill = {
+      id: 'skill-1',
+      type: 'skill',
+      skill: 'pdf',
+      name: 'PDF',
+      text: '',
+      time: { created: 1003 },
+    } as SessionMessageInfo
+    const messages = [createUserMessage('user-1', 1000), agentSwitch, assistant, skill]
+    const timeline = buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    expect(timeline.map(item => item.key)).toEqual(['user-1', 'agent-switch', 'process-shell:user-1', 'skill-1'])
+  })
+
   it('does not duplicate the error card when the last assistant already shows it', () => {
     // assistant.error 已由 MessageErrorView 渲染 → idle 卡片跳过（官方同款去重）
     const failedAssistant = createAssistantMessage(
@@ -946,6 +1013,71 @@ describe('buildProcessTimeline', () => {
 
     expect(timeline.map(item => item.kind)).toEqual(['message', 'message'])
     expect(timeline[1]).toMatchObject({ kind: 'message', key: 'assistant-1' })
+  })
+
+  it('appends a turn diff after a settled turn with changed files', () => {
+    const assistant = createAssistantMessage('assistant-1', [createToolPart('tool-1', 'assistant-1')], 1001, 1002)
+    assistant.snapshot = { files: ['b.ts', 'a.ts', 'a.ts'] }
+    const messages = [createUserMessage('user-1', 1000), assistant]
+    const timeline = buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    expect(timeline.at(-1)).toMatchObject({
+      kind: 'turn-diff',
+      userMessageId: 'user-1',
+      files: ['a.ts', 'b.ts'],
+    })
+  })
+
+  it('does not append a turn diff while the turn is still running', () => {
+    const assistant = createAssistantMessage('assistant-1', [createToolPart('tool-1', 'assistant-1')])
+    assistant.snapshot = { files: ['a.ts'] }
+    const messages = [createUserMessage('user-1', 1000), assistant]
+    const timeline = buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: true,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+      isUserEntryReady: () => true,
+    })
+
+    expect(timeline.some(item => item.kind === 'turn-diff')).toBe(false)
+  })
+})
+
+describe('buildFlatTimeline', () => {
+  it('keeps messages flat and inserts a turn diff for settled turns', () => {
+    const first = createAssistantMessage('assistant-1', [{ type: 'text', text: 'done' }], 1001, 1002)
+    first.snapshot = { files: ['src/a.ts'] }
+    const second = createAssistantMessage('assistant-2', [{ type: 'text', text: 'working' }], 2001)
+    const messages = [
+      createUserMessage('user-1', 1000),
+      first,
+      createUserMessage('user-2', 2000),
+      second,
+    ]
+
+    const timeline = buildFlatTimeline(messages, true)
+    expect(timeline.filter(item => item.kind === 'message')).toHaveLength(4)
+    expect(timeline.find(item => item.kind === 'turn-diff')).toMatchObject({
+      userMessageId: 'user-1',
+      files: ['src/a.ts'],
+    })
+    // 最后一个回合还在跑：不放摘要
+    expect(timeline.filter(item => item.kind === 'turn-diff')).toHaveLength(1)
+  })
+
+  it('adds the last turn diff once streaming ends', () => {
+    const assistant = createAssistantMessage('assistant-1', [{ type: 'text', text: 'done' }], 1001, 1002)
+    assistant.snapshot = { files: ['src/a.ts'] }
+    const messages = [createUserMessage('user-1', 1000), assistant]
+
+    expect(buildFlatTimeline(messages, true).some(item => item.kind === 'turn-diff')).toBe(false)
+    expect(buildFlatTimeline(messages, false).some(item => item.kind === 'turn-diff')).toBe(true)
   })
 })
 

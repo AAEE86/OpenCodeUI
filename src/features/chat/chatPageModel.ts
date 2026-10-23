@@ -1014,6 +1014,17 @@ export function buildProcessTimeline(
       turns.push({ user: null, assistants: [], notices: [], standalone: message })
       continue
     }
+    // 压缩消息独立成行（官方 projection：compaction 是独立 timeline entry），
+    // 并结束当前回合，避免压缩摘要被算进上一回合的过程壳。
+    // 漏掉这个分支会让压缩消息直接掉出时间线——压缩了但 UI 什么都不显示。
+    if (message.type === 'compaction') {
+      if (current) {
+        turns.push(current)
+        current = null
+      }
+      turns.push({ user: null, assistants: [], notices: [], standalone: message })
+      continue
+    }
     // 提示行：跟当前回合走（官方放进 turn 的 entries），没有回合就独立平铺
     if (isNoticeMessage(message)) {
       if (current) current.notices.push({ at: current.assistants.length, message })

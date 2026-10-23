@@ -157,14 +157,22 @@ describe('buildVisibleMessageEntries', () => {
     expect(ids).not.toContain('synthetic-context')
   })
 
-  it('hides timeline notices by default (setting off)', () => {
+  it('hides timeline notices by default but keeps synthetic failures', () => {
     const entries = buildVisibleMessageEntries([
       createUserMessage('user-1', 1, '你好'),
       { id: 'agent-switch', type: 'agent-switched', agent: 'plan', time: { created: 2 } } as SessionMessageInfo,
       { id: 'skill', type: 'skill', skill: 'pdf', name: 'PDF', text: '', time: { created: 3 } } as SessionMessageInfo,
+      {
+        id: 'synthetic-error',
+        type: 'synthetic',
+        text: 'failed',
+        metadata: { state: 'error' },
+        time: { created: 4 },
+      } as SessionMessageInfo,
     ])
 
-    expect(entries.map(entry => entry.message.id)).toEqual(['user-1'])
+    // 普通提示默认关；错误是失败唯一记录，必须无条件露出
+    expect(entries.map(entry => entry.message.id)).toEqual(['user-1', 'synthetic-error'])
   })
 
   it('keeps source ids for merged assistant tool messages', () => {
@@ -745,6 +753,35 @@ describe('buildProcessTimeline', () => {
     })
 
     expect(timeline.map(item => item.key)).toEqual(['user-1', 'agent-switch', 'process-shell:user-1', 'skill-1'])
+  })
+
+  it('renders a compaction message as its own timeline row', () => {
+    // 回归：compaction 既不是 assistant 也不是 notice，早先被 timeline 构建直接跳过，
+    // 导致服务端明明压缩了、UI 刷新也看不到任何压缩记录。
+    const before = createAssistantMessage('assistant-before', [createToolPart('tool-1', 'assistant-before')], 1001, 1002)
+    const compaction = {
+      id: 'compaction-1',
+      type: 'compaction',
+      status: 'completed',
+      reason: 'manual',
+      summary: '压缩完成',
+      time: { created: 1003 },
+    } as SessionMessageInfo
+    const messages = [createUserMessage('user-1', 1000), before, compaction, createUserMessage('user-2', 1004)]
+    const timeline = buildProcessTimeline(messages, {
+      turnDurationMap: new Map(),
+      sessionIsStreaming: false,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+    })
+
+    const compactionItem = timeline.find(item => item.key === 'compaction-1')
+    expect(compactionItem).toMatchObject({ kind: 'message', key: 'compaction-1' })
+    // 压缩行独立，不塞进上一回合的过程壳
+    const shell = timeline.find(item => item.kind === 'process-shell')
+    if (shell?.kind === 'process-shell') {
+      expect(shell.children.some(child => child.message.id === 'compaction-1')).toBe(false)
+    }
   })
 
   it('does not duplicate the error card when the last assistant already shows it', () => {

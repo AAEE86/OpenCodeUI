@@ -20,12 +20,20 @@ function isVisibleText(content: AssistantContent): boolean {
 
 /** 用户消息在 v2 里自带正文与附件 */
 function userMessageHasAnyContent(message: UserMessage): boolean {
-  return userMessageText(message).length > 0 || (message.files?.length ?? 0) > 0 || (message.agents?.length ?? 0) > 0
+  return (
+    userMessageText(message).length > 0 ||
+    (message.files?.length ?? 0) > 0 ||
+    (message.agents?.length ?? 0) > 0 ||
+    (message.skills?.length ?? 0) > 0
+  )
 }
 
 function userMessageHasRenderableContent(message: UserMessage): boolean {
   return (
-    userMessageText(message).trim().length > 0 || (message.files?.length ?? 0) > 0 || (message.agents?.length ?? 0) > 0
+    userMessageText(message).trim().length > 0 ||
+    (message.files?.length ?? 0) > 0 ||
+    (message.agents?.length ?? 0) > 0 ||
+    (message.skills?.length ?? 0) > 0
   )
 }
 
@@ -36,6 +44,18 @@ function syntheticNoticeRequired(message: Extract<SessionMessageInfo, { type: 's
     metadata?.['state'] === 'error' ||
     (metadata?.['source'] === 'shell' && metadata?.['state'] === 'completed' && shellResultFailed(metadata))
   )
+}
+
+/**
+ * 提示行是否要占位。
+ * - 普通切换 / 技能 / 指令更新：受「显示会话事件提示」开关控制，默认关。
+ * - synthetic 错误 / shell 失败：是唯一能证明失败发生过的记录，不受开关影响，
+ *   否则用户关掉提示后，失败就完全不可见了。
+ */
+function noticeVisible(message: SessionMessageInfo, showNotices: boolean): boolean {
+  if (!isNoticeMessage(message)) return false
+  if (message.type === 'synthetic' && syntheticNoticeRequired(message)) return true
+  return showNotices
 }
 
 /**
@@ -66,7 +86,7 @@ function hasAnyContent(message: SessionMessageInfo, showNotices: boolean): boole
   // `!` shell 命令消息：command + 状态即内容（官方 timeline 里独立成行）
   if (message.type === 'shell') return true
   // 切换记录 / 系统提示 / 技能 / 合成上下文：官方 timeline 的 Notice 行
-  if (showNotices && isNoticeMessage(message)) return true
+  if (noticeVisible(message, showNotices)) return true
   return false
 }
 
@@ -82,7 +102,7 @@ function hasRenderableContent(message: SessionMessageInfo, showNotices: boolean)
   }
   if (message.type === 'compaction') return true
   if (message.type === 'shell') return true
-  if (showNotices && isNoticeMessage(message)) return true
+  if (noticeVisible(message, showNotices)) return true
   return false
 }
 

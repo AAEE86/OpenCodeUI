@@ -311,6 +311,7 @@ const FilesContent = memo(function FilesContent({
             serverId={serverId}
             previewFile={tab.previewFile ?? null}
             previewFiles={tab.previewFiles ?? []}
+            previewActive={tab.previewActive}
             position="bottom"
             isPanelResizing={isPanelResizing}
             sessionId={sessionId}

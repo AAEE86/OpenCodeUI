@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useFileExplorer, type FileTreeNode } from '../hooks'
 import { useVerticalSplitResize } from '../hooks/useVerticalSplitResize'
-import { layoutStore, previewMatchesDirectory, type PreviewFile } from '../store/layoutStore'
+import { layoutStore, previewMatchesDirectory, type PreviewActiveEntry, type PreviewFile } from '../store/layoutStore'
 import {
   ChevronRightIcon,
   ChevronDownIcon,
@@ -95,6 +95,8 @@ interface FileExplorerProps {
   serverId?: string
   previewFile: PreviewFile | null
   previewFiles: PreviewFile[]
+  /** 最近激活的预览（旧→新），切回工作区时恢复用，不参与 tab 排序 */
+  previewActive?: PreviewActiveEntry[]
   position?: 'bottom' | 'right'
   isPanelResizing?: boolean
   sessionId?: string | null
@@ -106,6 +108,7 @@ export const FileExplorer = memo(function FileExplorer({
   serverId,
   previewFile,
   previewFiles,
+  previewActive,
   position = 'right',
   isPanelResizing = false,
   sessionId,
@@ -167,8 +170,16 @@ export const FileExplorer = memo(function FileExplorer({
   )
   const scopedPreviewFile = useMemo(() => {
     if (previewFile && previewMatchesDirectory(previewFile, effectiveDirectory)) return previewFile
+    // 切回工作区：恢复该工作区最近激活的预览。用独立的「最近激活」记录，
+    // 而不是列表末尾——tab 顺序必须保持稳定，点标签不能让位置跳
+    for (let index = (previewActive?.length ?? 0) - 1; index >= 0; index -= 1) {
+      const entry = previewActive![index]
+      if (!previewMatchesDirectory(entry, effectiveDirectory)) continue
+      const match = scopedPreviewFiles.find(file => file.path === entry.path)
+      if (match) return match
+    }
     return scopedPreviewFiles[scopedPreviewFiles.length - 1] ?? null
-  }, [previewFile, scopedPreviewFiles, effectiveDirectory])
+  }, [previewFile, previewActive, scopedPreviewFiles, effectiveDirectory])
 
   // 当 previewFile 改变时加载预览
   useEffect(() => {

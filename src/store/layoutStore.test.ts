@@ -202,7 +202,7 @@ describe('LayoutStore file preview workspace scoping', () => {
     store.openFilePreview({ path: 'b.ts', name: 'b.ts', directory: '/repo' })
     store.activateFilePreview('files', 'a.ts', '/repo')
 
-    // a.ts 是活跃（且因激活移到末尾=最近）
+    // a.ts 是活跃（关闭后应回退到右邻）
     expect(store.getState().panelTabs.find(t => t.id === 'files')?.previewFile?.path).toBe('a.ts')
 
     store.closeFilePreview('files', 'a.ts', '/repo')
@@ -220,5 +220,57 @@ describe('LayoutStore file preview workspace scoping', () => {
     const tab = store.getState().panelTabs.find(t => t.id === 'files')
     expect(tab?.previewFiles).toHaveLength(1)
     expect(tab?.previewFiles?.[0]?.directory).toBe('/repo-a')
+  })
+
+  it('切换标签不改变标签顺序', () => {
+    const store = new LayoutStore()
+    store.openFilePreview({ path: 'a.ts', name: 'a.ts', directory: '/repo' })
+    store.openFilePreview({ path: 'b.ts', name: 'b.ts', directory: '/repo' })
+    store.openFilePreview({ path: 'c.ts', name: 'c.ts', directory: '/repo' })
+
+    store.activateFilePreview('files', 'a.ts', '/repo')
+
+    const tab = store.getState().panelTabs.find(item => item.id === 'files')
+    expect(tab?.previewFiles?.map(item => item.path)).toEqual(['a.ts', 'b.ts', 'c.ts'])
+    expect(tab?.previewFile?.path).toBe('a.ts')
+  })
+
+  it('重复打开已存在的文件保持原位，只更新元数据', () => {
+    const store = new LayoutStore()
+    store.openFilePreview({ path: 'a.ts', name: 'a.ts', directory: '/repo' })
+    store.openFilePreview({ path: 'b.ts', name: 'b.ts', directory: '/repo' })
+
+    store.openFilePreview({ path: 'a.ts', name: 'a.ts', directory: '/repo', targetLine: 42 })
+
+    const tab = store.getState().panelTabs.find(item => item.id === 'files')
+    expect(tab?.previewFiles?.map(item => item.path)).toEqual(['a.ts', 'b.ts'])
+    expect(tab?.previewFiles?.[0]?.targetLine).toBe(42)
+    expect(tab?.previewFile?.path).toBe('a.ts')
+  })
+
+  it('关闭活跃标签后落到右邻标签', () => {
+    const store = new LayoutStore()
+    store.openFilePreview({ path: 'a.ts', name: 'a.ts', directory: '/repo' })
+    store.openFilePreview({ path: 'b.ts', name: 'b.ts', directory: '/repo' })
+    store.openFilePreview({ path: 'c.ts', name: 'c.ts', directory: '/repo' })
+
+    store.activateFilePreview('files', 'b.ts', '/repo')
+    store.closeFilePreview('files', 'b.ts', '/repo')
+
+    const tab = store.getState().panelTabs.find(item => item.id === 'files')
+    expect(tab?.previewFile?.path).toBe('c.ts')
+  })
+
+  it('按工作区分别记录最近激活的预览', () => {
+    const store = new LayoutStore()
+    store.openFilePreview({ path: 'a1.ts', name: 'a1.ts', directory: '/repo-a' })
+    store.openFilePreview({ path: 'a2.ts', name: 'a2.ts', directory: '/repo-a' })
+    store.openFilePreview({ path: 'b1.ts', name: 'b1.ts', directory: '/repo-b' })
+
+    store.activateFilePreview('files', 'a1.ts', '/repo-a')
+
+    const tab = store.getState().panelTabs.find(item => item.id === 'files')
+    expect(tab?.previewFiles?.map(item => item.path)).toEqual(['a1.ts', 'a2.ts', 'b1.ts'])
+    expect(tab?.previewActive?.at(-1)).toMatchObject({ path: 'a1.ts', directory: '/repo-a' })
   })
 })

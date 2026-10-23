@@ -16,6 +16,8 @@ export interface PanelTab {
   position: PanelPosition
   previewFile?: PreviewFile | null
   previewFiles?: PreviewFile[]
+  /** 最近激活的预览（按激活先后，旧的在前）。只用于切回工作区时恢复，不参与 tab 排序 */
+  previewActive?: PreviewActiveEntry[]
   // Terminal 特有属性
   ptyId?: string
   /** 终端所属服务器（PTY 创建时记录；连接/恢复时用该服务器，而不是当前焦点服务器） */
@@ -46,6 +48,12 @@ export interface PreviewFile {
 /** 预览条目身份 = 相对路径 + 工作区目录（同一路径在不同工作区是不同文件） */
 function samePreviewIdentity(a: { path: string; directory?: string }, b: { path: string; directory?: string }) {
   return a.path === b.path && (a.directory ?? '') === (b.directory ?? '')
+}
+
+/** 「最近激活」记录：切回工作区时用来恢复上次看的文件，与 tab 顺序解耦 */
+export interface PreviewActiveEntry {
+  path: string
+  directory?: string
 }
 
 /** 条目是否属于当前工作区：无目录信息（旧数据/无工作区上下文）时始终可见 */
@@ -840,12 +848,15 @@ export class LayoutStore {
       ? { ...file, directory: normalizeToForwardSlash(file.directory) }
       : file
 
-    // 按身份（path+工作区）去重；已存在则移到末尾——列表顺序即「最近使用序」，
-    // FileExplorer 用它推导每个工作区自己的最近预览
-    const rest = (targetTab.previewFiles ?? []).filter(item => !samePreviewIdentity(item, normalizedFile))
+    // 按身份（path+工作区）去重；已存在就**原地替换**（更新 targetLine 等），
+    // 不改变 tab 顺序——浏览器/编辑器里点一个已打开的文件不会让标签跳位置
+    const list = targetTab.previewFiles ?? []
+    const index = list.findIndex(item => samePreviewIdentity(item, normalizedFile))
 
-    targetTab.previewFiles = [...rest, normalizedFile]
+    targetTab.previewFiles =
+      index === -1 ? [...list, normalizedFile] : list.map((item, i) => (i === index ? normalizedFile : item))
     targetTab.previewFile = normalizedFile
+    this.recordPreviewActive(targetTab, normalizedFile)
     this.state.activeTabId[targetTab.position] = targetTab.id
     this.setPanelOpen(targetTab.position, true)
     this.notify()
@@ -858,9 +869,9 @@ export class LayoutStore {
     const identity = { path, directory }
     const file = files.find(item => samePreviewIdentity(item, identity))
     if (!file) return
-    // 激活即最近：移到末尾，保持每个工作区的最近序
-    tab.previewFiles = [...files.filter(item => !samePreviewIdentity(item, identity)), file]
+    // 只切换活跃项，不动 tab 顺序；「最近激活」另记，供切回工作区时恢复
     tab.previewFile = file
+    this.recordPreviewActive(tab, file)
     this.notify()
   }
 
@@ -871,18 +882,20 @@ export class LayoutStore {
     if (!tab || !previewFiles || !targetPath) return
     const identity = { path: targetPath, directory: directory ?? tab.previewFile?.directory }
 
-    if (!previewFiles.some(item => samePreviewIdentity(item, identity))) return
+    const index = previewFiles.findIndex(item => samePreviewIdentity(item, identity))
+    if (index === -1) return
 
     const isActive = !!tab.previewFile && samePreviewIdentity(tab.previewFile, identity)
     const nextPreviewFiles = previewFiles.filter(item => !samePreviewIdentity(item, identity))
 
     tab.previewFiles = nextPreviewFiles
+    tab.previewActive = (tab.previewActive ?? []).filter(item => !samePreviewIdentity(item, identity))
 
     if (nextPreviewFiles.length === 0) {
       tab.previewFile = null
     } else if (isActive) {
-      // 关闭活跃预览后回退到最近使用的条目（末尾 = 最近）
-      tab.previewFile = nextPreviewFiles[nextPreviewFiles.length - 1] ?? null
+      // 关闭活跃预览后落到右邻标签（没有右邻就用最后一个），与浏览器一致
+      tab.previewFile = nextPreviewFiles[Math.min(index, nextPreviewFiles.length - 1)] ?? null
     }
 
     this.notify()
@@ -893,6 +906,7 @@ export class LayoutStore {
     if (!tab) return
     tab.previewFile = null
     tab.previewFiles = []
+    tab.previewActive = []
     this.notify()
   }
 
@@ -911,6 +925,13 @@ export class LayoutStore {
     nextPreviewFiles.splice(targetIndex, 0, dragged)
     tab.previewFiles = nextPreviewFiles
     this.notify()
+  }
+
+  /** 记录「最近激活」（按工作区各自维护），只影响切回工作区时的恢复 */
+  private recordPreviewActive(tab: PanelTab, file: PreviewFile) {
+    const rest = (tab.previewActive ?? []).filter(item => !samePreviewIdentity(item, file))
+    // 上限防止长时间使用后无界增长；只保留最近的条目
+    tab.previewActive = [...rest, { path: file.path, directory: file.directory }].slice(-100)
   }
 
   private getTargetFilesTab(position?: PanelPosition): PanelTab | null {

@@ -65,6 +65,8 @@ interface Entry {
   error: Error | null
   /** 拉取期间收到的增量（整页替换后重放，避免刚创建的会话被覆盖掉） */
   pending: Mutation[]
+  /** 在途请求落地后是否还要补一次强制刷新（重连撞上请求时用） */
+  refreshQueued: boolean
   snapshot: SessionIndexSnapshot
 }
 
@@ -184,7 +186,21 @@ class SessionIndexStore {
   ensure(serverId: string, options: { force?: boolean } = {}): Promise<void> {
     this.ensureSubscription(serverId)
     const entry = this.entries.get(serverId)
-    if (entry?.loading) return entry.loading
+
+    if (entry?.loading) {
+      // 重连补偿可能正好撞上在途请求：光等它拿不到断连后的新数据，
+      // 但要等它落地后再拉一次，否则两个全量请求会互相覆盖
+      if (!options.force || entry.refreshQueued) return entry.loading
+      entry.refreshQueued = true
+      return entry.loading.then(() => {
+        entry.refreshQueued = false
+        if (this.entries.get(serverId) !== entry) return
+        // 期间又起了一次拉取：等它，不叠第三个
+        if (entry.loading) return entry.loading
+        return this.fetchPage(serverId, null)
+      })
+    }
+
     if (!options.force && entry?.ready && Date.now() - entry.fetchedAt < TTL_MS) {
       return Promise.resolve()
     }
@@ -306,6 +322,7 @@ class SessionIndexStore {
       loading: null,
       error: null,
       pending: [],
+      refreshQueued: false,
       snapshot: EMPTY_SNAPSHOT,
     }
     this.entries.set(serverId, entry)

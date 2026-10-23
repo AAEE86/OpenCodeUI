@@ -275,6 +275,28 @@ describe('sessionIndexStore', () => {
     expect(subscribeMock).toHaveBeenCalledTimes(1)
   })
 
+  it('重连撞上在途拉取时，等它落地后再补一次强制刷新', async () => {
+    let resolveFirst!: (value: { data: Session[]; next: string | null }) => void
+    listSessionsPageMock.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          resolveFirst = resolve
+        }),
+    )
+    const first = sessionIndexStore.ensure(SERVER)
+
+    listSessionsPageMock.mockResolvedValueOnce(page([session('ses_b')]))
+    const forced = sessionIndexStore.ensure(SERVER, { force: true })
+    // 在途请求没回来之前不能抢跑
+    expect(listSessionsPageMock).toHaveBeenCalledTimes(1)
+
+    resolveFirst(page([session('ses_a')]))
+    await Promise.all([first, forced])
+
+    expect(listSessionsPageMock).toHaveBeenCalledTimes(2)
+    expect(sessionIndexStore.getSnapshot(SERVER).sessions.map(item => item.id)).toEqual(['ses_b'])
+  })
+
   it('服务器被删除时释放索引与事件订阅', async () => {
     const server = serverStore.addServer({ name: 'remote', url: 'http://remote.test' })
     listSessionsPageMock.mockResolvedValue(page([session('ses_a')]))

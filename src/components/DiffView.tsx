@@ -47,7 +47,7 @@ export const DiffView = memo(function DiffView({
   after,
   filePath,
   defaultCollapsed = false,
-  maxHeight = 300,
+  maxHeight,
   language: explicitLanguage,
   bare = false,
 }: DiffViewProps) {
@@ -208,7 +208,7 @@ export const DiffView = memo(function DiffView({
             after={content.after}
             language={language}
             viewMode="unified"
-            maxHeight={maxHeight}
+            maxHeight={maxHeight ?? 300}
             data={diffViewerData}
           />
         </div>

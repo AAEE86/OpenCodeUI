@@ -34,8 +34,12 @@ export interface ContentBlockProps {
   labelIcon?: ReactNode
   /** 隐藏标签文本，仅保留图标 / 文件名 */
   hideLabel?: boolean
+  /** 隐藏折叠箭头（外层已有展开控制时用） */
+  hideChevron?: boolean
   /** 文件路径 */
   filePath?: string
+  /** header 显示完整路径（默认只显示文件名） */
+  showFullPath?: boolean
   /** 语言 */
   language?: string
   /** 样式变体 */
@@ -80,7 +84,9 @@ export const ContentBlock = memo(function ContentBlock({
   label,
   labelIcon,
   hideLabel = false,
+  hideChevron = false,
   filePath,
+  showFullPath = false,
   language,
   variant = 'default',
   defaultCollapsed = false,
@@ -117,7 +123,7 @@ export const ContentBlock = memo(function ContentBlock({
   const hasContent = !!content?.trim() || isDiff || stats?.exit !== undefined
   const canCollapse = !compact && collapsible && hasContent
   const lang = language || (filePath ? detectLanguage(filePath) : 'text')
-  const fileName = filePath?.split(/[/\\]/).pop()
+  const fileName = filePath ? (showFullPath ? filePath : filePath.split(/[/\\]/).pop()) : undefined
   const resolvedFullscreenId = fullscreenId ?? `content-block:${generatedFullscreenId}`
   const collapsed = compact ? false : cachedCollapsed
 
@@ -283,7 +289,7 @@ export const ContentBlock = memo(function ContentBlock({
       >
         {/* Left: chevron + label + filename */}
         <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
-          {canCollapse && (
+          {canCollapse && !hideChevron && (
             <span className={`shrink-0 ${isError ? 'text-danger-100/60' : 'text-text-500'}`}>
               {collapsed ? <ChevronRightIcon size={12} /> : <ChevronDownIcon size={12} />}
             </span>

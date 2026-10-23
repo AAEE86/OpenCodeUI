@@ -317,14 +317,13 @@ export function TimelinePreview() {
                 />
               </div>
               <div className="space-y-1 border-t border-border-200/40 pt-3">
-                <div className="px-2 text-[11px] text-text-500">点开文件：路径保留，diff 直接铺在行下面</div>
+                <div className="px-2 text-[11px] text-text-500">默认收起：点任一文件展开，diff 用工具卡同款渲染</div>
                 <TurnDiffPartView
                   sessionId={null}
                   from="preview-turn-file-open"
                   files={previewDiffs.map(diff => diff.file)}
                   diffs={previewDiffs}
                   defaultExpanded
-                  defaultOpenFiles={[previewDiffs[0].file]}
                   stateKey="preview-turn-diff-file-open"
                 />
               </div>

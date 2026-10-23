@@ -24,6 +24,7 @@
 import { getSession, listSessionsPage } from '../api/session'
 import { subscribeToServerEvents } from '../api/events'
 import { autoDetectPathStyle } from '../utils/directoryUtils'
+import { serverStore, WSL_SERVER_PREFIX } from './serverStore'
 import type { Session } from '../types/api/session'
 
 /** 与官方 home 列表的 staleTime 对齐：30s 内重复挂载不再请求 */
@@ -116,6 +117,47 @@ class SessionIndexStore {
   private directoryFetchedAt = new Map<string, number>()
   /** 目录级补拉去重（同一目录并发只打一次） */
   private directoryLoading = new Map<string, Promise<void>>()
+  /** 上一次看到的服务器集合：用来发现「哪台被删了」 */
+  private knownServerIds: Set<string>
+
+  constructor() {
+    this.knownServerIds = new Set(serverStore.getServers().map(server => server.id))
+    serverStore.subscribe(this.handleServerStoreChange)
+  }
+
+  /**
+   * 服务器被删除时释放对应索引和 SSE 订阅。
+   *
+   * 不能只增不减：删掉的服务器会一直留着一条连接和一份会话列表，
+   * 直到应用退出。这里只处理「上次见过、这次不见了」的 id，新增不受影响。
+   *
+   * WSL 例外：`wsl:` 服务器在 starting/stopped 期间会被临时移出列表，
+   * 稍后带着同一个 id 回来。这时丢掉索引没人会重新 ensure（hook 的
+   * serverKey 没变），列表会一直空着，所以宁可留着内存。
+   */
+  private handleServerStoreChange = (): void => {
+    const current = new Set(serverStore.getServers().map(server => server.id))
+    for (const serverId of this.knownServerIds) {
+      if (current.has(serverId) || serverId.startsWith(WSL_SERVER_PREFIX)) continue
+      this.forget(serverId)
+    }
+    this.knownServerIds = current
+  }
+
+  /** 丢弃某台服务器的全部内存状态（下次 ensure 重新拉） */
+  forget(serverId: string): void {
+    this.subscriptions.get(serverId)?.()
+    this.subscriptions.delete(serverId)
+    this.entries.delete(serverId)
+    // 键都是 `${serverId}\0...` 形式，按前缀一起清
+    const prefix = `${serverId}\0`
+    for (const map of [this.refreshing, this.directoryFetchedAt, this.directoryLoading]) {
+      for (const key of map.keys()) {
+        if (key.startsWith(prefix)) map.delete(key)
+      }
+    }
+    this.notify()
+  }
 
   // ============================================
   // 订阅（useSyncExternalStore）

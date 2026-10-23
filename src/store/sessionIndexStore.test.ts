@@ -22,6 +22,7 @@ vi.mock('../utils/directoryUtils', () => ({
 }))
 
 const { sessionIndexStore } = await import('./sessionIndexStore')
+const { serverStore } = await import('./serverStore')
 
 const SERVER = 'local'
 
@@ -272,6 +273,32 @@ describe('sessionIndexStore', () => {
     await sessionIndexStore.ensure(SERVER, { force: true })
 
     expect(subscribeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('服务器被删除时释放索引与事件订阅', async () => {
+    const server = serverStore.addServer({ name: 'remote', url: 'http://remote.test' })
+    listSessionsPageMock.mockResolvedValue(page([session('ses_a')]))
+    await sessionIndexStore.ensure(server.id)
+
+    expect(sessionIndexStore.getSnapshot(server.id).sessions).toHaveLength(1)
+    const unsubscribe = subscribeMock.mock.results[0]?.value as ReturnType<typeof vi.fn>
+
+    serverStore.removeServer(server.id)
+
+    expect(unsubscribe).toHaveBeenCalled()
+    expect(sessionIndexStore.getSnapshot(server.id).sessions).toHaveLength(0)
+    expect(sessionIndexStore.getSnapshot(server.id).ready).toBe(false)
+  })
+
+  it('WSL 服务器临时移出列表时不丢索引（同一个 id 稍后会回来）', async () => {
+    const id = 'wsl:ubuntu'
+    serverStore.upsertServer({ id, name: 'Ubuntu', url: 'http://127.0.0.1:9999' })
+    listSessionsPageMock.mockResolvedValue(page([session('ses_w')]))
+    await sessionIndexStore.ensure(id)
+
+    serverStore.removeServer(id)
+
+    expect(sessionIndexStore.getSnapshot(id).sessions).toHaveLength(1)
   })
 
   it('目录兜底补拉：把被挤出全局索引的目录并回来，30s 内不重复补', async () => {

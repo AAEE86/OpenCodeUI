@@ -44,8 +44,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const [search, setSearch] = useState('')
   const [isLoadingMore, setIsLoadingMore] = useState(false)
-  /** 索引没覆盖到的旧会话（服务端按标题搜出来的补充结果） */
-  const [remoteSessions, setRemoteSessions] = useState<Session[]>([])
+  /** 索引没覆盖到的旧会话（服务端按标题搜出来的补充结果）；跟 serverId 绑死，切服务器不串 */
+  const [remoteResults, setRemoteResults] = useState<{ serverId: string; sessions: Session[] }>({
+    serverId,
+    sessions: [],
+  })
+  const remoteSessions = remoteResults.serverId === serverId ? remoteResults.sessions : []
   // 「显示更多」的展开量跟目录/搜索词绑定：切过去时从第一页开始，不会把
   // 上一个目录的展开量短暂套到新目录上（会出现多显示一截再收回的跳动）
   const listKey = `${currentDirectory ?? ''}\0${search}`
@@ -81,7 +85,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const term = search.trim()
     if (!term || !snapshot.hasMore) {
-      setRemoteSessions(previous => (previous.length === 0 ? previous : []))
+      setRemoteResults(previous =>
+        previous.sessions.length === 0 && previous.serverId === serverId
+          ? previous
+          : { serverId, sessions: [] },
+      )
       return
     }
     let cancelled = false
@@ -92,10 +100,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         serverId,
       )
         .then(data => {
-          if (!cancelled) setRemoteSessions(data)
+          if (!cancelled) setRemoteResults({ serverId, sessions: data })
         })
         .catch(() => {
-          if (!cancelled) setRemoteSessions([])
+          if (!cancelled) setRemoteResults({ serverId, sessions: [] })
         })
     }, 300)
     return () => {

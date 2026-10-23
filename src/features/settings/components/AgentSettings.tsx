@@ -19,6 +19,9 @@ export function AgentSettings() {
   const [compactionAutoCollapse, setCompactionAutoCollapse] = useState(themeStore.compactionAutoCollapse)
   const [queueAutoCollapse, setQueueAutoCollapse] = useState(themeStore.queueAutoCollapse)
   const [processCollapseEnabled, setProcessCollapseEnabled] = useState(themeStore.processCollapseEnabled)
+  const [showTimelineNotices, setShowTimelineNotices] = useState(themeStore.showTimelineNotices)
+  const [showTurnDiff, setShowTurnDiff] = useState(themeStore.showTurnDiff)
+  const [showQueuedCompaction, setShowQueuedCompaction] = useState(themeStore.showQueuedCompaction)
 
   const handleAlwaysAllowModeChange = (mode: AlwaysAllowMode) => {
     const hasFrontendRules = autoApproveStore.getDebugInfo().sessions.some(session => session.rules.length > 0)
@@ -77,6 +80,24 @@ export function AgentSettings() {
     const next = !processCollapseEnabled
     setProcessCollapseEnabled(next)
     themeStore.setProcessCollapseEnabled(next)
+  }
+
+  const toggleShowTimelineNotices = () => {
+    const next = !showTimelineNotices
+    setShowTimelineNotices(next)
+    themeStore.setShowTimelineNotices(next)
+  }
+
+  const toggleShowTurnDiff = () => {
+    const next = !showTurnDiff
+    setShowTurnDiff(next)
+    themeStore.setShowTurnDiff(next)
+  }
+
+  const toggleShowQueuedCompaction = () => {
+    const next = !showQueuedCompaction
+    setShowQueuedCompaction(next)
+    themeStore.setShowQueuedCompaction(next)
   }
 
   const toggleCompactInlinePermission = () => {
@@ -169,6 +190,30 @@ export function AgentSettings() {
           onClick={toggleProcessCollapse}
         >
           <Toggle enabled={processCollapseEnabled} onChange={toggleProcessCollapse} />
+        </SettingRow>
+
+        <SettingRow
+          label={t('chat.showTimelineNotices')}
+          description={t('chat.showTimelineNoticesDesc')}
+          onClick={toggleShowTimelineNotices}
+        >
+          <Toggle enabled={showTimelineNotices} onChange={toggleShowTimelineNotices} />
+        </SettingRow>
+
+        <SettingRow
+          label={t('chat.showTurnDiff')}
+          description={t('chat.showTurnDiffDesc')}
+          onClick={toggleShowTurnDiff}
+        >
+          <Toggle enabled={showTurnDiff} onChange={toggleShowTurnDiff} />
+        </SettingRow>
+
+        <SettingRow
+          label={t('chat.showQueuedCompaction')}
+          description={t('chat.showQueuedCompactionDesc')}
+          onClick={toggleShowQueuedCompaction}
+        >
+          <Toggle enabled={showQueuedCompaction} onChange={toggleShowQueuedCompaction} />
         </SettingRow>
 
         <SettingRow

@@ -177,6 +177,12 @@ const DEFAULT_ACTIONS_ON_LATEST_ASSISTANT_ONLY = true
 const DEFAULT_DESKTOP_COLLAPSED_INPUT_DOCK = true
 /** 过程折叠：按用户消息把中间过程收成计时折叠块 */
 const DEFAULT_PROCESS_COLLAPSE_ENABLED = false
+/** 时间线提示行（模型/agent 切换、移动、技能、指令更新、合成上下文）默认关闭 */
+const DEFAULT_SHOW_TIMELINE_NOTICES = false
+/** 回合文件变更摘要默认关闭 */
+const DEFAULT_SHOW_TURN_DIFF = false
+/** 压缩排队提示默认关闭 */
+const DEFAULT_SHOW_QUEUED_COMPACTION = false
 /** 输入框选择器默认样式：独立图标按钮 */
 const DEFAULT_COMPOSER_SELECTOR_STYLE: ComposerSelectorStyle = 'icons'
 
@@ -249,6 +255,12 @@ export interface ThemeState {
   desktopCollapsedInputDock: boolean
   /** 过程折叠：用户发送后显示 Working 计时，结束后收成折叠块，最终回答留在外面 */
   processCollapseEnabled: boolean
+  /** 在消息流里显示会话事件提示行（模型/agent 切换、移动、技能、指令更新、合成上下文） */
+  showTimelineNotices: boolean
+  /** 每轮结束后显示文件变更摘要 */
+  showTurnDiff: boolean
+  /** 压缩已入队、尚未开始时显示提示 */
+  showQueuedCompaction: boolean
   /** 输入框选择器样式：独立图标按钮 / DSH 风格汇总菜单 */
   composerSelectorStyle: ComposerSelectorStyle
   /** 代码块语法高亮主题（亮色模式），Shiki theme id */
@@ -297,6 +309,9 @@ const STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT = 'outline-current-highlight'
 const STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY = 'actions-on-latest-assistant-only'
 const STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK = 'desktop-collapsed-input-dock'
 const STORAGE_KEY_PROCESS_COLLAPSE_ENABLED = 'process-collapse-enabled'
+const STORAGE_KEY_SHOW_TIMELINE_NOTICES = 'show-timeline-notices'
+const STORAGE_KEY_SHOW_TURN_DIFF = 'show-turn-diff'
+const STORAGE_KEY_SHOW_QUEUED_COMPACTION = 'show-queued-compaction'
 const STORAGE_KEY_COMPOSER_SELECTOR_STYLE = 'composer-selector-style'
 const STORAGE_KEY_CODE_BLOCK_THEME_LIGHT = 'code-block-theme-light'
 const STORAGE_KEY_CODE_BLOCK_THEME_DARK = 'code-block-theme-dark'
@@ -474,6 +489,17 @@ class ThemeStore {
         ? DEFAULT_PROCESS_COLLAPSE_ENABLED
         : savedProcessCollapseEnabled === 'true'
 
+    const savedShowTimelineNotices = localStorage.getItem(STORAGE_KEY_SHOW_TIMELINE_NOTICES)
+    const showTimelineNotices =
+      savedShowTimelineNotices === null ? DEFAULT_SHOW_TIMELINE_NOTICES : savedShowTimelineNotices === 'true'
+
+    const savedShowTurnDiff = localStorage.getItem(STORAGE_KEY_SHOW_TURN_DIFF)
+    const showTurnDiff = savedShowTurnDiff === null ? DEFAULT_SHOW_TURN_DIFF : savedShowTurnDiff === 'true'
+
+    const savedShowQueuedCompaction = localStorage.getItem(STORAGE_KEY_SHOW_QUEUED_COMPACTION)
+    const showQueuedCompaction =
+      savedShowQueuedCompaction === null ? DEFAULT_SHOW_QUEUED_COMPACTION : savedShowQueuedCompaction === 'true'
+
     const savedComposerSelectorStyle = localStorage.getItem(STORAGE_KEY_COMPOSER_SELECTOR_STYLE)
     const composerSelectorStyle: ComposerSelectorStyle =
       savedComposerSelectorStyle === 'seat' ? 'seat' : DEFAULT_COMPOSER_SELECTOR_STYLE
@@ -522,6 +548,9 @@ class ThemeStore {
       actionsOnLatestAssistantOnly,
       desktopCollapsedInputDock,
       processCollapseEnabled,
+      showTimelineNotices,
+      showTurnDiff,
+      showQueuedCompaction,
       composerSelectorStyle,
       codeBlockThemeLight,
       codeBlockThemeDark,
@@ -639,6 +668,18 @@ class ThemeStore {
 
   get processCollapseEnabled() {
     return this.state.processCollapseEnabled
+  }
+
+  get showTimelineNotices() {
+    return this.state.showTimelineNotices
+  }
+
+  get showTurnDiff() {
+    return this.state.showTurnDiff
+  }
+
+  get showQueuedCompaction() {
+    return this.state.showQueuedCompaction
   }
 
   get composerSelectorStyle() {
@@ -1034,6 +1075,27 @@ class ThemeStore {
     this.emit()
   }
 
+  setShowTimelineNotices(enabled: boolean) {
+    if (this.state.showTimelineNotices === enabled) return
+    this.state = { ...this.state, showTimelineNotices: enabled }
+    localStorage.setItem(STORAGE_KEY_SHOW_TIMELINE_NOTICES, String(enabled))
+    this.emit()
+  }
+
+  setShowTurnDiff(enabled: boolean) {
+    if (this.state.showTurnDiff === enabled) return
+    this.state = { ...this.state, showTurnDiff: enabled }
+    localStorage.setItem(STORAGE_KEY_SHOW_TURN_DIFF, String(enabled))
+    this.emit()
+  }
+
+  setShowQueuedCompaction(enabled: boolean) {
+    if (this.state.showQueuedCompaction === enabled) return
+    this.state = { ...this.state, showQueuedCompaction: enabled }
+    localStorage.setItem(STORAGE_KEY_SHOW_QUEUED_COMPACTION, String(enabled))
+    this.emit()
+  }
+
   setComposerSelectorStyle(style: ComposerSelectorStyle) {
     if (this.state.composerSelectorStyle === style) return
     this.state = { ...this.state, composerSelectorStyle: style }
@@ -1334,6 +1396,15 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
       typeof parsed?.processCollapseEnabled === 'boolean'
         ? parsed.processCollapseEnabled
         : DEFAULT_PROCESS_COLLAPSE_ENABLED,
+    showTimelineNotices:
+      typeof parsed?.showTimelineNotices === 'boolean'
+        ? parsed.showTimelineNotices
+        : DEFAULT_SHOW_TIMELINE_NOTICES,
+    showTurnDiff: typeof parsed?.showTurnDiff === 'boolean' ? parsed.showTurnDiff : DEFAULT_SHOW_TURN_DIFF,
+    showQueuedCompaction:
+      typeof parsed?.showQueuedCompaction === 'boolean'
+        ? parsed.showQueuedCompaction
+        : DEFAULT_SHOW_QUEUED_COMPACTION,
     composerSelectorStyle:
       parsed?.composerSelectorStyle === 'seat' ? 'seat' : DEFAULT_COMPOSER_SELECTOR_STYLE,
     codeBlockThemeLight: normalizeCodeBlockTheme(
@@ -1400,6 +1471,9 @@ export function importThemeBackup(raw: unknown): void {
   )
   localStorage.setItem(STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK, String(backup.desktopCollapsedInputDock))
   localStorage.setItem(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED, String(backup.processCollapseEnabled))
+  localStorage.setItem(STORAGE_KEY_SHOW_TIMELINE_NOTICES, String(backup.showTimelineNotices))
+  localStorage.setItem(STORAGE_KEY_SHOW_TURN_DIFF, String(backup.showTurnDiff))
+  localStorage.setItem(STORAGE_KEY_SHOW_QUEUED_COMPACTION, String(backup.showQueuedCompaction))
   localStorage.setItem(STORAGE_KEY_COMPOSER_SELECTOR_STYLE, backup.composerSelectorStyle)
   localStorage.setItem(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT, backup.codeBlockThemeLight)
   localStorage.setItem(STORAGE_KEY_CODE_BLOCK_THEME_DARK, backup.codeBlockThemeDark)

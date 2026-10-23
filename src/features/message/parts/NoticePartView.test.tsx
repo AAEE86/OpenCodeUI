@@ -10,8 +10,7 @@ describe('TimelineNoticeView', () => {
   it('renders agent switches with previous → next', () => {
     render(<TimelineNoticeView message={notice({ type: 'agent-switched', agent: 'plan', previous: 'build' })} />)
 
-    expect(screen.getByText('Agent changed')).toBeInTheDocument()
-    expect(screen.getByText('Build → Plan')).toBeInTheDocument()
+    expect(screen.getByText('Agent changed · Build → Plan')).toBeInTheDocument()
   })
 
   it('renders model switches as a separator line', () => {
@@ -35,9 +34,7 @@ describe('TimelineNoticeView', () => {
       />,
     )
 
-    expect(screen.getByText('Instructions updated')).toBeInTheDocument()
-    expect(screen.getByText('AGENTS.md')).toBeInTheDocument()
-    expect(screen.getByText('.cursor/rules')).toBeInTheDocument()
+    expect(screen.getByText('Instructions updated · AGENTS.md, .cursor/rules')).toBeInTheDocument()
   })
 
   it('renders subagent outcomes from synthetic metadata', () => {
@@ -52,8 +49,19 @@ describe('TimelineNoticeView', () => {
       />,
     )
 
-    expect(screen.getByText('explore failed')).toBeInTheDocument()
-    expect(screen.getByText('Subagent failed')).toBeInTheDocument()
+    expect(screen.getByText('explore failed · Subagent failed')).toBeInTheDocument()
+  })
+
+  it('renders skill activation with the skill name', () => {
+    render(<TimelineNoticeView message={notice({ type: 'skill', skill: 'commit', name: 'Commit', text: '' })} />)
+
+    expect(screen.getByText('Skill · Commit')).toBeInTheDocument()
+  })
+
+  it('renders notices as a centered separator', () => {
+    const { container } = render(<TimelineNoticeView message={notice({ type: 'system', text: 'hello' })} />)
+
+    expect(container.querySelector('[data-component="timeline-separator"]')).toBeTruthy()
   })
 
   it('renders queued compaction as a divider label', () => {

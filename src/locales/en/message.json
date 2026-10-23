@@ -141,17 +141,18 @@
     "filesChanged_other": "{{count}} files changed"
   },
   "notice": {
-    "agentChanged": "Agent changed",
+    "agentChangedDetail": "Agent changed · {{previous}} → {{agent}}",
+    "agentChangedTo": "Agent changed · {{agent}}",
     "modelSwitched": "Switched to {{model}}",
     "modelSwitchedVariant": "Switched to {{model}} ({{variant}})",
     "movedTo": "Moved to {{directory}}",
-    "skill": "Skill",
+    "skillActivated": "Skill · {{name}}",
     "failed": "{{actor}} failed",
     "cancelled": "{{actor}} cancelled",
     "finished": "{{actor}} finished",
     "actorShell": "Shell",
     "actorAgent": "Agent",
-    "instructionsUpdated": "Instructions updated",
+    "instructionsUpdatedDetail": "Instructions updated · {{sources}}",
     "restart": "Continuing after restart",
     "compactionQueued": "Session compaction queued"
   },

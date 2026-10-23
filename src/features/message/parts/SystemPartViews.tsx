@@ -112,13 +112,22 @@ interface CompactionPartViewProps {
   canUndo?: boolean
 }
 
-/** 官方 TimelineSeparator 同款：细分隔线 + 中间标签 */
-function Separator({ label }: { label: string }) {
+/**
+ * 官方 TimelineSeparator 同款：细分隔线 + 中间标签。
+ * 时间线提示行（切换记录 / 技能 / 指令更新 / 压缩排队）都复用它。
+ */
+export function TimelineSeparator({ label, title }: { label: string; title?: string }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 text-[length:var(--fs-sm)] text-text-500">
-      <span className="flex-1 h-px bg-border-200/70" />
-      <span className="shrink-0 text-[length:var(--fs-xs)] leading-none text-text-400">{label}</span>
-      <span className="flex-1 h-px bg-border-200/70" />
+    <div
+      data-component="timeline-separator"
+      className="flex items-center gap-2 px-3 py-1.5 text-[length:var(--fs-sm)] text-text-500"
+      title={title ?? label}
+    >
+      <span className="h-px min-w-0 flex-1 bg-border-200/70" />
+      <span className="min-w-0 max-w-[85%] shrink truncate text-[length:var(--fs-xs)] leading-none text-text-400">
+        {label}
+      </span>
+      <span className="h-px min-w-0 flex-1 bg-border-200/70" />
     </div>
   )
 }
@@ -227,7 +236,7 @@ export const CompactionPartView = memo(function CompactionPartView({
   if (!hasContent) {
     return (
       <div data-component="session-compaction-message">
-        <Separator label={headerLabel} />
+        <TimelineSeparator label={headerLabel} />
       </div>
     )
   }

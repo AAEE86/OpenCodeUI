@@ -59,19 +59,19 @@ export function isNoticeMessage(message: SessionMessageInfo): boolean {
 }
 
 /** 对应旧视图模型的 `message.parts.length !== 0`（原始存在性，不做 trim） */
-function hasAnyContent(message: SessionMessageInfo): boolean {
+function hasAnyContent(message: SessionMessageInfo, showNotices: boolean): boolean {
   if (isUserMessage(message)) return userMessageHasAnyContent(message)
   if (isAssistantMessage(message)) return message.content.length > 0 || message.retry != null
   if (message.type === 'compaction') return true
   // `!` shell 命令消息：command + 状态即内容（官方 timeline 里独立成行）
   if (message.type === 'shell') return true
   // 切换记录 / 系统提示 / 技能 / 合成上下文：官方 timeline 的 Notice 行
-  if (isNoticeMessage(message)) return true
+  if (showNotices && isNoticeMessage(message)) return true
   return false
 }
 
 /** 对应旧视图模型的 `hasRenderableParts(message)` */
-function hasRenderableContent(message: SessionMessageInfo): boolean {
+function hasRenderableContent(message: SessionMessageInfo, showNotices: boolean): boolean {
   if (isUserMessage(message)) return userMessageHasRenderableContent(message)
   if (isAssistantMessage(message)) {
     if (message.retry) return true
@@ -82,12 +82,12 @@ function hasRenderableContent(message: SessionMessageInfo): boolean {
   }
   if (message.type === 'compaction') return true
   if (message.type === 'shell') return true
-  if (isNoticeMessage(message)) return true
+  if (showNotices && isNoticeMessage(message)) return true
   return false
 }
 
-function messageHasContent(message: SessionMessageInfo): boolean {
-  const hasRenderable = hasRenderableContent(message)
+function messageHasContent(message: SessionMessageInfo, showNotices: boolean): boolean {
+  const hasRenderable = hasRenderableContent(message, showNotices)
   // 有非 abort 错误的助手消息始终可见（展示错误信息）。
   // abort 只有在已经产生可见内容时才显示；空 abort 不占信息流位置。
   if (isAssistantMessage(message) && message.error) {
@@ -96,7 +96,7 @@ function messageHasContent(message: SessionMessageInfo): boolean {
   // 失败 idle 标记（会话级错误，如 pre-promotion failure）始终可见：
   // 它没有 assistant 消息，错误卡片就是它唯一的内容（官方 isFailedIdle → Error 卡片）
   if (isFailedIdleMessage(message)) return true
-  if (!hasAnyContent(message)) {
+  if (!hasAnyContent(message, showNotices)) {
     // 任何角色的空消息都不可见：没有内容可展示
     // 内容到达后自动进入可见列表；abort 后永远不会有内容 → 永远不可见
     return false
@@ -180,7 +180,11 @@ export function getVisibleMessageForkTargetId(entry: VisibleMessageEntry): strin
   return entry.sourceIds[entry.sourceIds.length - 1] || entry.message.id
 }
 
-export function buildVisibleMessageEntries(messages: SessionMessageInfo[]): VisibleMessageEntry[] {
+export function buildVisibleMessageEntries(
+  messages: SessionMessageInfo[],
+  options?: { showNotices?: boolean },
+): VisibleMessageEntry[] {
+  const showNotices = options?.showNotices ?? false
   // 防御性去重：保证输入无重复 ID
   const seenIds = new Set<string>()
   const unique: SessionMessageInfo[] = []
@@ -190,7 +194,7 @@ export function buildVisibleMessageEntries(messages: SessionMessageInfo[]): Visi
       unique.push(m)
     }
   }
-  const filteredMessages = unique.filter(messageHasContent)
+  const filteredMessages = unique.filter(message => messageHasContent(message, showNotices))
   const result: VisibleMessageEntry[] = []
 
   for (let i = 0; i < filteredMessages.length; i++) {

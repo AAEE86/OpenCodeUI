@@ -241,10 +241,11 @@ function reuseSet<T>(previous: Set<T> | undefined, next: Set<T>) {
 export function buildChatPageViewModel(
   messages: SessionMessageInfo[],
   previous?: ChatPageViewModel,
+  showNotices = false,
 ): ChatPageViewModel {
   const visibleMessageEntries = reuseVisibleMessageEntries(
     previous?.visibleMessageEntries,
-    buildVisibleMessageEntries(messages),
+    buildVisibleMessageEntries(messages, { showNotices }),
   )
   const visibleMessages = visibleMessagesFromEntries(previous?.visibleMessages, visibleMessageEntries)
   const forkTargetIdMap = reuseMap(previous?.forkTargetIdMap, buildForkTargetIdMap(visibleMessageEntries))
@@ -279,11 +280,11 @@ export function buildChatPageViewModel(
   }
 }
 
-export function useChatPageViewModel(messages: SessionMessageInfo[]): ChatPageViewModel {
+export function useChatPageViewModel(messages: SessionMessageInfo[], showNotices = false): ChatPageViewModel {
   const previousRef = useRef<ChatPageViewModel | undefined>(undefined)
   return useMemo(() => {
-    const viewModel = buildChatPageViewModel(messages, previousRef.current)
+    const viewModel = buildChatPageViewModel(messages, previousRef.current, showNotices)
     previousRef.current = viewModel
     return viewModel
-  }, [messages])
+  }, [messages, showNotices])
 }

@@ -113,17 +113,18 @@
     "filesChanged_other": "{{count}} 个文件变更"
   },
   "notice": {
-    "agentChanged": "Agent 已切换",
+    "agentChangedDetail": "Agent 已切换 · {{previous}} → {{agent}}",
+    "agentChangedTo": "Agent 已切换 · {{agent}}",
     "modelSwitched": "模型已切换到 {{model}}",
     "modelSwitchedVariant": "模型已切换到 {{model}}（{{variant}}）",
     "movedTo": "会话已移动到 {{directory}}",
-    "skill": "技能",
+    "skillActivated": "技能 · {{name}}",
     "failed": "{{actor}} 失败",
     "cancelled": "{{actor}} 已取消",
     "finished": "{{actor}} 完成",
     "actorShell": "Shell",
     "actorAgent": "Agent",
-    "instructionsUpdated": "指令已更新",
+    "instructionsUpdatedDetail": "指令已更新 · {{sources}}",
     "restart": "重启后继续执行",
     "compactionQueued": "上下文压缩已排队"
   },

@@ -867,6 +867,7 @@ function collectTurnFiles(assistants: AssistantMessage[]): string[] {
 export function buildFlatTimeline(
   messages: SessionMessageInfo[],
   sessionIsStreaming: boolean,
+  turnDiff = false,
 ): ProcessTimelineItem[] {
   const items: ProcessTimelineItem[] = messages.map(message => ({
     kind: 'message',
@@ -892,6 +893,7 @@ export function buildFlatTimeline(
   if (current) turns.push(current)
 
   const diffByIndex = new Map<number, { userId: string; files: string[] }>()
+  if (!turnDiff) return items
   turns.forEach((turn, index) => {
     if (turn.files.size === 0) return
     if (index === turns.length - 1 && sessionIsStreaming) return
@@ -968,6 +970,8 @@ export function buildProcessTimeline(
     messageHasFinal: (message: AssistantMessage) => boolean
     /** 用户消息入场生长是否完成；缺省视为已完成（历史消息 / 测试） */
     isUserEntryReady?: (userMessageId: string) => boolean
+    /** 是否在回合结束后追加文件变更摘要（默认关闭） */
+    turnDiff?: boolean
   },
 ): ProcessTimelineItem[] {
   const {
@@ -976,6 +980,7 @@ export function buildProcessTimeline(
     messageHasProcess,
     messageHasFinal,
     isUserEntryReady = () => true,
+    turnDiff = false,
   } = options
   const items: ProcessTimelineItem[] = []
 
@@ -1197,7 +1202,7 @@ export function buildProcessTimeline(
     emitNotices(turn, false)
 
     // 回合结束后追加文件变更摘要（官方 TurnDiff：idle 后按 snapshot.files 汇总）
-    if (!turnIsActive) {
+    if (!turnIsActive && turnDiff) {
       const files = collectTurnFiles(assistants)
       if (files.length > 0) {
         items.push({ kind: 'turn-diff', key: `turn-diff:${userId}`, userMessageId: userId, files })

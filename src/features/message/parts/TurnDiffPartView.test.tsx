@@ -24,6 +24,9 @@ describe('TurnDiffPartView', () => {
     render(<TurnDiffPartView sessionId="server:session-a" from="user-1" files={['src/a.ts', 'src/b.ts']} />)
 
     expect(screen.getByText('2 files changed')).toBeInTheDocument()
+    expect(screen.queryByText('src/a.ts')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('2 files changed'))
     expect(screen.getByText('src/a.ts')).toBeInTheDocument()
     expect(screen.getByText('src/b.ts')).toBeInTheDocument()
   })
@@ -35,6 +38,7 @@ describe('TurnDiffPartView', () => {
     ])
 
     render(<TurnDiffPartView sessionId="server:session-b" from="user-2" files={['src/a.ts', 'src/b.ts']} />)
+    fireEvent.click(screen.getByText('2 files changed'))
 
     await waitFor(() => expect(mockGetTurnDiff).toHaveBeenCalledWith('server:session-b', 'user-2'))
     expect(await screen.findByText('+3')).toBeInTheDocument()
@@ -48,8 +52,8 @@ describe('TurnDiffPartView', () => {
     const files = Array.from({ length: 7 }, (_, index) => `src/file-${index + 1}.ts`)
 
     render(<TurnDiffPartView sessionId="server:session-c" from="user-3" files={files} />)
+    fireEvent.click(screen.getByText('7 files changed'))
 
-    expect(screen.getByText('7 files changed')).toBeInTheDocument()
     expect(screen.queryByText('src/file-6.ts')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByText('Show all'))

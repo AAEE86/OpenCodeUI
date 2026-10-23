@@ -410,8 +410,6 @@ export const ChatPane = memo(function ChatPane({
   const hasRenderableMessages = renderedMessages.length > 0
   const chatAreaMountKey = messagesReady || hasRenderableMessages ? (routeSessionId ?? 'home') : null
   const inputDisabled = !!routeSessionId && loadState === 'error' && messages.length === 0
-  const chatPageViewModel = useChatPageViewModel(projectedMessages)
-
   // 切 session remount 时默认视为贴底，避免回底按钮闪一下
   useEffect(() => {
     if (chatAreaMountKey == null) return
@@ -844,7 +842,12 @@ export const ChatPane = memo(function ChatPane({
     setChatContentWidth,
     chatInputWidth,
     setChatInputWidth,
+    showTimelineNotices,
+    showQueuedCompaction,
   } = useTheme()
+
+  // 提示行开关参与可见性过滤：关掉后这些消息不进入时间线
+  const chatPageViewModel = useChatPageViewModel(projectedMessages, showTimelineNotices)
 
   // ── 对话列/输入框宽度（左缘拖拽调宽，两个独立把手）──
   // 样式与交互抄 dsh ConversationWidthControls，按需求收窄成左缘单把手 × 2：
@@ -1062,7 +1065,7 @@ export const ChatPane = memo(function ChatPane({
                 registerMessage={registerMessage}
                 retryStatus={retryStatus}
                 queuedFollowUps={queuedPrompts}
-                queuedCompactions={queuedCompactions}
+                queuedCompactions={showQueuedCompaction ? queuedCompactions : undefined}
                 queueEditingId={queueEditing?.item.id}
                 queueMutation={queueMutation}
                 onQueueSteer={handleSteerQueuedPrompt}

@@ -242,6 +242,18 @@ export function useTheme() {
     themeStore.setProcessCollapseEnabled(enabled)
   }, [])
 
+  const setShowTimelineNotices = useCallback((enabled: boolean) => {
+    themeStore.setShowTimelineNotices(enabled)
+  }, [])
+
+  const setShowTurnDiff = useCallback((enabled: boolean) => {
+    themeStore.setShowTurnDiff(enabled)
+  }, [])
+
+  const setShowQueuedCompaction = useCallback((enabled: boolean) => {
+    themeStore.setShowQueuedCompaction(enabled)
+  }, [])
+
   const setCodeBlockThemeLight = useCallback((id: string) => {
     themeStore.setCodeBlockThemeLight(id)
   }, [])
@@ -390,6 +402,14 @@ export function useTheme() {
     // 过程折叠
     processCollapseEnabled: state.processCollapseEnabled,
     setProcessCollapseEnabled,
+
+    // 时间线提示行 / 回合文件变更 / 压缩排队
+    showTimelineNotices: state.showTimelineNotices,
+    setShowTimelineNotices,
+    showTurnDiff: state.showTurnDiff,
+    setShowTurnDiff,
+    showQueuedCompaction: state.showQueuedCompaction,
+    setShowQueuedCompaction,
 
     // 输入框选择器样式（独立图标按钮 / DSH 风格汇总菜单）
     composerSelectorStyle: state.composerSelectorStyle,

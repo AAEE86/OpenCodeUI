@@ -397,7 +397,7 @@ export const ChatArea = memo(
       ref,
     ) => {
       const { t } = useTranslation('chat')
-      const { processCollapseEnabled } = useTheme()
+      const { processCollapseEnabled, showTimelineNotices, showTurnDiff } = useTheme()
       const { presentation } = useChatViewport()
       const atBottomThreshold = presentation.isCompact ? 150 : AT_BOTTOM_THRESHOLD_PX
       const paddingClass = presentation.isCompact ? 'px-3' : 'px-5'
@@ -407,8 +407,8 @@ export const ChatArea = memo(
 
       // ── 派生数据 ──
       const entries = useMemo(
-        () => visibleMessageEntriesProp ?? buildVisibleMessageEntries(messages),
-        [messages, visibleMessageEntriesProp],
+        () => visibleMessageEntriesProp ?? buildVisibleMessageEntries(messages, { showNotices: showTimelineNotices }),
+        [messages, visibleMessageEntriesProp, showTimelineNotices],
       )
       const visibleMessages = useMemo(
         () => visibleMessagesProp ?? entries.map(e => e.message),
@@ -439,13 +439,14 @@ export const ChatArea = memo(
       }>({ processCollapseEnabled })
       const timeline = useMemo<ProcessTimelineItem[]>(() => {
         const next = !processCollapseEnabled
-          ? buildFlatTimeline(visibleMessages, isStreaming)
+          ? buildFlatTimeline(visibleMessages, isStreaming, showTurnDiff)
           : buildProcessTimeline(visibleMessages, {
               turnDurationMap,
               sessionIsStreaming: isStreaming,
               messageHasProcess: messageHasProcessContent,
               messageHasFinal: messageHasFinalContent,
               isUserEntryReady: emptyShellGate.isReady,
+              turnDiff: showTurnDiff,
             })
         const previous =
           previousTimelineRef.current.processCollapseEnabled === processCollapseEnabled
@@ -461,6 +462,7 @@ export const ChatArea = memo(
         visibleMessages,
         turnDurationMap,
         isStreaming,
+        showTurnDiff,
         emptyShellGate.version,
         emptyShellGate.isReady,
       ])

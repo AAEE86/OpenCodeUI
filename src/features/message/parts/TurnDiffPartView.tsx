@@ -1,9 +1,9 @@
 // ============================================
 // 回合文件变更摘要（官方 timeline 的 TurnDiff 行）
 //
-// 官方在每个回合 idle 之后按 assistant.snapshot.files 汇总本轮改过的文件，
-// 用 session.diff({ from: 该轮 user message }) 拉取补丁；列表先显示路径，
-// 点开某个文件再渲染 diff。这里保持同样的行为（虚拟列表下按需渲染）。
+// 默认收起成一行「N 个文件变更」，点开才列文件、再点文件看 diff。
+// 官方是列表常驻，这里按本项目的信息流密度收了一级，避免每轮都铺一屏。
+// 默认关闭，可在设置里打开。
 // ============================================
 
 import { memo, useEffect, useState } from 'react'
@@ -12,6 +12,7 @@ import { ChevronDownIcon } from '../../../components/Icons'
 import { DiffView } from '../../../components/DiffView'
 import { getTurnDiff } from '../../../api/session'
 import type { FileDiff } from '../../../api/types'
+import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
 import { chevronClass } from '../messageExpand'
 
 /** 官方 turnDiffFileLimit 同款：列表默认最多露 5 个文件 */
@@ -48,14 +49,17 @@ export const TurnDiffPartView = memo(function TurnDiffPartView({
 }: TurnDiffPartViewProps) {
   const { t } = useTranslation('message')
   const cacheKey = sessionId ? `${sessionId}:${from}` : ''
+  const [expanded, setExpanded] = useUiDisclosureState(stateKey ?? `turn-diff:${cacheKey}`, false)
   const [fetched, setFetched] = useState<{ key: string; diffs: FileDiff[] } | null>(null)
-  // 已缓存的 diff 直接在渲染期取，避免在 effect 里同步 setState
-  const diffs = (fetched?.key === cacheKey ? fetched.diffs : undefined) ?? turnDiffCache.get(cacheKey) ?? null
   const [showAll, setShowAll] = useState(false)
   const [openFiles, setOpenFiles] = useState<ReadonlySet<string>>(() => new Set())
 
+  // 已缓存的 diff 直接在渲染期取，避免在 effect 里同步 setState
+  const diffs = (fetched?.key === cacheKey ? fetched.diffs : undefined) ?? turnDiffCache.get(cacheKey) ?? null
+
   useEffect(() => {
-    if (!sessionId || diffs) return
+    // 收起时不请求：历史回合很多，展开哪个才拉哪个
+    if (!expanded || !sessionId || diffs) return
 
     let cancelled = false
     getTurnDiff(sessionId, from)
@@ -69,7 +73,7 @@ export const TurnDiffPartView = memo(function TurnDiffPartView({
     return () => {
       cancelled = true
     }
-  }, [cacheKey, diffs, from, sessionId])
+  }, [cacheKey, diffs, expanded, from, sessionId])
 
   const allFiles = diffs?.map(diff => diff.file) ?? files
   if (allFiles.length === 0) return null
@@ -88,58 +92,71 @@ export const TurnDiffPartView = memo(function TurnDiffPartView({
   }
 
   return (
-    <div className="flex flex-col gap-2 px-3 py-2" data-component="turn-diff" data-state-key={stateKey}>
+    <div className="flex min-w-0 flex-col gap-1 px-3 py-1" data-component="turn-diff">
       <div className="flex min-w-0 items-center gap-2 text-[length:var(--fs-sm)]">
-        <span className="font-medium tabular-nums text-text-300">
-          {t('system.filesChanged', { count: allFiles.length })}
-        </span>
+        <button
+          type="button"
+          className="flex min-w-0 items-center gap-1.5 text-text-400 hover:text-text-200"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+        >
+          <ChevronDownIcon className={chevronClass(expanded)} />
+          <span className="truncate tabular-nums">
+            {t('system.filesChanged', { count: allFiles.length })}
+          </span>
+        </button>
         {diffs && diffs.length > 0 && (
-          <span className="flex items-center gap-1 tabular-nums">
+          <span className="flex shrink-0 items-center gap-1 tabular-nums">
             <span className="text-success-100">+{additions ?? 0}</span>
             <span className="text-danger-100">-{deletions ?? 0}</span>
           </span>
         )}
-        {allFiles.length > TURN_DIFF_FILE_LIMIT && (
-          <button
-            type="button"
-            className="ml-auto shrink-0 text-text-500 hover:text-text-300"
-            onClick={() => setShowAll(value => !value)}
-          >
-            {showAll ? t('showLess') : t('showAll')}
-          </button>
-        )}
       </div>
 
-      <div className="flex flex-col">
-        {visibleFiles.map(file => {
-          const diff = diffs?.find(item => item.file === file)
-          const open = openFiles.has(file)
-          return (
-            <div key={file} className="min-w-0">
-              <button
-                type="button"
-                className="flex w-full min-w-0 items-center gap-2 py-0.5 text-left text-[length:var(--fs-sm)] text-text-400 hover:text-text-200"
-                onClick={() => diff && toggleFile(file)}
-                title={file}
-              >
-                <ChevronDownIcon className={`${chevronClass(open)} shrink-0 ${diff ? '' : 'invisible'}`} />
-                <span className="min-w-0 flex-1 truncate">{file}</span>
-                {diff && (
-                  <span className="shrink-0 tabular-nums">
-                    <span className="text-success-100">+{diff.additions}</span>{' '}
-                    <span className="text-danger-100">-{diff.deletions}</span>
-                  </span>
-                )}
-              </button>
-              {open && diff?.patch && (
-                <div className="pb-2">
-                  <DiffView diff={diff.patch} filePath={file} maxHeight={320} defaultCollapsed={false} />
+      {expanded && (
+        <>
+          <div className="flex flex-col">
+            {visibleFiles.map(file => {
+              const diff = diffs?.find(item => item.file === file)
+              const open = openFiles.has(file)
+              return (
+                <div key={file} className="min-w-0">
+                  <button
+                    type="button"
+                    className="flex w-full min-w-0 items-center gap-2 py-0.5 text-left text-[length:var(--fs-sm)] text-text-400 hover:text-text-200"
+                    onClick={() => diff && toggleFile(file)}
+                    title={file}
+                  >
+                    <ChevronDownIcon className={`${chevronClass(open)} shrink-0 ${diff ? '' : 'invisible'}`} />
+                    <span className="min-w-0 flex-1 truncate">{file}</span>
+                    {diff && (
+                      <span className="shrink-0 tabular-nums">
+                        <span className="text-success-100">+{diff.additions}</span>{' '}
+                        <span className="text-danger-100">-{diff.deletions}</span>
+                      </span>
+                    )}
+                  </button>
+                  {open && diff?.patch && (
+                    <div className="pb-2">
+                      <DiffView diff={diff.patch} filePath={file} maxHeight={320} defaultCollapsed={false} />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
+              )
+            })}
+          </div>
+
+          {allFiles.length > TURN_DIFF_FILE_LIMIT && (
+            <button
+              type="button"
+              className="self-start text-[length:var(--fs-xs)] text-text-500 hover:text-text-300"
+              onClick={() => setShowAll(value => !value)}
+            >
+              {showAll ? t('showLess') : t('showAll')}
+            </button>
+          )}
+        </>
+      )}
     </div>
   )
 })

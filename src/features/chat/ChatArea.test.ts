@@ -146,13 +146,25 @@ describe('buildVisibleMessageEntries', () => {
       },
     ] as SessionMessageInfo[]
 
-    const entries = buildVisibleMessageEntries([createUserMessage('user-1', 1, '你好'), ...notices])
+    const entries = buildVisibleMessageEntries([createUserMessage('user-1', 1, '你好'), ...notices], {
+      showNotices: true,
+    })
     const ids = entries.map(entry => entry.message.id)
 
     expect(ids).toEqual(
       expect.arrayContaining(['agent-switch', 'model-switch', 'skill', 'system', 'synthetic', 'synthetic-error']),
     )
     expect(ids).not.toContain('synthetic-context')
+  })
+
+  it('hides timeline notices by default (setting off)', () => {
+    const entries = buildVisibleMessageEntries([
+      createUserMessage('user-1', 1, '你好'),
+      { id: 'agent-switch', type: 'agent-switched', agent: 'plan', time: { created: 2 } } as SessionMessageInfo,
+      { id: 'skill', type: 'skill', skill: 'pdf', name: 'PDF', text: '', time: { created: 3 } } as SessionMessageInfo,
+    ])
+
+    expect(entries.map(entry => entry.message.id)).toEqual(['user-1'])
   })
 
   it('keeps source ids for merged assistant tool messages', () => {
@@ -1024,6 +1036,7 @@ describe('buildProcessTimeline', () => {
       sessionIsStreaming: false,
       messageHasProcess: hasProcess,
       messageHasFinal: hasFinal,
+      turnDiff: true,
     })
 
     expect(timeline.at(-1)).toMatchObject({
@@ -1043,6 +1056,7 @@ describe('buildProcessTimeline', () => {
       messageHasProcess: hasProcess,
       messageHasFinal: hasFinal,
       isUserEntryReady: () => true,
+      turnDiff: true,
     })
 
     expect(timeline.some(item => item.kind === 'turn-diff')).toBe(false)
@@ -1061,7 +1075,7 @@ describe('buildFlatTimeline', () => {
       second,
     ]
 
-    const timeline = buildFlatTimeline(messages, true)
+    const timeline = buildFlatTimeline(messages, true, true)
     expect(timeline.filter(item => item.kind === 'message')).toHaveLength(4)
     expect(timeline.find(item => item.kind === 'turn-diff')).toMatchObject({
       userMessageId: 'user-1',
@@ -1076,8 +1090,8 @@ describe('buildFlatTimeline', () => {
     assistant.snapshot = { files: ['src/a.ts'] }
     const messages = [createUserMessage('user-1', 1000), assistant]
 
-    expect(buildFlatTimeline(messages, true).some(item => item.kind === 'turn-diff')).toBe(false)
-    expect(buildFlatTimeline(messages, false).some(item => item.kind === 'turn-diff')).toBe(true)
+    expect(buildFlatTimeline(messages, true, true).some(item => item.kind === 'turn-diff')).toBe(false)
+    expect(buildFlatTimeline(messages, false, true).some(item => item.kind === 'turn-diff')).toBe(true)
   })
 })
 

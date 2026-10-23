@@ -1,5 +1,38 @@
 # Changelog
 
+## [v0.7.22] - 2026-10-23
+
+- refactor(input): Android IME 兜底收敛为 useAndroidImeSafeTextarea (5b599f46)
+- fix(input): Android WebView 全选删除后重建 textarea 节点 (69617707)
+- fix(attachment): skill 附件展开后补上类型和技能 ID (1bf39b22)
+- fix(message): 渲染用户消息里的 skill 附件 (acf287d6)
+- fix(timeline): 文件变更收敛为描述性一行，diff 复用工具卡 (6c9c3387)
+- fix(timeline): 压缩消息独立成行，失败提示不再被开关隐藏 (0418523f)
+- fix(timeline): 文件 diff 改为行下展开，去掉套娃卡片 (e956ad4e)
+- fix(timeline): 回合文件变更改为正文末尾的卡片 (d9ee30c4)
+- chore(preview): 增加时间线 UI 的浏览器预览页 (e921d91b)
+- fix(timeline): 提示行统一为分隔线样式，并新增默认关闭开关 (af50264c)
+- feat(session): 实时处理 session.moved 并渲染移动提示 (45bf6945)
+- feat(timeline): 补齐切换记录、压缩排队与回合 diff 的渲染 (8c9e02e1)
+- fix(message): 重试卡片显示实时倒计时 (9d5e40c8)
+- fix(attachment): file:// 附件地址按段编码 (95e19efc)
+- fix(files): 切换预览标签不再改变标签顺序 (5b8be80d)
+- fix(events): 切回前台复核半开连接，短时切屏保持懒连接 (f8490164)
+- perf(session-list): 目录补拉按官方页大小一次拿满 (9e20a5ea)
+- refactor(session-list): 搜索改官方口径，本地匹配 + 会话 ID 回读 (73874945)
+- fix(session-list): 搜索补全结果跟服务器绑定，切服务器不串 (1414f17a)
+- docs(session-list): 记录 session.list 的实测语义 (9ae6b1e7)
+- fix(session-list): 索引没覆盖的旧会话也能搜到 (a60ff2a5)
+- fix(session-list): 重连撞上在途拉取时，落地后再补一次 (58282d64)
+- fix(session-list): 服务器被删除时释放索引与事件订阅 (6ec8625e)
+- fix(session-list): 翻页以当前目录为准，去掉 2000 条硬上限 (ff89068c)
+- perf(session-list): 首屏只拉一页 200 条，不再自动续页 (a5fee557)
+- fix(session-list): 当前目录被挤出索引时按目录补拉一次 (4b9c4119)
+- fix(session-list): 展开量跟随目录，切走再切回来不跳 (eeeee4f9)
+- perf(session-list): 每台服务器一份会话索引，切目录不再发请求 (ddec0aad)
+- perf(session): 进会话复用列表元信息并预取首屏，恢复动作让出首屏路径 (c8f8bfe6)
+- fix(api): 相对 baseUrl 补全为绝对地址 (1c78fed7)
+
 ## [v0.7.21] - 2026-10-20
 
 - fix(server): 健康检查探当前生效地址，不再盯着列表第一行 (e846d751)

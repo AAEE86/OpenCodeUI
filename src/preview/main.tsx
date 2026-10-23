@@ -4,6 +4,7 @@ import 'katex/dist/katex.min.css'
 import '../index.css'
 import i18n from '../i18n'
 import { themeStore } from '../store/themeStore'
+import { FullscreenProvider } from '../contexts'
 import { TimelinePreview } from './TimelinePreview'
 
 // 与 src/main.tsx 相同：React 渲染前先把主题 CSS 变量注入
@@ -27,6 +28,8 @@ for (const element of [document.documentElement, document.body, document.getElem
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <TimelinePreview />
+    <FullscreenProvider>
+      <TimelinePreview />
+    </FullscreenProvider>
   </StrictMode>,
 )

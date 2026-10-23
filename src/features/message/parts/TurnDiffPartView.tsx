@@ -31,6 +31,8 @@ interface TurnDiffPartViewProps {
   diffs?: FileDiff[]
   /** 预览用：初始是否展开 */
   defaultExpanded?: boolean
+  /** 预览用：初始展开的文件 */
+  defaultOpenFiles?: string[]
 }
 
 function splitPath(file: string): { dir: string; name: string } {
@@ -53,6 +55,7 @@ export const TurnDiffPartView = memo(function TurnDiffPartView({
   stateKey,
   diffs: diffsProp,
   defaultExpanded,
+  defaultOpenFiles,
 }: TurnDiffPartViewProps) {
   const { t } = useTranslation('message')
   const cacheKey = sessionId ? `${sessionId}:${from}` : ''
@@ -62,7 +65,9 @@ export const TurnDiffPartView = memo(function TurnDiffPartView({
   )
   const [fetched, setFetched] = useState<{ key: string; diffs: FileDiff[] } | null>(null)
   const [showAll, setShowAll] = useState(false)
-  const [openFiles, setOpenFiles] = useState<ReadonlySet<string>>(() => new Set())
+  const [openFiles, setOpenFiles] = useState<ReadonlySet<string>>(
+    () => new Set(defaultOpenFiles ?? []),
+  )
 
   // 已缓存的 diff 直接在渲染期取，避免在 effect 里同步 setState
   const loadedDiffs = (fetched?.key === cacheKey ? fetched.diffs : undefined) ?? getCachedTurnDiff(cacheKey) ?? null
@@ -135,40 +140,48 @@ export const TurnDiffPartView = memo(function TurnDiffPartView({
               const { dir, name } = splitPath(file)
               const status = statusOf(diff)
 
-              if (open && diff?.patch) {
-                return (
-                  <div key={file} className="bg-bg-100/40 p-2">
-                    <DiffView diff={diff.patch} filePath={file} maxHeight={320} defaultCollapsed={false} />
-                  </div>
-                )
-              }
-
               return (
-                <button
-                  key={file}
-                  type="button"
-                  className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-bg-200/30"
-                  onClick={() => diff && toggleFile(file)}
-                  title={file}
-                  disabled={!diff}
-                >
-                  <span
-                    className={`w-3 shrink-0 font-mono text-[10px] font-semibold leading-none ${status.className}`}
-                    title={diff?.status}
+                <div key={file} className="min-w-0">
+                  <button
+                    type="button"
+                    className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-bg-200/30"
+                    onClick={() => diff && toggleFile(file)}
+                    title={file}
+                    disabled={!diff}
                   >
-                    {status.letter}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-xs)]">
-                    <span className="text-text-500">{dir}</span>
-                    <span className="text-text-200">{name}</span>
-                  </span>
-                  {diff && (
-                    <span className="shrink-0 tabular-nums text-[length:var(--fs-xs)]">
-                      <span className="text-success-100">+{diff.additions}</span>{' '}
-                      <span className="text-danger-100">-{diff.deletions}</span>
+                    <span
+                      className={`w-3 shrink-0 font-mono text-[10px] font-semibold leading-none ${status.className}`}
+                      title={diff?.status}
+                    >
+                      {status.letter}
                     </span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-xs)]">
+                      <span className="text-text-500">{dir}</span>
+                      <span className="text-text-200">{name}</span>
+                    </span>
+                    {diff && (
+                      <span className="shrink-0 tabular-nums text-[length:var(--fs-xs)]">
+                        <span className="text-success-100">+{diff.additions}</span>{' '}
+                        <span className="text-danger-100">-{diff.deletions}</span>
+                      </span>
+                    )}
+                    {diff?.patch && (
+                      <ChevronDownIcon className={`${chevronClass(open)} shrink-0 text-text-500`} />
+                    )}
+                  </button>
+
+                  {open && diff?.patch && (
+                    <div className="border-t border-border-200/40 bg-bg-100/40">
+                      <DiffView
+                        bare
+                        diff={diff.patch}
+                        filePath={file}
+                        maxHeight={320}
+                        defaultCollapsed={false}
+                      />
+                    </div>
                   )}
-                </button>
+                </div>
               )
             })}
           </div>

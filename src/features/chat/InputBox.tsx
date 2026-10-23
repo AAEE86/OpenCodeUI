@@ -90,6 +90,10 @@ const COMPOSER_MIN_HEIGHT = 144
 const COMPOSER_DESKTOP_MAX_HEIGHT = 420
 const COMPOSER_COMPACT_MAX_HEIGHT = 320
 
+function isAndroidWebView(): boolean {
+  return typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
 }
@@ -508,6 +512,9 @@ function InputBoxComponent({
   const footerRef = useRef<HTMLDivElement>(null)
   const isComposingRef = useRef(false)
   const compositionEndTimerRef = useRef<number | null>(null)
+  const selectAllRef = useRef(false)
+  const imeRebuildRef = useRef(false)
+  const [imeResetKey, setImeResetKey] = useState(0)
   const [composerMaxHeight, setComposerMaxHeight] = useState(280)
   const [inputContainerMaxHeight, setInputContainerMaxHeight] = useState(240)
   const [textareaMaxHeight, setTextareaMaxHeight] = useState(180)
@@ -693,6 +700,59 @@ function InputBoxComponent({
       if (budgetRaf !== null) cancelAnimationFrame(budgetRaf)
     }
   }, [updateComposerHeightBudget])
+
+  // Android WebView：搜狗全选删除会把 textarea 的编辑节点弄成僵尸连接
+  // （DOM、焦点、系统 InputConnection 都还在，但 commitText 永远进不来；
+  // 同一页面里新建的 textarea 却正常）。文本被一次清空时直接重建节点。
+  const rebuildImeNode = useCallback(() => {
+    if (imeRebuildRef.current) return
+    imeRebuildRef.current = true
+    setText('')
+    setImeResetKey(key => key + 1)
+    window.setTimeout(() => {
+      imeRebuildRef.current = false
+    }, 300)
+  }, [])
+
+  useEffect(() => {
+    if (!isAndroidWebView()) return
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    const rememberSelectAll = () => {
+      selectAllRef.current =
+        textarea.value.length > 0 &&
+        textarea.selectionStart === 0 &&
+        textarea.selectionEnd === textarea.value.length
+    }
+    const onSelectionChange = () => {
+      if (document.activeElement === textarea) rememberSelectAll()
+    }
+    const onInput = () => {
+      if (textarea.value !== '' || !selectAllRef.current) return
+      selectAllRef.current = false
+      rebuildImeNode()
+    }
+
+    textarea.addEventListener('select', rememberSelectAll)
+    textarea.addEventListener('selectstart', rememberSelectAll)
+    textarea.addEventListener('input', onInput)
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => {
+      textarea.removeEventListener('select', rememberSelectAll)
+      textarea.removeEventListener('selectstart', rememberSelectAll)
+      textarea.removeEventListener('input', onInput)
+      document.removeEventListener('selectionchange', onSelectionChange)
+    }
+  }, [imeResetKey, rebuildImeNode])
+
+  useLayoutEffect(() => {
+    if (imeResetKey === 0) return
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.focus({ preventScroll: true })
+    textarea.setSelectionRange(0, 0)
+  }, [imeResetKey])
 
   // 自动调整 textarea 高度
   useLayoutEffect(() => {
@@ -1991,6 +2051,7 @@ function InputBoxComponent({
                       </div>
                     )}
                     <textarea
+                      key={imeResetKey}
                       ref={textareaRef}
                       value={text}
                       onChange={handleChange}

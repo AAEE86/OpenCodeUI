@@ -108,6 +108,32 @@ describe('InputBox slash command selection', () => {
     promptHistoryStore.reset()
   })
 
+  it('Android 全选删除后重建 textarea 节点', async () => {
+    const userAgent = vi
+      .spyOn(navigator, 'userAgent', 'get')
+      .mockReturnValue(
+        'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+      )
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} />)
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+
+    textarea.focus()
+    fireEvent.input(textarea, { target: { value: 'hello' } })
+    textarea.setSelectionRange(0, textarea.value.length)
+    document.dispatchEvent(new Event('selectionchange'))
+
+    fireEvent.input(textarea, { target: { value: '' } })
+
+    await waitFor(() => {
+      const next = screen.getByRole('textbox') as HTMLTextAreaElement
+      expect(next).not.toBe(textarea)
+      expect(next.value).toBe('')
+    })
+
+    userAgent.mockRestore()
+  })
+
   it('executes frontend commands immediately on selection', async () => {
     slashCommands = [{ name: 'compact', description: 'Compact session', source: 'frontend' }]
     const onCommand = vi.fn()

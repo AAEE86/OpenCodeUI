@@ -93,14 +93,32 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         grow()
         return
       }
-      if (snapshot.hasMore) {
+      if (!snapshot.hasMore) return
+      // 服务端翻页是全局的：某一页可能一条都不属于当前目录。
+      // 以「当前目录有没有变多」为准，最多连翻三页，别让点击看起来没反应。
+      const before = filteredSessions.length
+      for (let page = 0; page < 3; page++) {
         await sessionIndexStore.loadMore(serverId)
-        grow()
+        const latest = sessionIndexStore.getSnapshot(serverId)
+        const inDirectory = currentDirectory
+          ? latest.sessions.filter(item => isSameDirectory(currentDirectory, item.location?.directory)).length
+          : latest.sessions.length
+        if (inDirectory > before || !latest.hasMore) break
       }
+      grow()
     } finally {
       setIsLoadingMore(false)
     }
-  }, [isLoadingMore, hasMore, filteredSessions.length, limit, grow, snapshot.hasMore, serverId])
+  }, [
+    isLoadingMore,
+    hasMore,
+    filteredSessions.length,
+    limit,
+    grow,
+    snapshot.hasMore,
+    serverId,
+    currentDirectory,
+  ])
 
   const createSession = useCallback(
     async (title?: string) => {

@@ -122,7 +122,8 @@ describe('SessionProvider', () => {
     latestContext = null
     storeMock.ensure.mockClear()
     storeMock.ensureDirectory.mockClear()
-    storeMock.loadMore.mockClear()
+    storeMock.loadMore.mockReset()
+    storeMock.loadMore.mockImplementation(() => Promise.resolve())
     storeMock.remove.mockClear()
     storeMock.patch.mockClear()
     storeMock.upsert.mockClear()
@@ -201,6 +202,33 @@ describe('SessionProvider', () => {
     })
 
     expect(storeMock.loadMore).toHaveBeenCalledWith('local')
+  })
+
+  it('「显示更多」连翻到当前目录出现新行就停', async () => {
+    storeMock.setSnapshotForTest({
+      ready: true,
+      hasMore: true,
+      sessions: [makeSession('ses_other', '/workspace/other')],
+    })
+    renderProvider()
+
+    let pages = 0
+    storeMock.loadMore.mockImplementation(async () => {
+      pages += 1
+      if (pages < 2) return
+      storeMock.setSnapshotForTest({
+        ready: true,
+        hasMore: true,
+        sessions: [makeSession('ses_other', '/workspace/other'), makeSession('ses_b', '/workspace/demo')],
+      })
+    })
+
+    await act(async () => {
+      await latestContext!.loadMore()
+    })
+
+    expect(storeMock.loadMore).toHaveBeenCalledTimes(2)
+    expect(latestContext?.sessions.map(session => session.id)).toEqual(['ses_b'])
   })
 
   it('切换目录不重新拉索引', () => {

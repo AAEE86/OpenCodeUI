@@ -30,8 +30,6 @@ import type { Session } from '../types/api/session'
 const TTL_MS = 30_000
 /** 单页条数：首屏一页就要出内容，大库靠 cursor 续页 / 目录补拉 */
 const PAGE_LIMIT = 200
-/** 兜底上限：极端情况下也不无限翻页 */
-const MAX_SESSIONS = 2_000
 /** 目录级补拉的条数：只用来把「被挤出全局索引」的那个目录补出来 */
 const DIRECTORY_LIMIT = 100
 /** 首屏失败的重试退避（启动可能早于本地服务端就绪） */
@@ -335,7 +333,8 @@ class SessionIndexStore {
           // 首屏整页替换，续页追加；normalize 按 id 去重并统一排序
           entry.sessions = normalize([...(cursor ? entry.sessions : []), ...page.data])
           entry.cursor = page.next
-          entry.exhausted = !page.next || entry.sessions.length >= MAX_SESSIONS
+          // 到底只看服务端游标：不加本地条数上限，用户点多少就能翻多少
+          entry.exhausted = !page.next
           entry.ready = true
           entry.error = null
           entry.fetchedAt = Date.now()

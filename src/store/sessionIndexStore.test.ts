@@ -104,6 +104,24 @@ describe('sessionIndexStore', () => {
     expect(sessionIndexStore.getSnapshot(SERVER).sessions.map(item => item.id)).toEqual(['ses_b'])
   })
 
+  it('手动翻页不受条数上限截断（hasMore 只看服务端游标）', async () => {
+    let pageIndex = 0
+    listSessionsPageMock.mockImplementation(async () => {
+      const base = pageIndex * 200
+      pageIndex += 1
+      const rows = Array.from({ length: 200 }, (_, offset) =>
+        session(`ses_${base + offset}`, { time: { created: 1, updated: 100_000 - (base + offset) } }),
+      )
+      return page(rows, `cursor-${pageIndex}`)
+    })
+
+    await sessionIndexStore.ensure(SERVER)
+    for (let index = 0; index < 10; index++) await sessionIndexStore.loadMore(SERVER)
+
+    expect(sessionIndexStore.getSnapshot(SERVER).sessions).toHaveLength(2_200)
+    expect(sessionIndexStore.getSnapshot(SERVER).hasMore).toBe(true)
+  })
+
   it('首屏只拉一页，更多靠「显示更多」按 cursor 续页', async () => {
     listSessionsPageMock.mockResolvedValueOnce(page([session('ses_1')], 'cursor-2'))
     await sessionIndexStore.ensure(SERVER)

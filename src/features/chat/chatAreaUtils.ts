@@ -28,7 +28,6 @@ export function getTimelineRowYClass(
   next?: ProcessTimelineItem,
 ): string {
   if (item.kind === 'process-shell') return ROW_Y_TURN
-  if (item.kind === 'turn-diff') return ROW_Y_ASSISTANT_STACK
   if (isNoticeItem(item)) return ''
   if (isUserMessage(item.message)) return ROW_Y_TURN
 

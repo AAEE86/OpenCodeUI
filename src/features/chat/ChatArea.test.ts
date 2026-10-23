@@ -1039,11 +1039,11 @@ describe('buildProcessTimeline', () => {
       turnDiff: true,
     })
 
-    expect(timeline.at(-1)).toMatchObject({
-      kind: 'turn-diff',
-      userMessageId: 'user-1',
-      files: ['a.ts', 'b.ts'],
-    })
+    const shell = timeline.at(-1)
+    expect(shell?.kind).toBe('process-shell')
+    if (shell?.kind === 'process-shell') {
+      expect(shell.turnDiff).toEqual({ from: 'user-1', files: ['a.ts', 'b.ts'] })
+    }
   })
 
   it('does not append a turn diff while the turn is still running', () => {
@@ -1059,7 +1059,8 @@ describe('buildProcessTimeline', () => {
       turnDiff: true,
     })
 
-    expect(timeline.some(item => item.kind === 'turn-diff')).toBe(false)
+    const shell = timeline.find(item => item.kind === 'process-shell')
+    if (shell?.kind === 'process-shell') expect(shell.turnDiff).toBeUndefined()
   })
 })
 
@@ -1077,12 +1078,13 @@ describe('buildFlatTimeline', () => {
 
     const timeline = buildFlatTimeline(messages, true, true)
     expect(timeline.filter(item => item.kind === 'message')).toHaveLength(4)
-    expect(timeline.find(item => item.kind === 'turn-diff')).toMatchObject({
-      userMessageId: 'user-1',
-      files: ['src/a.ts'],
+    expect(timeline[1]).toMatchObject({
+      kind: 'message',
+      key: 'assistant-1',
+      turnDiff: { from: 'user-1', files: ['src/a.ts'] },
     })
     // 最后一个回合还在跑：不放摘要
-    expect(timeline.filter(item => item.kind === 'turn-diff')).toHaveLength(1)
+    expect(timeline.filter(item => item.kind === 'message' && item.turnDiff)).toHaveLength(1)
   })
 
   it('adds the last turn diff once streaming ends', () => {
@@ -1090,8 +1092,12 @@ describe('buildFlatTimeline', () => {
     assistant.snapshot = { files: ['src/a.ts'] }
     const messages = [createUserMessage('user-1', 1000), assistant]
 
-    expect(buildFlatTimeline(messages, true, true).some(item => item.kind === 'turn-diff')).toBe(false)
-    expect(buildFlatTimeline(messages, false, true).some(item => item.kind === 'turn-diff')).toBe(true)
+    expect(
+      buildFlatTimeline(messages, true, true).every(item => item.kind !== 'message' || !item.turnDiff),
+    ).toBe(true)
+    expect(buildFlatTimeline(messages, false, true)[1]).toMatchObject({
+      turnDiff: { from: 'user-1', files: ['src/a.ts'] },
+    })
   })
 })
 

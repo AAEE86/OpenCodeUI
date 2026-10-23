@@ -45,6 +45,7 @@ import {
   buildTurnLatestAssistantIdSet,
   reuseProcessTimelineItems,
   type ProcessTimelineItem,
+  type TurnDiffInfo,
 } from './chatPageModel'
 import { useTheme } from '../../hooks/useTheme'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
@@ -71,7 +72,6 @@ const bottomSpacerHeight = (bottomPadding: number) => (bottomPadding > 0 ? botto
 function estimateTimelineItemSize(item: ProcessTimelineItem | undefined): number {
   if (!item) return ROW_ESTIMATE
   if (item.kind === 'message') return ROW_ESTIMATE
-  if (item.kind === 'turn-diff') return 32 + Math.min(item.files.length, 5) * 20
   // 进行中默认展开：header + 壳内消息（空回合至少占 header）
   if (item.isActive) {
     const body = Math.max(item.children.length, 1) * ROW_ESTIMATE
@@ -149,6 +149,9 @@ interface MessageBodyProps {
   processContentScope?: 'all' | 'process' | 'final' | 'inline'
   /** step 完成信息是否由本实例渲染（壳内那截且壳外还有一份时传 false） */
   stepFinishVisible?: boolean
+  /** 回合文件变更摘要（渲染在正文末尾、step 信息之前） */
+  turnDiff?: TurnDiffInfo
+  sessionId?: string | null
   onEntryGrowComplete?: (messageId: string) => void
 }
 
@@ -164,6 +167,8 @@ const MessageBody = memo(function MessageBody({
   allowStreamingLayoutAnimation,
   processContentScope = 'all',
   stepFinishVisible,
+  turnDiff,
+  sessionId,
   onEntryGrowComplete,
 }: MessageBodyProps) {
   const messageId = message.id
@@ -189,6 +194,8 @@ const MessageBody = memo(function MessageBody({
             onFork={onFork}
             forkMessageId={forkMessageId}
             canUndo={undoable ? canUndo : undefined}
+            turnDiff={turnDiff}
+            sessionId={sessionId}
             onEntryGrowComplete={isUser ? onEntryGrowComplete : undefined}
           />
         </div>
@@ -273,14 +280,9 @@ const VirtualRow = memo(
               }
               allowStreamingLayoutAnimation={allowStreamingLayoutAnimation}
               processContentScope={item.processContentScope ?? 'all'}
-              onEntryGrowComplete={onEntryGrowComplete}
-            />
-          ) : item.kind === 'turn-diff' ? (
-            <TurnDiffPartView
+              turnDiff={item.turnDiff}
               sessionId={sessionId}
-              from={item.userMessageId}
-              files={item.files}
-              stateKey={`turn-diff:${item.key}`}
+              onEntryGrowComplete={onEntryGrowComplete}
             />
           ) : (
             <div className="flex justify-start">
@@ -322,6 +324,16 @@ const VirtualRow = memo(
                     isTurnLatestAssistant
                     allowStreamingLayoutAnimation={allowStreamingLayoutAnimation}
                     processContentScope="final"
+                    turnDiff={item.turnDiff}
+                    sessionId={sessionId}
+                  />
+                )}
+                {!item.finalMessage && item.turnDiff && (
+                  <TurnDiffPartView
+                    sessionId={sessionId}
+                    from={item.turnDiff.from}
+                    files={item.turnDiff.files}
+                    stateKey={`turn-diff:${item.turnDiff.from}`}
                   />
                 )}
               </div>
@@ -474,7 +486,6 @@ export const ChatArea = memo(
             map.set(item.message.id, index)
             return
           }
-          if (item.kind === 'turn-diff') return
           if (item.userMessageId) map.set(item.userMessageId, index)
           for (const child of item.children) map.set(child.message.id, index)
           if (item.finalMessage) map.set(item.finalMessage.id, index)

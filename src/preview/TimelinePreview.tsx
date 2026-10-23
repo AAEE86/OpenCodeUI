@@ -15,6 +15,7 @@ import {
   CompactionQueuedView,
   TimelineNoticeView,
   TurnDiffPartView,
+  primeTurnDiffCache,
   type NoticeMessage,
 } from '../features/message/parts'
 import { useTheme } from '../hooks/useTheme'
@@ -29,6 +30,9 @@ function textAssistant(id: string, text: string, createdOffset: number, complete
     agent: 'build',
     model: { providerID: 'anthropic', id: 'claude-sonnet-4-5' },
     content: [{ type: 'text', text }],
+    cost: 0.0123,
+    tokens: { input: 12_400, output: 860, reasoning: 0, cache: { read: 0, write: 0 } },
+    finish: 'stop',
     time: { created: NOW + createdOffset, completed: NOW + completedOffset },
   }
 }
@@ -180,6 +184,9 @@ const previewDiffs: FileDiff[] = [
   },
 ]
 
+// 真实对话流里让卡片直接拿到假 diff，不走接口
+primeTurnDiffCache('preview', 'preview-user', previewDiffs)
+
 const runningCompaction: SessionMessageCompaction = {
   id: 'preview-compaction-running',
   type: 'compaction',
@@ -322,19 +329,14 @@ export function TimelinePreview() {
               </div>
               <TimelineNoticeView message={agentSwitched} />
               <div className="py-1">
-                <MessageRenderer message={assistantMessage} />
+                <MessageRenderer
+                  message={assistantMessage}
+                  sessionId="preview"
+                  turnDiff={{ from: 'preview-user', files: previewDiffs.map(diff => diff.file) }}
+                />
               </div>
               <TimelineNoticeView message={modelSwitched} />
               <TimelineNoticeView message={systemNotice} />
-              <div className="py-1">
-                <TurnDiffPartView
-                  sessionId={null}
-                  from="preview-turn-inline"
-                  files={previewDiffs.map(diff => diff.file)}
-                  diffs={previewDiffs}
-                  stateKey="preview-turn-diff-inline"
-                />
-              </div>
               <CompactionQueuedView />
               <div className="py-1">
                 <MessageRenderer

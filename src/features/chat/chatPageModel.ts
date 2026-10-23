@@ -744,6 +744,14 @@ export function buildTurnLatestAssistantIdSet(visibleMessages: SessionMessageInf
   return latestIds
 }
 
+/** 回合文件变更摘要（附着在回合最后一条正文消息上，渲染在其正文末尾） */
+export interface TurnDiffInfo {
+  /** 该轮用户消息 id */
+  from: string
+  /** 各 step 记录到的变更文件（去重排序） */
+  files: string[]
+}
+
 /** 过程折叠：虚拟时间线上的一行 */
 export type ProcessTimelineItem =
   | {
@@ -752,6 +760,8 @@ export type ProcessTimelineItem =
       message: SessionMessageInfo
       /** 过程壳内消息的内容范围 */
       processContentScope?: 'process' | 'final' | 'inline'
+      /** 回合文件变更摘要（仅挂在回合最后一条正文消息上） */
+      turnDiff?: TurnDiffInfo
     }
   | {
       kind: 'process-shell'
@@ -767,14 +777,8 @@ export type ProcessTimelineItem =
       }>
       /** 壳外最终回答（结束后才有） */
       finalMessage?: SessionMessageInfo
-    }
-  | {
-      /** 回合结束后的文件变更摘要（官方 TurnDiff 行） */
-      kind: 'turn-diff'
-      key: string
-      userMessageId: string
-      /** 该回合里各 step 记录到的变更文件（去重排序） */
-      files: string[]
+      /** 回合文件变更摘要：有壳外 final 时挂在 final 上，没有时由壳外单独渲染 */
+      turnDiff?: TurnDiffInfo
     }
 
 /** 两行是否可共享同一对象（VirtualRow 靠 item 引用短路） */
@@ -783,7 +787,12 @@ export function sameProcessTimelineItem(a: ProcessTimelineItem, b: ProcessTimeli
   if (a.kind !== b.kind || a.key !== b.key) return false
 
   if (a.kind === 'message' && b.kind === 'message') {
-    return a.message === b.message && a.processContentScope === b.processContentScope
+    return (
+      a.message === b.message &&
+      a.processContentScope === b.processContentScope &&
+      a.turnDiff?.from === b.turnDiff?.from &&
+      a.turnDiff?.files === b.turnDiff?.files
+    )
   }
 
   if (a.kind === 'process-shell' && b.kind === 'process-shell') {
@@ -793,6 +802,8 @@ export function sameProcessTimelineItem(a: ProcessTimelineItem, b: ProcessTimeli
       a.durationMs !== b.durationMs ||
       a.isActive !== b.isActive ||
       a.finalMessage !== b.finalMessage ||
+      a.turnDiff?.from !== b.turnDiff?.from ||
+      a.turnDiff?.files !== b.turnDiff?.files ||
       a.children.length !== b.children.length
     ) {
       return false
@@ -805,14 +816,6 @@ export function sameProcessTimelineItem(a: ProcessTimelineItem, b: ProcessTimeli
       }
     }
     return true
-  }
-
-  if (a.kind === 'turn-diff' && b.kind === 'turn-diff') {
-    return (
-      a.userMessageId === b.userMessageId &&
-      a.files.length === b.files.length &&
-      a.files.every((file, index) => file === b.files[index])
-    )
   }
 
   return false
@@ -874,46 +877,37 @@ export function buildFlatTimeline(
     key: message.id,
     message,
   }))
+  if (!turnDiff) return items
 
-  const turns: Array<{ userId: string; lastIndex: number; files: Set<string> }> = []
+  const turns: Array<{ userId: string; lastAssistantIndex: number | null; files: Set<string> }> = []
   let current: (typeof turns)[number] | null = null
 
   messages.forEach((message, index) => {
     if (isUserMessage(message)) {
       if (current) turns.push(current)
-      current = { userId: message.id, lastIndex: index, files: new Set() }
+      current = { userId: message.id, lastAssistantIndex: null, files: new Set() }
       return
     }
     if (!current) return
-    current.lastIndex = index
     if (isAssistantMessage(message)) {
+      current.lastAssistantIndex = index
       for (const file of message.snapshot?.files ?? []) current.files.add(file)
     }
   })
   if (current) turns.push(current)
 
-  const diffByIndex = new Map<number, { userId: string; files: string[] }>()
-  if (!turnDiff) return items
   turns.forEach((turn, index) => {
-    if (turn.files.size === 0) return
+    if (turn.lastAssistantIndex == null || turn.files.size === 0) return
     if (index === turns.length - 1 && sessionIsStreaming) return
-    diffByIndex.set(turn.lastIndex, { userId: turn.userId, files: [...turn.files].sort() })
+    const target = items[turn.lastAssistantIndex]
+    if (target?.kind !== 'message') return
+    items[turn.lastAssistantIndex] = {
+      ...target,
+      turnDiff: { from: turn.userId, files: [...turn.files].sort() },
+    }
   })
-  if (diffByIndex.size === 0) return items
 
-  const result: ProcessTimelineItem[] = []
-  items.forEach((item, index) => {
-    result.push(item)
-    const diff = diffByIndex.get(index)
-    if (!diff) return
-    result.push({
-      kind: 'turn-diff',
-      key: `turn-diff:${diff.userId}`,
-      userMessageId: diff.userId,
-      files: diff.files,
-    })
-  })
-  return result
+  return items
 }
 
 function assistantHasLiveWork(message: AssistantMessage): boolean {
@@ -1173,6 +1167,9 @@ export function buildProcessTimeline(
 
     const finalOutside = !turnIsActive && finalAssistant && messageHasFinal(finalAssistant) ? finalAssistant : undefined
 
+    const files = !turnIsActive && turnDiff ? collectTurnFiles(assistants) : []
+    const turnDiffInfo: TurnDiffInfo | undefined = files.length > 0 ? { from: userId, files } : undefined
+
     // 进行中或有过程内容 → 挂壳
     // 更晚的空 pending 回合：turnIsActive=false 且无 children → 不挂壳（只显示 user）
     // 纯 final 正文、无过程 → 直接平铺
@@ -1186,28 +1183,27 @@ export function buildProcessTimeline(
         isActive: turnIsActive,
         children,
         finalMessage: finalOutside,
+        turnDiff: turnDiffInfo,
       })
     } else if (finalOutside) {
       items.push({
         kind: 'message',
         key: finalOutside.id,
         message: finalOutside,
+        turnDiff: turnDiffInfo,
       })
     } else {
-      for (const m of assistants) {
-        items.push({ kind: 'message', key: m.id, message: m })
-      }
+      assistants.forEach((m, index) => {
+        items.push({
+          kind: 'message',
+          key: m.id,
+          message: m,
+          turnDiff: index === assistants.length - 1 ? turnDiffInfo : undefined,
+        })
+      })
     }
 
     emitNotices(turn, false)
-
-    // 回合结束后追加文件变更摘要（官方 TurnDiff：idle 后按 snapshot.files 汇总）
-    if (!turnIsActive && turnDiff) {
-      const files = collectTurnFiles(assistants)
-      if (files.length > 0) {
-        items.push({ kind: 'turn-diff', key: `turn-diff:${userId}`, userMessageId: userId, files })
-      }
-    }
 
     appendFailedIdle(turn)
   }

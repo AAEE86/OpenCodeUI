@@ -1,19 +1,20 @@
 // ============================================
 // 回合文件变更摘要（官方 timeline 的 TurnDiff 行）
 //
-// 默认收起成一行「N 个文件变更」，点开才列文件、再点文件看 diff。
-// 官方是列表常驻，这里按本项目的信息流密度收了一级，避免每轮都铺一屏。
+// 以卡片形式挂在回合正文末尾（step 信息之前），默认收起成一行。
+// 展开后列出文件；点某个文件再内联展开 diff。
 // 默认关闭，可在设置里打开。
 // ============================================
 
 import { memo, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDownIcon } from '../../../components/Icons'
+import { ChevronDownIcon, GitDiffIcon } from '../../../components/Icons'
 import { DiffView } from '../../../components/DiffView'
 import { getTurnDiff } from '../../../api/session'
 import type { FileDiff } from '../../../api/types'
 import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
 import { chevronClass } from '../messageExpand'
+import { cacheTurnDiff, getCachedTurnDiff } from './turnDiffCache'
 
 /** 官方 turnDiffFileLimit 同款：列表默认最多露 5 个文件 */
 const TURN_DIFF_FILE_LIMIT = 5
@@ -32,17 +33,17 @@ interface TurnDiffPartViewProps {
   defaultExpanded?: boolean
 }
 
-/** 会话内跨虚拟行复用已拉到的 diff（只留最近若干轮，避免补丁长期占内存） */
-const turnDiffCache = new Map<string, FileDiff[]>()
-const MAX_CACHED_TURN_DIFFS = 50
+function splitPath(file: string): { dir: string; name: string } {
+  const index = Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\'))
+  if (index < 0) return { dir: '', name: file }
+  return { dir: file.slice(0, index + 1), name: file.slice(index + 1) }
+}
 
-function cacheTurnDiff(key: string, diffs: FileDiff[]) {
-  turnDiffCache.set(key, diffs)
-  while (turnDiffCache.size > MAX_CACHED_TURN_DIFFS) {
-    const oldest = turnDiffCache.keys().next().value
-    if (oldest === undefined) break
-    turnDiffCache.delete(oldest)
-  }
+function statusOf(diff: FileDiff | undefined): { letter: string; className: string } {
+  if (!diff) return { letter: '·', className: 'text-text-500' }
+  if (diff.status === 'added') return { letter: 'A', className: 'text-success-100' }
+  if (diff.status === 'deleted') return { letter: 'D', className: 'text-danger-100' }
+  return { letter: 'M', className: 'text-warning-100' }
 }
 
 export const TurnDiffPartView = memo(function TurnDiffPartView({
@@ -55,13 +56,16 @@ export const TurnDiffPartView = memo(function TurnDiffPartView({
 }: TurnDiffPartViewProps) {
   const { t } = useTranslation('message')
   const cacheKey = sessionId ? `${sessionId}:${from}` : ''
-  const [expanded, setExpanded] = useUiDisclosureState(stateKey ?? `turn-diff:${cacheKey}`, defaultExpanded ?? false)
+  const [expanded, setExpanded] = useUiDisclosureState(
+    stateKey ?? `turn-diff:${cacheKey}`,
+    defaultExpanded ?? false,
+  )
   const [fetched, setFetched] = useState<{ key: string; diffs: FileDiff[] } | null>(null)
   const [showAll, setShowAll] = useState(false)
   const [openFiles, setOpenFiles] = useState<ReadonlySet<string>>(() => new Set())
 
   // 已缓存的 diff 直接在渲染期取，避免在 effect 里同步 setState
-  const loadedDiffs = (fetched?.key === cacheKey ? fetched.diffs : undefined) ?? turnDiffCache.get(cacheKey) ?? null
+  const loadedDiffs = (fetched?.key === cacheKey ? fetched.diffs : undefined) ?? getCachedTurnDiff(cacheKey) ?? null
   const diffs = diffsProp ?? loadedDiffs
 
   useEffect(() => {
@@ -99,56 +103,72 @@ export const TurnDiffPartView = memo(function TurnDiffPartView({
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-1 px-3 py-1" data-component="turn-diff">
-      <div className="flex min-w-0 items-center gap-2 text-[length:var(--fs-sm)]">
-        <button
-          type="button"
-          className="flex min-w-0 items-center gap-1.5 text-text-400 hover:text-text-200"
-          onClick={() => setExpanded(!expanded)}
-          aria-expanded={expanded}
-        >
-          <ChevronDownIcon className={chevronClass(expanded)} />
-          <span className="truncate tabular-nums">
-            {t('system.filesChanged', { count: allFiles.length })}
-          </span>
-        </button>
+    <div
+      className="mt-2 overflow-hidden rounded-lg border border-border-200/60 bg-bg-200/20"
+      data-component="turn-diff"
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-bg-200/30"
+      >
+        <GitDiffIcon size={14} className="shrink-0 text-text-400" />
+        <span className="min-w-0 flex-1 truncate text-[length:var(--fs-sm)] font-medium text-text-200">
+          {t('system.filesChanged', { count: allFiles.length })}
+        </span>
         {diffs && diffs.length > 0 && (
-          <span className="flex shrink-0 items-center gap-1 tabular-nums">
-            <span className="text-success-100">+{additions ?? 0}</span>
-            <span className="text-danger-100">-{deletions ?? 0}</span>
+          <span className="flex shrink-0 items-center gap-1 tabular-nums text-[length:var(--fs-xs)]">
+            <span className="rounded bg-success-100/10 px-1.5 py-0.5 text-success-100">+{additions ?? 0}</span>
+            <span className="rounded bg-danger-100/10 px-1.5 py-0.5 text-danger-100">-{deletions ?? 0}</span>
           </span>
         )}
-      </div>
+        <ChevronDownIcon className={`${chevronClass(expanded)} shrink-0 text-text-400`} />
+      </button>
 
       {expanded && (
-        <>
-          <div className="flex flex-col">
+        <div className="border-t border-border-200/50">
+          <div className="divide-y divide-border-200/40">
             {visibleFiles.map(file => {
               const diff = diffs?.find(item => item.file === file)
               const open = openFiles.has(file)
+              const { dir, name } = splitPath(file)
+              const status = statusOf(diff)
+
+              if (open && diff?.patch) {
+                return (
+                  <div key={file} className="bg-bg-100/40 p-2">
+                    <DiffView diff={diff.patch} filePath={file} maxHeight={320} defaultCollapsed={false} />
+                  </div>
+                )
+              }
+
               return (
-                <div key={file} className="min-w-0">
-                  <button
-                    type="button"
-                    className="flex w-full min-w-0 items-center gap-2 py-0.5 text-left text-[length:var(--fs-sm)] text-text-400 hover:text-text-200"
-                    onClick={() => diff && toggleFile(file)}
-                    title={file}
+                <button
+                  key={file}
+                  type="button"
+                  className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-bg-200/30"
+                  onClick={() => diff && toggleFile(file)}
+                  title={file}
+                  disabled={!diff}
+                >
+                  <span
+                    className={`w-3 shrink-0 font-mono text-[10px] font-semibold leading-none ${status.className}`}
+                    title={diff?.status}
                   >
-                    <ChevronDownIcon className={`${chevronClass(open)} shrink-0 ${diff ? '' : 'invisible'}`} />
-                    <span className="min-w-0 flex-1 truncate">{file}</span>
-                    {diff && (
-                      <span className="shrink-0 tabular-nums">
-                        <span className="text-success-100">+{diff.additions}</span>{' '}
-                        <span className="text-danger-100">-{diff.deletions}</span>
-                      </span>
-                    )}
-                  </button>
-                  {open && diff?.patch && (
-                    <div className="pb-2">
-                      <DiffView diff={diff.patch} filePath={file} maxHeight={320} defaultCollapsed={false} />
-                    </div>
+                    {status.letter}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-xs)]">
+                    <span className="text-text-500">{dir}</span>
+                    <span className="text-text-200">{name}</span>
+                  </span>
+                  {diff && (
+                    <span className="shrink-0 tabular-nums text-[length:var(--fs-xs)]">
+                      <span className="text-success-100">+{diff.additions}</span>{' '}
+                      <span className="text-danger-100">-{diff.deletions}</span>
+                    </span>
                   )}
-                </div>
+                </button>
               )
             })}
           </div>
@@ -156,13 +176,13 @@ export const TurnDiffPartView = memo(function TurnDiffPartView({
           {allFiles.length > TURN_DIFF_FILE_LIMIT && (
             <button
               type="button"
-              className="self-start text-[length:var(--fs-xs)] text-text-500 hover:text-text-300"
+              className="flex w-full items-center justify-center border-t border-border-200/40 px-3 py-1.5 text-[length:var(--fs-xs)] text-text-500 transition-colors hover:bg-bg-200/30 hover:text-text-300"
               onClick={() => setShowAll(value => !value)}
             >
               {showAll ? t('showLess') : t('showAll')}
             </button>
           )}
-        </>
+        </div>
       )}
     </div>
   )

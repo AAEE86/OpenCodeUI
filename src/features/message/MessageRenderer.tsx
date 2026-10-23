@@ -25,10 +25,12 @@ import {
   RetryPartView,
   CompactionPartView,
   TimelineNoticeView,
+  TurnDiffPartView,
   MessageErrorView,
   type StepFinishInfo,
   type NoticeMessage,
 } from './parts'
+import type { TurnDiffInfo } from '../chat/chatPageModel'
 import { CollapsibleUserText, USER_HTML_ARTIFACT_PATTERN } from './CollapsibleUserText'
 import { extractToolData, type ToolViewPart } from './tools'
 import { ForkActionButton, UndoActionButton, useMessageActionBarClass } from './MessageActionBar'
@@ -285,6 +287,10 @@ interface MessageRendererProps {
   onFork?: (message: SessionMessageInfo, forkMessageId?: string) => Promise<void> | void
   forkMessageId?: string
   canUndo?: boolean
+  /** 回合文件变更摘要：渲染在正文末尾、step 信息之前 */
+  turnDiff?: TurnDiffInfo
+  /** 带服务器前缀的 session key，供 diff 拉取 */
+  sessionId?: string | null
   /** 用户消息入场生长完成（供过程壳等待挂载） */
   onEntryGrowComplete?: (messageId: string) => void
 }
@@ -300,6 +306,8 @@ export const MessageRenderer = memo(function MessageRenderer({
   onFork,
   forkMessageId,
   canUndo,
+  turnDiff,
+  sessionId,
   onEntryGrowComplete,
 }: MessageRendererProps) {
   if (message.type === 'user') {
@@ -379,6 +387,8 @@ export const MessageRenderer = memo(function MessageRenderer({
       stepFinishVisible={stepFinishVisible}
       onFork={onFork}
       forkMessageId={forkMessageId}
+      turnDiff={turnDiff}
+      sessionId={sessionId}
     />
   )
 })
@@ -616,6 +626,8 @@ const AssistantMessageView = memo(function AssistantMessageView({
   stepFinishVisible = true,
   onFork,
   forkMessageId,
+  turnDiff,
+  sessionId,
 }: {
   message: AssistantMessage
   allowStreamingLayoutAnimation?: boolean
@@ -625,6 +637,8 @@ const AssistantMessageView = memo(function AssistantMessageView({
   stepFinishVisible?: boolean
   onFork?: (message: SessionMessageInfo, forkMessageId?: string) => Promise<void> | void
   forkMessageId?: string
+  turnDiff?: TurnDiffInfo
+  sessionId?: string | null
 }) {
   const { t } = useTranslation('message')
   const { stepFinishDisplay, completedAtFormat, actionsOnLatestAssistantOnly } = useTheme()
@@ -763,6 +777,16 @@ const AssistantMessageView = memo(function AssistantMessageView({
                 return null
             }
           })}
+
+          {/* 回合文件变更：放在正文末尾、step 信息之前，避免和正文分离 */}
+          {turnDiff && processContentScope !== 'process' && processContentScope !== 'inline' && (
+            <TurnDiffPartView
+              sessionId={sessionId ?? null}
+              from={turnDiff.from}
+              files={turnDiff.files}
+              stateKey={`turn-diff:${turnDiff.from}`}
+            />
+          )}
 
           {/* step 完成信息：v2 里一个助手消息就是一整个 step，tokens / cost / finish
               全挂在消息上，所以固定放在本消息内容末尾一行。

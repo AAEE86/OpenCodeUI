@@ -65,6 +65,7 @@ import type { APIError } from '../types/api/common'
 import { clipboardErrorHandler, copyTextToClipboard, createErrorHandler } from '../utils'
 import { saveData } from '../utils/downloadUtils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
+import { scheduleIdle } from '../utils/scheduleIdle'
 import { serverStorage } from '../utils/perServerStorage'
 import { makeSessionKey, sessionKeyToServerId, splitSessionKey } from '../utils/sessionKey'
 import { sweepTaskChildBindings, verifyTaskChildBindings } from '../utils/taskChildBinding'
@@ -600,6 +601,9 @@ export function useChatSession({
       },
       onReconnected: (_reason: 'network' | 'server-switch') => {
         messageStore.markAllSessionsStale()
+        // 断连期间新建的子会话没收到 session.created：作废「已确认」标记，
+        // 让首屏落地后的关系恢复重新问一次（每个会话也只多一次）
+        childSessionStore.resetChildrenScans()
 
         // SSE 重连后重新加载当前会话，补齐断连期间可能丢失的消息
         if (routeSessionId) {
@@ -668,13 +672,15 @@ export function useChatSession({
     // No-op: parts are always in memory now
   }, [])
 
-  // Preload @ root directory and / commands for current session directory
+  // Preload @ root directory and / commands for current session directory.
+  // 依赖只跟目录/服务器走：同目录切会话不该重发这两次请求
+  //（缓存 TTL 只有 10s，挂在 routeSessionId 上等于每次切会话都打穿）。
   useEffect(() => {
-    if (!routeSessionId || !effectiveDirectory) return
+    if (!effectiveDirectory) return
 
     prefetchRootDirectory(effectiveDirectory, paneServerId).catch(() => {})
     prefetchCommands(effectiveDirectory, paneServerId).catch(() => {})
-  }, [routeSessionId, effectiveDirectory, paneServerId])
+  }, [effectiveDirectory, paneServerId])
 
   // agents 列表加载后，校验当前选中的 agent 是否存在于列表中
   // 选择值统一为 agent **id**（v2 API 用 id）；历史存储的显示名会被归一化成 id
@@ -702,29 +708,55 @@ export function useChatSession({
     return () => cancelAnimationFrame(frameId)
   }, [agents, selectedAgent, setSelectedAgent])
 
-  // Load child sessions and pending permissions on session change
-  // 页面刷新时 childSessionStore 是空的，需要先从 API 恢复子 session 关系
-  // 然后再加载权限请求（包括子 session 的权限）
-  // 切换 session 时同样要清空旧 session 的 pending 权限/问题，否则 A 会话的请求会残留在 B 会话
+  // ============================================
+  // 会话切换：先清掉旧会话残留，恢复动作延后到首屏消息落地
+  // ============================================
+  //
+  // 这里原来在切会话时同步发起 getSessionChildren + 全量权限 + 全量表单 +
+  // task 卡片绑定校验（内部最多 12 次 message.list）。这些请求会和首屏
+  // getSession / message.list 抢同源连接槽，直接把「进入会话」拖慢。
+  //
+  // 现在分两段：
+  //   1. 立即清空上一个会话的待处理请求（纯内存操作，防串台）
+  //   2. 首屏消息落地（loaded / error）后再恢复关系与权限，绑定校验放到空闲时
+  //
+  // 功能不减：刷新后子会话关系、权限弹窗、task 卡片绑定照样恢复，只是
+  // 不再挡在首屏前面。官方同样把子会话 sync 留在真正需要时
+  //（app/src/session/timeline/controller.tsx:301）。
   useEffect(() => {
     resetPendingRequests()
-    if (!routeSessionId) {
-      return
-    }
+  }, [routeSessionId, resetPendingRequests])
+
+  useEffect(() => {
+    if (!routeSessionId) return
+
+    // 首屏还没落地：先让消息占满带宽（idle / loading 直接返回）。
+    if (loadState !== 'loaded' && loadState !== 'error') return
 
     let cancelled = false
+    let cancelBindingScan: (() => void) | null = null
 
-    async function loadChildSessionsAndPermissions() {
-      // Step 1: 恢复子 session 关系（如果 store 中还没有）
-      const existingChildren = childSessionStore.getChildSessionIds(routeSessionId!)
-      if (existingChildren.length === 0) {
+    async function restoreSessionRelations() {
+      const sessionKey = routeSessionId!
+      const knownChildren = childSessionStore.getChildSessionIds(sessionKey)
+      // 子会话关系只能靠 REST 问清楚（列表和事件都不保证覆盖历史子会话）。
+      // 但每个会话问一次就够：问过之后要么 store 里已有子会话，要么确认没有；
+      // 之后新建的子会话会由 session.created 直接注册进来。
+      //
+      // 早先的做法是靠「消息里有没有 task 卡片 + 有没有更多历史」推断，
+      // 那是有概率漏判的（导入的会话树、卡片在未加载的历史页）。
+      // 记住「问过了」既省掉重复请求，又不依赖推断。
+      const shouldQueryChildren = knownChildren.length === 0 && !childSessionStore.hasScannedChildren(sessionKey)
+
+      if (shouldQueryChildren) {
         try {
-          const children = await getSessionChildren(routeSessionId!, effectiveDirectory, paneServerId)
+          const children = await getSessionChildren(sessionKey, effectiveDirectory, paneServerId)
           if (cancelled) return
-          // 注册所有子 session 到 store
           for (const child of children) {
             childSessionStore.registerChildSession(child, paneServerId)
           }
+          // 请求成功才落「已确认」：失败（离线、瞬时 5xx）下次进入还会再问
+          childSessionStore.markChildrenScanned(sessionKey)
           // 父子关系刚由 REST 建立：此前因「不知道子会话归属」而只弹了 toast、
           // 被缓存下来的权限/表单请求，现在补投进 pane（否则要刷新页面才挂上）
           flushPendingRequests()
@@ -733,32 +765,17 @@ export function useChatSession({
         }
       }
 
-      // 刷新/重进后运行中的 task 卡片 metadata 里没有 sessionID（progress 不落库）：
-      // 先一对一同步直绑，剩下的用 input.prompt 与子 session 首条用户消息
-      // 逐字比对精确绑定（在线时由 tool.progress 的 metadata.sessionID 精确下发，
-      // 这里是离线恢复通道——绝不用 agent/title 做概率性配对，会挂错会话）
-      sweepTaskChildBindings(paneServerId, routeSessionId!)
-      await verifyTaskChildBindings(paneServerId, routeSessionId!, async childKey => {
-        try {
-          const messages = await getSessionMessages(childKey, undefined, undefined, paneServerId)
-          const firstUser = messages.find(m => m.type === 'user')
-          return firstUser?.type === 'user' ? firstUser.text : undefined
-        } catch {
-          return undefined
-        }
-      })
-
       if (cancelled) return
 
-      // Step 2: 获取完整的 session family（主 session + 所有子孙）
-      const family = new Set(childSessionStore.getSessionAndDescendants(routeSessionId!))
+      // 完整的 session family（主 session + 所有子孙）
+      const family = new Set(childSessionStore.getSessionAndDescendants(sessionKey))
       // family 是复合 key；API 返回的 sessionID 是原始 id，兼容两种形式比较
       const familyRaw = new Set([...family].map(k => splitSessionKey(k).sessionId))
       const matchesFamily = (rawSessionId: string) =>
         familyRaw.has(rawSessionId) || familyRaw.has(splitSessionKey(rawSessionId).sessionId)
 
-      // Step 3: 获取所有待处理请求，然后用 family 过滤
-      // GET /permission 和 GET /question 返回全量数据，不传 sessionId 避免 N 次重复请求
+      // 待处理请求：GET /permission 和 GET /question 返回全量数据，
+      // 不传 sessionId 避免 N 次重复请求
       const [allPerms, allQuestions] = await Promise.all([
         getPendingPermissions(undefined, effectiveDirectory, paneServerId).catch(() => []),
         getPendingForms(undefined, effectiveDirectory, paneServerId).catch(() => []),
@@ -788,15 +805,40 @@ export function useChatSession({
         }
         return Array.from(merged.values())
       })
+
+      if (cancelled) return
+
+      // 刷新/重进后运行中的 task 卡片 metadata 里没有 sessionID（progress 不落库）：
+      // 先一对一同步直绑，剩下的用 input.prompt 与子 session 首条用户消息
+      // 逐字比对精确绑定（在线时由 tool.progress 的 metadata.sessionID 精确下发，
+      // 这里是离线恢复通道——绝不用 agent/title 做概率性配对，会挂错会话）。
+      //
+      // 这一步最多发 12 次 message.list，纯恢复性质：放到空闲时，别和用户
+      // 紧接着的操作抢连接。
+      cancelBindingScan = scheduleIdle(() => {
+        if (cancelled) return
+        sweepTaskChildBindings(paneServerId, sessionKey)
+        void verifyTaskChildBindings(paneServerId, sessionKey, async childKey => {
+          try {
+            const childMessages = await getSessionMessages(childKey, undefined, undefined, paneServerId)
+            const firstUser = childMessages.find(m => m.type === 'user')
+            return firstUser?.type === 'user' ? firstUser.text : undefined
+          } catch {
+            return undefined
+          }
+        })
+      })
     }
 
-    loadChildSessionsAndPermissions()
+    void restoreSessionRelations()
 
     return () => {
       cancelled = true
+      cancelBindingScan?.()
     }
   }, [
     routeSessionId,
+    loadState,
     effectiveDirectory,
     paneServerId,
     resetPendingRequests,

@@ -39,6 +39,9 @@ import { multiServerStore } from './store/multiServerStore'
 import { serverStore } from './store/serverStore'
 import { initNotificationSound } from './utils/notificationSoundBridge'
 import { createPtySession } from './api/pty'
+import { prefetchSessionMessages } from './api/messagePrefetch'
+import { isCompleteSessionInfo, sessionInfoCache } from './store/sessionInfoCache'
+import { INITIAL_MESSAGE_LIMIT } from './constants'
 import type { TerminalTab } from './store/layoutStore'
 import type { SettingsTab } from './features/settings/SettingsDialog'
 import { isTauri, isTauriMobile } from './utils/tauri'
@@ -221,7 +224,15 @@ function App() {
     (session: { id: string; serverId?: string; directory?: string; location?: { directory?: string } }) => {
       const paneId = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
       if (!paneId) return
-      const sessionKey = makeSessionKey(session.serverId ?? serverStore.getActiveServerId(), session.id)
+      const serverId = session.serverId ?? serverStore.getActiveServerId()
+      const sessionKey = makeSessionKey(serverId, session.id)
+
+      // 点击即出发：把列表里已有的元信息留给会话页（省掉 session.get），
+      // 同时预取首屏消息。两者都只是写缓存 / 发请求，不等待结果，
+      // 页面照常立刻导航（官方 home/sessions/controller.tsx:348 同款时机）。
+      if (isCompleteSessionInfo(session)) sessionInfoCache.remember(serverId, session)
+      prefetchSessionMessages(serverId, session.id, INITIAL_MESSAGE_LIMIT)
+
       // v2 的目录在 location.directory；扁平 directory 只有命令面板等少数路径会带
       navigatePaneToSession(paneId, sessionKey, sessionRouteDirectory(session))
     },
@@ -229,7 +240,9 @@ function App() {
   )
 
   // 命令面板混合搜索的会话/文件数据源（官方 palette.ts 同款：
-  // 命令之外还能搜到会话与文件）
+  // 命令之外还能搜到会话与文件）。
+  // 面板只读 id/title/directory，所以这里只挑这三个字段；点击时再按 id
+  // 从 allSessions 取回完整记录（见 handlePaletteOpenSession）。
   const { sessions: allSessions } = useSessionContext()
   const paletteSessions = useMemo(
     () =>
@@ -239,6 +252,16 @@ function App() {
         directory: session.location?.directory,
       })),
     [allSessions],
+  )
+
+  // 面板只回传 id + directory（它并不关心完整记录），这里按 id 补回列表里的
+  // 完整 SessionInfo：元信息交接缓存与目录解析都依赖完整字段。
+  const handlePaletteOpenSession = useCallback(
+    (session: { id: string; directory?: string }) => {
+      const full = allSessions.find(item => item.id === session.id)
+      handleSelectSession(full ?? session)
+    },
+    [allSessions, handleSelectSession],
   )
   const handlePaletteOpenFile = useCallback(
     (path: string) => {
@@ -1085,7 +1108,7 @@ function App() {
             commands={commands}
             directory={focusedDirectory || currentDirectory || undefined}
             sessions={paletteSessions}
-            onOpenSession={handleSelectSession}
+            onOpenSession={handlePaletteOpenSession}
             onOpenFile={handlePaletteOpenFile}
           />
         </Suspense>

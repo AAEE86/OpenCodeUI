@@ -11,15 +11,18 @@ import { useCallback, useEffect, useRef } from 'react'
 import { logger } from '../utils/logger'
 import { messageStore, type RevertState } from '../store'
 import { LOCAL_SERVER_ID } from '../store/serverStore'
+import { sessionInfoCache } from '../store/sessionInfoCache'
 import { useServiceStore } from '../store/serviceStore'
 import { sessionKeyToServerId } from '../utils/sessionKey'
 import { getSessionMessagesPage, getSession, revertMessage, unrevertSession } from '../api'
+import { takeSessionMessagesPrefetch } from '../api/messagePrefetch'
 import { sessionErrorHandler } from '../utils'
 import { isSessionNotFoundError } from '../utils/sessionErrors'
 import { INITIAL_MESSAGE_LIMIT, HISTORY_LOAD_BATCH_SIZE } from '../constants'
 import { isUserMessage } from '../types/api/message'
 import type { APIError } from '../types/api/common'
 import type { SessionMessageInfo } from '../types/api/message'
+import type { Session as ApiSession } from '../types/api/session'
 
 /**
  * 首屏窗口是否从半截回合开始（官方 leadingTurnNeedsParent 同款，
@@ -40,6 +43,32 @@ const LEADING_TURN_PAGE_DELAY = 200
 // deep undo 往回翻页补边界的安全上限；正常靠 hasMoreHistory 耗尽提前终止，这只是兜底
 const REVERT_BOUNDARY_PAGE_LIMIT = 50
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+/**
+ * 会话元信息通道：列表点击时留下的 SessionInfo 优先。
+ *
+ * 列表返回的本来就是完整 SessionInfo，再从列表点进来时没必要重复
+ * `session.get`（官方 data.session.remember 同款）。force（重连恢复）
+ * 与未命中（深链、刷新）照常请求。
+ *
+ * `fresh` 表示这份元信息是刚从服务端读回来的（权威）。缓存命中的那份
+ * 只是点击前的列表快照，某些字段（revert）可能已经落后于本端操作。
+ */
+interface LoadedSessionInfo {
+  info: ApiSession
+  fresh: boolean
+}
+
+function loadSessionInfo(
+  sessionId: string,
+  directory: string | undefined,
+  serverId: string,
+  force: boolean,
+): Promise<LoadedSessionInfo> {
+  const cached = force ? undefined : sessionInfoCache.get(serverId, sessionId)
+  if (cached) return Promise.resolve({ info: cached, fresh: false })
+  return getSession(sessionId, directory, serverId).then(info => ({ info, fresh: true }))
+}
 
 /**
  * 会话加载失败 → v2 的结构化错误（`{ type, message, status?, response? }`）。
@@ -160,14 +189,17 @@ export function useSessionManager({
         // 异步加载 session 元数据（不阻塞）
         const dir = directoryRef.current
         const serverId = sessionKeyToServerId(sid)
+        // 导航入口若已预取首屏，这里同样取走同一个请求，而不是再发一次
+        const prefetched = force ? undefined : takeSessionMessagesPrefetch(serverId, sid, INITIAL_MESSAGE_LIMIT)
         Promise.all([
-          getSession(sid, dir, serverId).catch(() => null),
-          getSessionMessagesPage(sid, { limit: INITIAL_MESSAGE_LIMIT }, serverId)
+          loadSessionInfo(sid, dir, serverId, false).catch(() => null),
+          (prefetched ?? getSessionMessagesPage(sid, { limit: INITIAL_MESSAGE_LIMIT }, serverId))
             .then(page => ({ ok: true as const, page }))
             .catch(() => ({ ok: false as const, page: null })),
         ])
-          .then(([sessionInfo, messagesResult]) => {
+          .then(([sessionInfoResult, messagesResult]) => {
             if (isStale()) return
+            const sessionInfo = sessionInfoResult?.info
 
             messageStore.updateSessionMetadata(sid, {
               ...(messagesResult.ok && messagesResult.page
@@ -192,14 +224,36 @@ export function useSessionManager({
       messageStore.setLoadState(sid, 'loading')
 
       try {
-        // 并行加载 session 信息和消息（传递 directory）
+        // 并行加载 session 信息和消息（传递 directory）。
+        // 消息若在导航入口已预取（prefetchSessionMessages），这里直接取走同一个
+        // in-flight 请求；元信息若刚由列表写入缓存，也不再发 session.get。
         const serverId = sessionKeyToServerId(sid)
-        const [sessionInfo, firstPage] = await Promise.all([
-          getSession(sid, dir, serverId).catch(() => null),
-          getSessionMessagesPage(sid, { limit: INITIAL_MESSAGE_LIMIT }, serverId),
+        const prefetchedMessages = force ? undefined : takeSessionMessagesPrefetch(serverId, sid, INITIAL_MESSAGE_LIMIT)
+        const [sessionInfoResult, firstPage] = await Promise.all([
+          loadSessionInfo(sid, dir, serverId, force).catch(() => null),
+          // 预取失败不该让整个进入失败（真实请求还没试过）：取到的预取出错就重发一次
+          (prefetchedMessages ?? getSessionMessagesPage(sid, { limit: INITIAL_MESSAGE_LIMIT }, serverId)).catch(
+            error => {
+              if (!prefetchedMessages) throw error
+              return getSessionMessagesPage(sid, { limit: INITIAL_MESSAGE_LIMIT }, serverId)
+            },
+          ),
         ])
 
         if (isStale()) return
+
+        const sessionInfo = sessionInfoResult?.info
+        // revert 边界的取舍：
+        //   - 刚从服务端读回（fresh）→ 无条件采信
+        //   - 命中交接缓存：缓存是点击前的列表快照，可能比本端操作旧（刚 undo 变出来会被
+        //     抹掉，刚 redo 掉的又会被复活）。本端已有该会话状态时以本地为准，
+        //     没有（首次进入这条会话）才用缓存兜底，至少能恢复撤销后的可见性。
+        const localState = messageStore.getSessionState(sid)
+        const revertState = sessionInfoResult?.fresh
+          ? (sessionInfo?.revert ?? null)
+          : localState
+            ? (localState.revertState ? { messageID: localState.revertState.messageId } : null)
+            : (sessionInfo?.revert ?? null)
 
         const apiMessages = firstPage.messages
         const nextCursor = firstPage.nextCursor
@@ -238,7 +292,7 @@ export function useSessionManager({
           historyCursor: nextCursor,
           // 服务端把回退边界持久化在 Session.Info.revert（schema session.ts），
           // 刷新后据此重建 redo 历史，否则刷新就像没 undo 过。
-          revertState: sessionInfo?.revert ?? null,
+          revertState,
           // 会话级 agent/model 的 durable 来源（官方 selection.tsx 同款）：
           // 新鲜客户端没有 live SSE 历史时，composer 从这里恢复
           agent: sessionInfo?.agent,
@@ -262,7 +316,7 @@ export function useSessionManager({
         // deep undo：回退边界不在首屏时（undo 的消息很深），往回翻页把边界补进内存，
         // 重建逐条 redo 历史 + 预填内容。边界一加载 rebuildRevertHistory 就返回 true 提前终止；
         // 正常情况下同一页里边界之前的消息也一并带出来，当前（撤销后的）视图就有了。
-        if (sessionInfo?.revert?.messageID) {
+        if (revertState?.messageID) {
           for (let pages = 0; pages < REVERT_BOUNDARY_PAGE_LIMIT; pages++) {
             if (messageStore.rebuildRevertHistory(sid)) break
             const state = messageStore.getSessionState(sid)
@@ -435,13 +489,10 @@ export function useSessionManager({
   useEffect(() => {
     if (!sessionId) return
 
-    const cached = messageStore.getSessionState(sessionId)
-    const canUseCached = !!cached && cached.loadState === 'loaded' && !cached.isStale && cached.messages.length > 0
-
-    if (canUseCached) {
+    if (messageStore.hasRenderableCache(sessionId)) {
       logger.log('[SessionManager] switch:use-cached', {
         sessionId,
-        cachedCount: cached.messages.length,
+        cachedCount: messageStore.getSessionState(sessionId)?.messages.length ?? 0,
       })
       return
     }

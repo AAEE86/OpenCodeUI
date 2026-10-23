@@ -418,6 +418,18 @@ class MessageStore {
     return this.sessions.get(sessionId)
   }
 
+  /**
+   * 会话是否已有可直接渲染的缓存视图。
+   *
+   * 「切过去不用再拉」和「点击时不必预取」是同一个判断，放在这里做唯一定义，
+   * 免得两处口径漂移（改阈值只改一处）。
+   */
+  hasRenderableCache(sessionId: string | null): boolean {
+    if (!sessionId) return false
+    const cached = this.sessions.get(sessionId)
+    return !!cached && cached.loadState === 'loaded' && !cached.isStale && cached.messages.length > 0
+  }
+
   /** 可见消息：undo 生效后，撤销点及其之后的消息不再展示 */
   getVisibleMessages(sessionId: string | null): SessionMessageInfo[] {
     if (!sessionId) return []

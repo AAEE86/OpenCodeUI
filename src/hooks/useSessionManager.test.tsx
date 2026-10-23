@@ -1,12 +1,14 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSessionManager } from './useSessionManager'
+import { sessionInfoCache } from '../store/sessionInfoCache'
 
 const { getSessionMock, getSessionMessagesPageMock, messageStoreMock, sessionErrorHandlerMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
   getSessionMessagesPageMock: vi.fn(),
   messageStoreMock: {
     getSessionState: vi.fn(),
+    hasRenderableCache: vi.fn(() => false),
     setLoadState: vi.fn(),
     setLoadError: vi.fn(),
     setMessages: vi.fn(),
@@ -23,6 +25,12 @@ vi.mock('../api', () => ({
   revertMessage: vi.fn(),
   unrevertSession: vi.fn(),
   extractUserMessageContent: vi.fn(),
+}))
+
+// messagePrefetch 直接依赖 ./message（绕过 api 桶），两处必须指向同一个 mock，
+// 否则「复用预取」的断言会看到两个互不相干的函数
+vi.mock('../api/message', () => ({
+  getSessionMessagesPage: (...args: unknown[]) => getSessionMessagesPageMock(...args),
 }))
 
 vi.mock('../store', () => ({
@@ -45,6 +53,7 @@ describe('useSessionManager', () => {
     messageStoreMock.prependMessages.mockReset()
     messageStoreMock.setRevertState.mockReset()
     sessionErrorHandlerMock.mockReset()
+    sessionInfoCache.clear()
 
     messageStoreMock.getSessionState.mockReturnValue(null)
     getSessionMock.mockResolvedValue({ id: 'session-1', directory: '/workspace/demo' })
@@ -143,5 +152,119 @@ describe('useSessionManager', () => {
     await result.current.loadMoreHistory()
 
     expect(getSessionMessagesPageMock).not.toHaveBeenCalled()
+  })
+
+  it('列表交接命中：进入会话不再发 session.get', async () => {
+    sessionInfoCache.remember('local', {
+      id: 'session-1',
+      title: '来自列表',
+      location: { directory: '/workspace/demo' },
+      time: { created: 1, updated: 2 },
+    } as never)
+
+    renderHook(() => useSessionManager({ sessionId: 'local::session-1', directory: '/workspace/demo' }))
+
+    await waitFor(() => {
+      expect(messageStoreMock.setMessages).toHaveBeenCalled()
+    })
+
+    expect(getSessionMock).not.toHaveBeenCalled()
+    expect(messageStoreMock.setMessages).toHaveBeenCalledWith(
+      'local::session-1',
+      [],
+      expect.objectContaining({ title: '来自列表', directory: '/workspace/demo' }),
+    )
+  })
+
+  it('交接缓存命中被 force（重连恢复）显式跳过，仍回读服务端', async () => {
+    sessionInfoCache.remember('local', {
+      id: 'session-1',
+      title: '旧标题',
+      location: { directory: '/workspace/demo' },
+      time: { created: 1, updated: 2 },
+    } as never)
+
+    const { result } = renderHook(() =>
+      useSessionManager({ sessionId: 'local::session-1', directory: '/workspace/demo' }),
+    )
+
+    // 首次进入命中缓存，不发请求
+    await waitFor(() => {
+      expect(messageStoreMock.setMessages).toHaveBeenCalled()
+    })
+    getSessionMock.mockClear()
+
+    await result.current.loadSession('local::session-1', { force: true })
+
+    expect(getSessionMock).toHaveBeenCalledWith('local::session-1', '/workspace/demo', 'local')
+  })
+
+  it('交接缓存命中时，本地已有的回退边界不能被旧快照抹掉', async () => {
+    sessionInfoCache.remember('local', {
+      id: 'session-1',
+      title: '来自列表',
+      location: { directory: '/workspace/demo' },
+      time: { created: 1, updated: 2 },
+    } as never)
+    // 本端刚 undo 过，列表快照还没有 revert 字段
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [],
+      loadState: 'idle',
+      isStale: false,
+      revertState: { messageId: 'msg_revert', history: [] },
+    })
+
+    renderHook(() => useSessionManager({ sessionId: 'local::session-1', directory: '/workspace/demo' }))
+
+    await waitFor(() => {
+      expect(messageStoreMock.setMessages).toHaveBeenCalled()
+    })
+
+    expect(messageStoreMock.setMessages).toHaveBeenCalledWith(
+      'local::session-1',
+      [],
+      expect.objectContaining({ revertState: { messageID: 'msg_revert' } }),
+    )
+  })
+
+  it('服务端回读的 revert 优先于本地（权威数据覆盖）', async () => {
+    getSessionMock.mockResolvedValue({
+      id: 'session-1',
+      location: { directory: '/workspace/demo' },
+      revert: { messageID: 'msg_server' },
+    })
+    // 缓存未命中，走服务端；本地还留着旧边界
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [],
+      loadState: 'idle',
+      isStale: false,
+      revertState: { messageId: 'msg_local', history: [] },
+    })
+
+    renderHook(() => useSessionManager({ sessionId: 'local::session-1', directory: '/workspace/demo' }))
+
+    await waitFor(() => {
+      expect(messageStoreMock.setMessages).toHaveBeenCalled()
+    })
+
+    expect(messageStoreMock.setMessages).toHaveBeenCalledWith(
+      'local::session-1',
+      [],
+      expect.objectContaining({ revertState: { messageID: 'msg_server' } }),
+    )
+  })
+
+  it('导航入口已预取消息时复用同一请求，不重复拉首屏', async () => {
+    const { prefetchSessionMessages } = await import('../api/messagePrefetch')
+    prefetchSessionMessages('local', 'session-1', 50)
+
+    renderHook(() => useSessionManager({ sessionId: 'local::session-1', directory: '/workspace/demo' }))
+
+    await waitFor(() => {
+      expect(messageStoreMock.setMessages).toHaveBeenCalled()
+    })
+
+    // 预取过一次就够：加载路径取走它，而不是再发一次
+    expect(getSessionMessagesPageMock).toHaveBeenCalledTimes(1)
   })
 })

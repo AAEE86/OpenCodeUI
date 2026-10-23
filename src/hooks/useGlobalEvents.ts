@@ -15,6 +15,7 @@ import { inboxStore } from '../store/inboxStore'
 import { usageExceededStore } from '../store/usageExceededStore'
 import { shellInventoryStore } from '../store/shellInventoryStore'
 import { activeSessionStore } from '../store/activeSessionStore'
+import { sessionInfoCache } from '../store/sessionInfoCache'
 import { notificationStore } from '../store/notificationStore'
 import { soundStore } from '../store/soundStore'
 import { playNotificationSoundDeduped } from '../utils/notificationSoundBridge'
@@ -1144,9 +1145,17 @@ export function useGlobalEvents(directories?: string[]) {
         onSessionRenamed: data => {
           const scopedId = scope(data.sessionID)
           activeSessionStore.setSessionMeta(scopedId, data.title, undefined)
+          // 交接缓存里的标题同步更新：否则 TTL 内从列表点进去会显示旧标题
+          if (data.title) sessionInfoCache.update(serverId, data.sessionID, { title: data.title })
           if (data.title && messageStore.getSessionState(scopedId)) {
             messageStore.updateSessionMetadata(scopedId, { title: data.title })
           }
+        },
+
+        onSessionMoved: data => {
+          // 目录归属变了：交接缓存里的 location 立刻作废，
+          // 否则 TTL 内进会话会带着旧目录（undo / 媒体路径都会用错）
+          sessionInfoCache.forget(serverId, data.sessionID)
         },
 
         onSessionDeleted: data => {

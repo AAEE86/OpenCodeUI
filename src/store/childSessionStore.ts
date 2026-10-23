@@ -44,6 +44,10 @@ class ChildSessionStore {
   private toolBindings = new Map<string, string>()
   // 反向索引：childSessionKey -> partKey（一个子 session 只属于一张卡片）
   private toolBindingsByChild = new Map<string, string>()
+  // 已经问过服务端「这个父会话有哪些子会话」的 parent key。
+  // 查询只能靠 REST（列表/事件都不保证覆盖历史子会话），所以每个会话只问一次：
+  // 之后要么 store 里已有子会话，要么已确认没有。会话创建时照样会注册进来。
+  private childrenScanned = new Set<string>()
   private subscribers = new Set<Subscriber>()
   private version = 0
 
@@ -152,6 +156,25 @@ class ChildSessionStore {
     return this.sessionInfo.get(sessionId)
   }
 
+  /** 标记「已向服务端确认过该父会话的子会话列表」 */
+  markChildrenScanned(parentId: string) {
+    this.childrenScanned.add(parentId)
+  }
+
+  /** 是否已经确认过该父会话的子会话列表（确认过就不会再重复请求） */
+  hasScannedChildren(parentId: string): boolean {
+    return this.childrenScanned.has(parentId)
+  }
+
+  /**
+   * 丢弃「已确认」标记（重连后调用）：
+   * 断连期间新建的子会话没有走过 session.created，只有重新问一次才能补齐。
+   */
+  resetChildrenScans() {
+    if (this.childrenScanned.size === 0) return
+    this.childrenScanned.clear()
+  }
+
   getVersion = (): number => this.version
 
   // ============================================
@@ -231,6 +254,7 @@ class ChildSessionStore {
     this.sessionInfo.clear()
     this.toolBindings.clear()
     this.toolBindingsByChild.clear()
+    this.childrenScanned.clear()
     this.notify()
   }
 
@@ -249,6 +273,8 @@ class ChildSessionStore {
       this.childrenByParent.delete(parentId)
       this.notify()
     }
+    // 记录被清掉 = 需要重新向服务端确认
+    this.childrenScanned.delete(parentId)
   }
 
   removeSession(sessionId: string) {
@@ -267,6 +293,7 @@ class ChildSessionStore {
 
       if (this.childrenByParent.delete(id)) changed = true
       if (this.sessionInfo.delete(id)) changed = true
+      if (this.childrenScanned.delete(id)) changed = true
       if (this.dropToolBinding(id)) changed = true
     }
 

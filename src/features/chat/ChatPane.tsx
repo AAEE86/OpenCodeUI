@@ -403,7 +403,11 @@ export const ChatPane = memo(function ChatPane({
   const renderedLoadState = loadState === 'loaded' && isRenderingDeferredMessages ? 'loading' : loadState
   // 对齐 oc：session 消息 ready 后再 mount ChatArea，避免空 virtualizer 先建再跳
   const messagesReady = !routeSessionId || loadState === 'loaded' || loadState === 'error'
-  const chatAreaMountKey = messagesReady ? (routeSessionId ?? 'home') : null
+  // 已有可显示消息就先挂出来（官方 createTimelineModel 的 ready 同款：
+  // 任意一条非 pending 消息即视为可渲染，enrich 之后补）。
+  // 缓存命中 / SSE 先到 / 重连刷新时，没必要为了一次元信息回读让整页空白。
+  const hasRenderableMessages = renderedMessages.length > 0
+  const chatAreaMountKey = messagesReady || hasRenderableMessages ? (routeSessionId ?? 'home') : null
   const inputDisabled = !!routeSessionId && loadState === 'error' && messages.length === 0
   const chatPageViewModel = useChatPageViewModel(projectedMessages)
 

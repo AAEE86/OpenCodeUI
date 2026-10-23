@@ -27,6 +27,7 @@ import { inboxStore } from '../store/inboxStore'
 import { normalizeFileDiffs } from '../types/api/file'
 import type { FileDiff, Session, SessionListParams, SessionRevert, SessionStatusMap } from './types'
 import type { SessionTransferData, SessionInboxInfo } from '@opencode/client/promise'
+import { sessionInfoCache } from '../store/sessionInfoCache'
 
 // ============================================
 // 会话状态
@@ -120,7 +121,10 @@ export async function getSessionChildren(
 export async function getSession(sessionId: string, _directory?: string, serverId?: string): Promise<Session> {
   const target = resolveSessionTarget(sessionId, serverId)
   const sdk = getSDKClient(target.serverId)
-  return await sdk.session.get({ sessionID: target.sessionId })
+  const session = await sdk.session.get({ sessionID: target.sessionId })
+  // 权威读顺手刷新交接缓存：从任何路径回读到的最新元信息都能被下一次进入命中
+  sessionInfoCache.remember(target.serverId, session)
+  return session
 }
 
 /**
@@ -177,7 +181,9 @@ export async function updateSession(
     title: params.title,
   })
   // v2 的 update 返回 void，回读一次保证调用点拿到最新会话
-  return await sdk.session.get({ sessionID: target.sessionId })
+  const session = await sdk.session.get({ sessionID: target.sessionId })
+  sessionInfoCache.remember(target.serverId, session)
+  return session
 }
 
 /** 删除会话（v1 的 delete → v2 的 remove） */
@@ -185,6 +191,8 @@ export async function deleteSession(sessionId: string, _directory?: string, serv
   const target = resolveSessionTarget(sessionId, serverId)
   const sdk = getSDKClient(target.serverId)
   await sdk.session.remove({ sessionID: target.sessionId })
+  // 删掉的会话不该在 TTL 内还命中交接缓存
+  sessionInfoCache.forget(target.serverId, sessionId)
   return true
 }
 
@@ -198,6 +206,8 @@ export async function moveSession(sessionId: string, directory: string, serverId
   const target = resolveSessionTarget(sessionId, serverId)
   const sdk = getSDKClient(target.serverId)
   await sdk.session.move({ sessionID: target.sessionId, directory })
+  // 目录归属变了：交接缓存里的 location 立刻作废，避免进会话用错目录
+  sessionInfoCache.forget(target.serverId, sessionId)
 }
 
 /**

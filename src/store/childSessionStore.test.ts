@@ -51,3 +51,37 @@ describe('工具卡片 ↔ 子 session 绑定', () => {
     expect(childSessionStore.getBoundChildForToolPart('local', 'call_a')).toBeUndefined()
   })
 })
+
+describe('子会话「已确认」标记', () => {
+  it('标记之后不再重复问服务端', () => {
+    expect(childSessionStore.hasScannedChildren('local::ses_parent')).toBe(false)
+    childSessionStore.markChildrenScanned('local::ses_parent')
+    expect(childSessionStore.hasScannedChildren('local::ses_parent')).toBe(true)
+  })
+
+  it('removeSession 丢掉标记（会话没了，下次重建要重新确认）', () => {
+    childSessionStore.markChildrenScanned('local::ses_parent')
+    childSessionStore.removeSession('local::ses_parent')
+    expect(childSessionStore.hasScannedChildren('local::ses_parent')).toBe(false)
+  })
+
+  it('clearChildren 丢掉标记（子会话记录被清空需要重新问）', () => {
+    childSessionStore.markChildrenScanned('local::ses_parent')
+    childSessionStore.clearChildren('local::ses_parent')
+    expect(childSessionStore.hasScannedChildren('local::ses_parent')).toBe(false)
+  })
+
+  it('resetChildrenScans 只清标记（重连补拉断连期间新建的子会话）', () => {
+    childSessionStore.markChildrenScanned('local::ses_a')
+    childSessionStore.markChildrenScanned('local::ses_b')
+    childSessionStore.resetChildrenScans()
+    expect(childSessionStore.hasScannedChildren('local::ses_a')).toBe(false)
+    expect(childSessionStore.hasScannedChildren('local::ses_b')).toBe(false)
+  })
+
+  it('clearAll 清空标记（切换服务器）', () => {
+    childSessionStore.markChildrenScanned('local::ses_parent')
+    childSessionStore.clearAll()
+    expect(childSessionStore.hasScannedChildren('local::ses_parent')).toBe(false)
+  })
+})

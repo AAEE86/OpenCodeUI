@@ -330,8 +330,9 @@ describe('sessionIndexStore', () => {
     listSessionsPageMock.mockResolvedValueOnce(page([session('ses_old')]))
     await sessionIndexStore.ensureDirectory(SERVER, '/workspace/demo')
 
+    // 一次拿满官方 home 的页大小，目录多深都能露出来
     expect(listSessionsPageMock).toHaveBeenLastCalledWith(
-      { directory: '/workspace/demo', parentID: null, order: 'desc', limit: 100 },
+      { directory: '/workspace/demo', parentID: null, order: 'desc', limit: 5_000 },
       SERVER,
     )
     expect(sessionIndexStore.getSnapshot(SERVER).sessions.map(item => item.id).sort()).toEqual([

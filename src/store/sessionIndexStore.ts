@@ -9,6 +9,8 @@
 // 在本地按目录分组、按时间切片（home/sessions/index.ts）。这里做同一件事：
 //
 //   - `ensure(serverId)` 拉首页（limit 200），30s 内复用
+//     官方 home 一次拉 5000（HOME_V2_SESSION_PAGE_LIMIT）；这里为了首屏更快
+//     只拉一页，目录覆盖交给 ensureDirectory（一次也拿满 5000）
 //   - 各列表从 `getSnapshot(serverId)` 里按目录过滤、按需切片，零额外请求
 //   - 某个目录被挤出索引时 `ensureDirectory` 按目录补一次（见下）
 //   - SSE 增量（新增/重命名/删除/移动）直接写进索引，所有列表同步更新
@@ -37,8 +39,8 @@ import type { Session } from '../types/api/session'
 const TTL_MS = 30_000
 /** 单页条数：首屏一页就要出内容，大库靠 cursor 续页 / 目录补拉 */
 const PAGE_LIMIT = 200
-/** 目录级补拉的条数：只用来把「被挤出全局索引」的那个目录补出来 */
-const DIRECTORY_LIMIT = 100
+/** 目录级补拉的条数：对齐官方 home 的会话页大小（HOME_V2_SESSION_PAGE_LIMIT） */
+const DIRECTORY_LIMIT = 5_000
 /** 首屏失败的重试退避（启动可能早于本地服务端就绪） */
 const RETRY_DELAYS_MS = [500, 1_500, 3_000]
 
@@ -99,6 +101,8 @@ function normalizeDirectoryKey(directory: string): string {
 
 function sortSessions(sessions: Session[]): Session[] {
   return [...sessions].sort((a, b) => {
+    // 与官方 home 的 retainHomeSessions 同款排序：只看 time.updated，
+    // 流式输出期间服务端不改这个时间，所以行不会立刻跳到顶部。
     const diff = updatedAt(b) - updatedAt(a)
     if (diff !== 0) return diff
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0

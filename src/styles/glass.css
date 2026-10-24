@@ -341,7 +341,10 @@
   background-color: transparent !important;
 }
 
-/* 全屏页（设置、移动端面板）：接近实底，避免正文穿透 */
+/* 全屏预览（ModalShell）：跟对话框同一种淡色叠层。
+   它本来就叠在整窗那层之上，再铺 0.88 会合成到接近实心，等于没玻璃。 */
 :root[data-appearance='glass'] [data-glass-solid] {
-  background-color: hsl(var(--bg-100) / 0.96);
+  background-color: var(--glass-veil-soft);
+  -webkit-backdrop-filter: blur(40px) saturate(120%);
+  backdrop-filter: blur(40px) saturate(120%);
 }

@@ -210,23 +210,22 @@
   border-radius: inherit;
   padding: 1px;
   pointer-events: none;
-  opacity: calc(var(--glass-beam-opacity) * 0.55 * var(--glass-beam-strength));
+  opacity: calc(var(--glass-beam-opacity) * 0.9 * var(--glass-beam-strength));
   background: conic-gradient(
     from var(--glass-beam-angle),
     transparent 0%,
     transparent 38%,
-    rgb(124 132 255 / 0.06) 43%,
-    rgb(96 168 255 / 0.14) 48%,
-    rgb(64 210 206 / 0.22) 53%,
-    rgb(84 226 152 / 0.28) 57%,
-    rgb(255 255 255 / 0.4) 61%,
-    rgb(255 255 255 / 0.74) 65%,
-    rgb(255 255 255 / 0.95) 68%,
-    rgb(255 255 255 / 0.74) 71%,
-    rgb(255 214 140 / 0.44) 75%,
-    rgb(255 146 96 / 0.26) 80%,
-    rgb(255 96 168 / 0.12) 85%,
-    transparent 90%,
+    rgb(144 148 255 / 0.6) 44%,
+    rgb(96 176 255 / 0.8) 48%,
+    rgb(58 230 218 / 0.9) 52%,
+    rgb(104 248 164 / 0.95) 56%,
+    rgb(255 255 255 / 0.92) 60%,
+    rgb(255 255 255 / 1) 64%,
+    rgb(255 255 255 / 0.94) 68%,
+    rgb(255 218 144 / 0.95) 72%,
+    rgb(255 138 80 / 0.82) 77%,
+    rgb(255 80 172 / 0.6) 83%,
+    transparent 89%,
     transparent 100%
   );
   -webkit-mask:
@@ -252,13 +251,13 @@
     from var(--glass-beam-angle),
     transparent 0%,
     transparent 38%,
-    rgb(110 150 255 / 0.08) 44%,
-    rgb(70 214 196 / 0.14) 51%,
-    rgb(255 255 255 / 0.26) 60%,
-    rgb(255 255 255 / 0.62) 66%,
-    rgb(255 255 255 / 0.62) 70%,
-    rgb(255 168 108 / 0.16) 78%,
-    transparent 90%,
+    rgb(110 150 255 / 0.24) 45%,
+    rgb(70 222 204 / 0.4) 52%,
+    rgb(255 255 255 / 0.42) 60%,
+    rgb(255 255 255 / 0.72) 65%,
+    rgb(255 255 255 / 0.64) 70%,
+    rgb(255 172 112 / 0.4) 78%,
+    transparent 89%,
     transparent 100%
   );
   -webkit-mask:
@@ -273,7 +272,7 @@
 }
 
 :root[data-appearance='glass'] [data-input-box][data-busy] [data-glass-beam-bloom] {
-  opacity: calc(var(--glass-beam-opacity) * 0.26 * var(--glass-beam-strength));
+  opacity: calc(var(--glass-beam-opacity) * 0.45 * var(--glass-beam-strength));
 }
 
 @keyframes glass-beam-spin {

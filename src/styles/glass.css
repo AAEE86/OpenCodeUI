@@ -150,14 +150,14 @@
  * 主操作按钮反过来用文字色做底、背景色做字。
  * ------------------------------------------------------------------------- */
 
-:root[data-appearance='glass'] .glass[data-input-box]:not([class*='border-accent-main-100']) {
+:root[data-appearance='glass'] .glass[data-input-box]:not([class*='ring-accent']) {
   background-color: var(--glass-veil-soft);
   border-color: var(--glass-hairline);
   -webkit-backdrop-filter: blur(24px);
   backdrop-filter: blur(24px);
 }
 
-:root[data-appearance='glass'] .glass[data-input-box]:focus-within:not([class*='border-accent-main-100']) {
+:root[data-appearance='glass'] .glass[data-input-box]:focus-within:not([class*='ring-accent']) {
   border-color: color-mix(in srgb, hsl(var(--text-100)) 20%, transparent);
 }
 

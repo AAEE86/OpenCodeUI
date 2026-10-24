@@ -10,6 +10,12 @@
 
 import { getThemePreset, themeColorsToCSSVars, builtinThemes, DEFAULT_THEME_ID, registerCustomTheme, unregisterCustomTheme, listCustomThemes } from '../themes'
 import type { ThemePreset, ThemeColors } from '../themes'
+import {
+  compressWallpaperImage,
+  wallpaperIdbDelete,
+  wallpaperIdbGet,
+  wallpaperIdbPut,
+} from '../utils/wallpaperStorage'
 
 const STORAGE_KEY_CUSTOM_THEMES = 'opencode:custom-themes'
 
@@ -159,6 +165,32 @@ const DEFAULT_CODE_FONT_SCALE = 0
 
 /** 工具输出渲染风格：classic = 经典（input+output 分离），compact = 精简（只展示 output，header 更矮） */
 export type ToolCardStyle = 'classic' | 'compact'
+
+/**
+ * 外观处理：与主题配色相互独立
+ * - default: 实色
+ * - glass:   整窗一层半透明染色 + 一次磨砂
+ */
+export type AppearanceStyle = 'default' | 'glass'
+
+/** 壁纸铺放方式 */
+export type WallpaperFit = 'cover' | 'contain'
+
+const DEFAULT_APPEARANCE_STYLE: AppearanceStyle = 'default'
+/** 玻璃浓度：整窗染色的不透明度，默认 0.88，最低可到 0.15 */
+const DEFAULT_GLASS_ALPHA = 0.88
+const GLASS_ALPHA_MIN = 0.15
+const GLASS_ALPHA_MAX = 1
+const DEFAULT_WALLPAPER_ENABLED = false
+const DEFAULT_WALLPAPER_FIT: WallpaperFit = 'cover'
+/** 对话区是否再叠一层淡图；默认关闭，保持整窗观感统一 */
+const DEFAULT_WALLPAPER_IN_CHAT = false
+
+function clampGlassAlpha(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_GLASS_ALPHA
+  return Math.max(GLASS_ALPHA_MIN, Math.min(GLASS_ALPHA_MAX, n))
+}
+
 const DEFAULT_TOOL_CARD_STYLE: ToolCardStyle = 'compact'
 const DEFAULT_IMMERSIVE_MODE = true
 const DEFAULT_COMPACT_INLINE_PERMISSION = true
@@ -239,6 +271,20 @@ export interface ThemeState {
   queueAutoCollapse: boolean
   /** 毛玻璃效果开关（backdrop-filter blur） */
   glassEffect: boolean
+  /** 外观处理：default = 实色，glass = 玻璃 */
+  appearanceStyle: AppearanceStyle
+  /** 玻璃浓度 0.15–1，越高越实 */
+  glassAlpha: number
+  /** 是否启用壁纸 */
+  wallpaperEnabled: boolean
+  /** 壁纸铺放方式 */
+  wallpaperFit: WallpaperFit
+  /** 对话区是否再叠一层淡图 */
+  wallpaperInChat: boolean
+  /** 壁纸文件名（仅展示，图片本体在 IndexedDB） */
+  wallpaperFileName: string | null
+  /** 运行时壁纸 object URL，不持久化、不随备份导出 */
+  wallpaperUrl: string | null
   /** 忙碌时后续消息是否进入队列 */
   queueFollowupMessages: boolean
   /** 输入框的 busy 投递 chip（插队/排队）是否显示 */
@@ -301,6 +347,12 @@ const STORAGE_KEY_COMPACT_INLINE_PERMISSION = 'compact-inline-permission'
 const STORAGE_KEY_COMPACTION_AUTO_COLLAPSE = 'compaction-auto-collapse'
 const STORAGE_KEY_QUEUE_AUTO_COLLAPSE = 'queue-auto-collapse'
 const STORAGE_KEY_GLASS_EFFECT = 'glass-effect'
+const STORAGE_KEY_APPEARANCE_STYLE = 'appearance-style'
+const STORAGE_KEY_GLASS_ALPHA = 'glass-alpha'
+const STORAGE_KEY_WALLPAPER_ENABLED = 'wallpaper-enabled'
+const STORAGE_KEY_WALLPAPER_FIT = 'wallpaper-fit'
+const STORAGE_KEY_WALLPAPER_IN_CHAT = 'wallpaper-in-chat'
+const STORAGE_KEY_WALLPAPER_FILE_NAME = 'wallpaper-file-name'
 const STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES = 'queue-followup-messages'
 const STORAGE_KEY_QUEUE_DELIVERY_CHIP_VISIBLE = 'queue-delivery-chip-visible'
 const STORAGE_KEY_MANUAL_TERMINAL_TITLES = 'manual-terminal-titles'
@@ -352,6 +404,8 @@ function parseCustomCSSSnippets(raw: string | null): CustomCSSSnippet[] {
 class ThemeStore {
   private state: ThemeState
   private listeners = new Set<() => void>()
+  /** 是否已从 IndexedDB 恢复过壁纸 */
+  private wallpaperBlobLoaded = false
 
   constructor() {
     // 自定义主题（OpenCode 官方主题 JSON 导入）先于 preset 校验注册——
@@ -447,6 +501,16 @@ class ThemeStore {
     const savedGlassEffect = localStorage.getItem(STORAGE_KEY_GLASS_EFFECT)
     const glassEffect = savedGlassEffect === null ? DEFAULT_GLASS_EFFECT : savedGlassEffect === 'true'
 
+    const appearanceStyle: AppearanceStyle =
+      localStorage.getItem(STORAGE_KEY_APPEARANCE_STYLE) === 'glass' ? 'glass' : DEFAULT_APPEARANCE_STYLE
+    const savedGlassAlpha = localStorage.getItem(STORAGE_KEY_GLASS_ALPHA)
+    const glassAlpha = savedGlassAlpha !== null ? clampGlassAlpha(Number(savedGlassAlpha)) : DEFAULT_GLASS_ALPHA
+    const wallpaperEnabled = localStorage.getItem(STORAGE_KEY_WALLPAPER_ENABLED) === 'true'
+    const wallpaperFit: WallpaperFit =
+      localStorage.getItem(STORAGE_KEY_WALLPAPER_FIT) === 'contain' ? 'contain' : DEFAULT_WALLPAPER_FIT
+    const wallpaperInChat = localStorage.getItem(STORAGE_KEY_WALLPAPER_IN_CHAT) === 'true'
+    const wallpaperFileName = localStorage.getItem(STORAGE_KEY_WALLPAPER_FILE_NAME)
+
     const savedQueueFollowupMessages = localStorage.getItem(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES)
     const queueFollowupMessages =
       savedQueueFollowupMessages === null ? DEFAULT_QUEUE_FOLLOWUP_MESSAGES : savedQueueFollowupMessages === 'true'
@@ -540,6 +604,13 @@ class ThemeStore {
       compactionAutoCollapse,
       queueAutoCollapse,
       glassEffect,
+      appearanceStyle,
+      glassAlpha,
+      wallpaperEnabled,
+      wallpaperFit,
+      wallpaperInChat,
+      wallpaperFileName: wallpaperFileName || null,
+      wallpaperUrl: null,
       queueFollowupMessages,
       queueDeliveryChipVisible,
       manualTerminalTitles,
@@ -640,6 +711,27 @@ class ThemeStore {
   }
   get glassEffect() {
     return this.state.glassEffect
+  }
+  get appearanceStyle() {
+    return this.state.appearanceStyle
+  }
+  get glassAlpha() {
+    return this.state.glassAlpha
+  }
+  get wallpaperEnabled() {
+    return this.state.wallpaperEnabled
+  }
+  get wallpaperFit() {
+    return this.state.wallpaperFit
+  }
+  get wallpaperInChat() {
+    return this.state.wallpaperInChat
+  }
+  get wallpaperFileName() {
+    return this.state.wallpaperFileName
+  }
+  get wallpaperUrl() {
+    return this.state.wallpaperUrl
   }
   get queueFollowupMessages() {
     return this.state.queueFollowupMessages
@@ -1019,6 +1111,79 @@ class ThemeStore {
     this.emit()
   }
 
+  /** 切换外观处理；玻璃需要浮层模糊，顺手打开毛玻璃 */
+  setAppearanceStyle(style: AppearanceStyle) {
+    if (this.state.appearanceStyle === style) return
+    const next: Partial<ThemeState> = { appearanceStyle: style }
+    if (style === 'glass' && !this.state.glassEffect) {
+      next.glassEffect = true
+      localStorage.setItem(STORAGE_KEY_GLASS_EFFECT, 'true')
+    }
+    this.state = { ...this.state, ...next }
+    localStorage.setItem(STORAGE_KEY_APPEARANCE_STYLE, style)
+    this.applyGlassClass()
+    this.applyAppearance()
+    this.emit()
+  }
+
+  setGlassAlpha(alpha: number) {
+    const clamped = clampGlassAlpha(alpha)
+    if (this.state.glassAlpha === clamped) return
+    this.state = { ...this.state, glassAlpha: clamped }
+    localStorage.setItem(STORAGE_KEY_GLASS_ALPHA, String(clamped))
+    this.applyAppearance()
+    this.emit()
+  }
+
+  setWallpaperEnabled(enabled: boolean) {
+    if (this.state.wallpaperEnabled === enabled) return
+    this.state = { ...this.state, wallpaperEnabled: enabled }
+    localStorage.setItem(STORAGE_KEY_WALLPAPER_ENABLED, String(enabled))
+    this.applyAppearance()
+    this.emit()
+  }
+
+  setWallpaperFit(fit: WallpaperFit) {
+    if (this.state.wallpaperFit === fit) return
+    this.state = { ...this.state, wallpaperFit: fit }
+    localStorage.setItem(STORAGE_KEY_WALLPAPER_FIT, fit)
+    this.applyAppearance()
+    this.emit()
+  }
+
+  setWallpaperInChat(enabled: boolean) {
+    if (this.state.wallpaperInChat === enabled) return
+    this.state = { ...this.state, wallpaperInChat: enabled }
+    localStorage.setItem(STORAGE_KEY_WALLPAPER_IN_CHAT, String(enabled))
+    this.applyAppearance()
+    this.emit()
+  }
+
+  /** 设置壁纸；传 null 清除 */
+  async setWallpaperImage(file: File | Blob | null, fileName?: string | null): Promise<void> {
+    if (!file) {
+      await wallpaperIdbDelete().catch(() => undefined)
+      this.replaceWallpaperUrl(null)
+      this.state = { ...this.state, wallpaperFileName: null, wallpaperEnabled: false }
+      localStorage.removeItem(STORAGE_KEY_WALLPAPER_FILE_NAME)
+      localStorage.setItem(STORAGE_KEY_WALLPAPER_ENABLED, 'false')
+      this.applyAppearance()
+      this.emit()
+      return
+    }
+
+    const compressed = await compressWallpaperImage(file)
+    await wallpaperIdbPut(compressed)
+    const name =
+      fileName ?? (file instanceof File && file.name ? file.name : this.state.wallpaperFileName) ?? 'wallpaper'
+    this.replaceWallpaperUrl(URL.createObjectURL(compressed))
+    this.state = { ...this.state, wallpaperFileName: name, wallpaperEnabled: true }
+    localStorage.setItem(STORAGE_KEY_WALLPAPER_FILE_NAME, name)
+    localStorage.setItem(STORAGE_KEY_WALLPAPER_ENABLED, 'true')
+    this.applyAppearance()
+    this.emit()
+  }
+
   setQueueFollowupMessages(enabled: boolean) {
     if (this.state.queueFollowupMessages === enabled) return
     this.state = { ...this.state, queueFollowupMessages: enabled }
@@ -1126,6 +1291,8 @@ class ThemeStore {
     this.applyTheme()
     this.applyFontScale()
     this.applyGlassClass()
+    this.applyAppearance()
+    void this.loadWallpaperFromIDB()
 
     // 监听系统主题变化
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
@@ -1158,6 +1325,9 @@ class ThemeStore {
 
     // 3. 应用自定义 CSS
     this.applyCustomCSS()
+
+    // 4. 明暗切换会影响玻璃浓度（亮色实色），重算一次
+    this.applyAppearance()
 
     // 4. 更新 meta theme-color
     requestAnimationFrame(() => {
@@ -1279,6 +1449,75 @@ class ThemeStore {
     }
   }
 
+  /**
+   * 外观处理：把壁纸和染色浓度写到 DOM。
+   * 内部面板不自己上色（--color-bg-100 在 glass.css 里置空），
+   * 只由 .app-shell 那一层统一涂色，避免嵌套叠加。
+   */
+  private applyAppearance() {
+    const root = document.documentElement
+    if (this.state.appearanceStyle !== 'glass') {
+      root.removeAttribute('data-appearance')
+      root.removeAttribute('data-glass-wallpaper')
+      root.style.removeProperty('--glass-wallpaper')
+      root.style.removeProperty('--glass-wallpaper-fit')
+      root.style.removeProperty('--glass-alpha')
+      root.style.removeProperty('--glass-art-alpha')
+      return
+    }
+
+    root.setAttribute('data-appearance', 'glass')
+    // 亮色下保持实色
+    const alpha = this.getResolvedMode() === 'light' ? 1 : this.state.glassAlpha
+    root.style.setProperty('--glass-alpha', String(alpha))
+
+    const url = this.state.wallpaperUrl
+    if (this.state.wallpaperEnabled && url) {
+      root.setAttribute('data-glass-wallpaper', '')
+      root.style.setProperty('--glass-wallpaper', `url("${url}")`)
+      root.style.setProperty('--glass-wallpaper-fit', this.state.wallpaperFit)
+      root.style.setProperty('--glass-art-alpha', this.state.wallpaperInChat ? '0.24' : '0')
+    } else {
+      root.removeAttribute('data-glass-wallpaper')
+      root.style.removeProperty('--glass-wallpaper')
+      root.style.removeProperty('--glass-wallpaper-fit')
+      root.style.setProperty('--glass-art-alpha', '0')
+    }
+  }
+
+  /** 替换壁纸 object URL（先释放旧的） */
+  private replaceWallpaperUrl(nextUrl: string | null) {
+    const prev = this.state.wallpaperUrl
+    if (prev && prev !== nextUrl) {
+      URL.revokeObjectURL(prev)
+    }
+    this.state = { ...this.state, wallpaperUrl: nextUrl }
+  }
+
+  /** 从 IndexedDB 恢复壁纸；失败就当作没有 */
+  private async loadWallpaperFromIDB() {
+    if (this.wallpaperBlobLoaded) return
+    this.wallpaperBlobLoaded = true
+    try {
+      const blob = await wallpaperIdbGet()
+      if (!blob) {
+        if (this.state.wallpaperEnabled || this.state.wallpaperFileName) {
+          this.state = { ...this.state, wallpaperEnabled: false, wallpaperFileName: null, wallpaperUrl: null }
+          localStorage.setItem(STORAGE_KEY_WALLPAPER_ENABLED, 'false')
+          localStorage.removeItem(STORAGE_KEY_WALLPAPER_FILE_NAME)
+          this.applyAppearance()
+          this.emit()
+        }
+        return
+      }
+      this.replaceWallpaperUrl(URL.createObjectURL(blob))
+      this.applyAppearance()
+      this.emit()
+    } catch {
+      /* IndexedDB 不可用时静默跳过 */
+    }
+  }
+
   private persistCustomCSSSnippets(customCSSSnippets: CustomCSSSnippet[]) {
     localStorage.setItem(STORAGE_KEY_CUSTOM_CSS_SNIPPETS, JSON.stringify(customCSSSnippets))
   }
@@ -1367,6 +1606,15 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
     queueAutoCollapse:
       typeof parsed?.queueAutoCollapse === 'boolean' ? parsed.queueAutoCollapse : DEFAULT_QUEUE_AUTO_COLLAPSE,
     glassEffect: typeof parsed?.glassEffect === 'boolean' ? parsed.glassEffect : DEFAULT_GLASS_EFFECT,
+    appearanceStyle: parsed?.appearanceStyle === 'glass' ? 'glass' : DEFAULT_APPEARANCE_STYLE,
+    glassAlpha: clampGlassAlpha(typeof parsed?.glassAlpha === 'number' ? parsed.glassAlpha : DEFAULT_GLASS_ALPHA),
+    wallpaperEnabled:
+      typeof parsed?.wallpaperEnabled === 'boolean' ? parsed.wallpaperEnabled : DEFAULT_WALLPAPER_ENABLED,
+    wallpaperFit: parsed?.wallpaperFit === 'contain' ? 'contain' : DEFAULT_WALLPAPER_FIT,
+    wallpaperInChat:
+      typeof parsed?.wallpaperInChat === 'boolean' ? parsed.wallpaperInChat : DEFAULT_WALLPAPER_IN_CHAT,
+    wallpaperFileName: typeof parsed?.wallpaperFileName === 'string' ? parsed.wallpaperFileName : null,
+    wallpaperUrl: null,
     queueFollowupMessages:
       typeof parsed?.queueFollowupMessages === 'boolean'
         ? parsed.queueFollowupMessages
@@ -1460,6 +1708,16 @@ export function importThemeBackup(raw: unknown): void {
   localStorage.setItem(STORAGE_KEY_COMPACTION_AUTO_COLLAPSE, String(backup.compactionAutoCollapse))
   localStorage.setItem(STORAGE_KEY_QUEUE_AUTO_COLLAPSE, String(backup.queueAutoCollapse))
   localStorage.setItem(STORAGE_KEY_GLASS_EFFECT, String(backup.glassEffect))
+  localStorage.setItem(STORAGE_KEY_APPEARANCE_STYLE, backup.appearanceStyle)
+  localStorage.setItem(STORAGE_KEY_GLASS_ALPHA, String(backup.glassAlpha))
+  localStorage.setItem(STORAGE_KEY_WALLPAPER_ENABLED, String(backup.wallpaperEnabled))
+  localStorage.setItem(STORAGE_KEY_WALLPAPER_FIT, backup.wallpaperFit)
+  localStorage.setItem(STORAGE_KEY_WALLPAPER_IN_CHAT, String(backup.wallpaperInChat))
+  if (backup.wallpaperFileName) {
+    localStorage.setItem(STORAGE_KEY_WALLPAPER_FILE_NAME, backup.wallpaperFileName)
+  } else {
+    localStorage.removeItem(STORAGE_KEY_WALLPAPER_FILE_NAME)
+  }
   localStorage.setItem(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES, String(backup.queueFollowupMessages))
   localStorage.setItem(STORAGE_KEY_QUEUE_DELIVERY_CHIP_VISIBLE, String(backup.queueDeliveryChipVisible))
   localStorage.setItem(STORAGE_KEY_MANUAL_TERMINAL_TITLES, String(backup.manualTerminalTitles))

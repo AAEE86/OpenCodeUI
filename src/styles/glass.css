@@ -1,0 +1,160 @@
+/* ============================================================================
+ * Glass Appearance — 玻璃外观
+ * ============================================================================
+ *
+ * 由 <html data-appearance="glass"> 开关，默认风格不受任何影响。
+ *
+ * 分层结构：
+ *   1. 整窗只涂一层主题色（0.85），不是每个面板各涂一次。
+ *      所以这里把 --color-bg-100 置空，让内部面板不再自己上色，
+ *      只在 .app-shell 这一层画色，避免嵌套叠加越叠越实。
+ *   2. 模糊只有一次（#root::before），所有面板共享。
+ *   3. 对话区额外叠一层很淡的壁纸（0.24）并向下渐隐，
+ *      这是唯一一张图能看清的地方。
+ *   4. 亮色模式保持实色，玻璃只在暗色下成立。
+ *
+ * 注意：
+ *  - backdrop-filter 里不能用 var()，webkit2gtk 不支持
+ *  - -webkit- 前缀写在非前缀前面
+ * ========================================================================== */
+
+:root[data-appearance='glass'] {
+  /* 整窗染色浓度，由 JS 按用户设置覆盖 */
+  --glass-alpha: 0.88;
+  /* 对话区壁纸浓度 */
+  --glass-art-alpha: 0.24;
+  --glass-blur: 24px;
+  --glass-wallpaper-fit: cover;
+
+  /* 关键：内部面板不再自己涂色，统一由 .app-shell 那一层提供 */
+  --color-bg-100: transparent;
+}
+
+/* 亮色下走实色，不做玻璃 */
+:root[data-appearance='glass'][data-mode='light'] {
+  --glass-alpha: 1;
+}
+
+/* ---------------------------------------------------------------------------
+ * 1. 背景：整窗一张壁纸
+ * ------------------------------------------------------------------------- */
+
+:root[data-appearance='glass'] #root {
+  background-color: hsl(var(--bg-100));
+  background-image: var(--glass-wallpaper, none);
+  background-size: var(--glass-wallpaper-fit);
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* 全窗唯一一次磨砂，所有面板共享 */
+:root[data-appearance='glass'] #root::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+/* ---------------------------------------------------------------------------
+ * 2. 主表面：整窗只涂一层染色
+ * ------------------------------------------------------------------------- */
+
+:root[data-appearance='glass'] .app-shell {
+  background-color: hsl(var(--bg-100) / var(--glass-alpha));
+}
+
+/* ---------------------------------------------------------------------------
+ * 3. 对话区：淡淡的一层壁纸，向下渐隐到输入框
+ * ------------------------------------------------------------------------- */
+
+:root[data-appearance='glass'][data-glass-wallpaper] [data-chat-pane-root] {
+  isolation: isolate;
+}
+
+:root[data-appearance='glass'][data-glass-wallpaper] [data-chat-pane-root]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: var(--glass-wallpaper);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: var(--glass-art-alpha);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0 18%,
+    rgb(0 0 0 / 86%) 30%,
+    rgb(0 0 0 / 52%) 55%,
+    rgb(0 0 0 / 18%) 78%,
+    transparent 96%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0 18%,
+    rgb(0 0 0 / 86%) 30%,
+    rgb(0 0 0 / 52%) 55%,
+    rgb(0 0 0 / 18%) 78%,
+    transparent 96%
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * 4. 顶部截断：信息流滚到 header 下沿就消失
+ * ---------------------------------------------------------------------------
+ * header 保持透明，只截内容。用 mask 而不是给它铺底色：
+ * 底色会盖住玻璃，mask 只动 alpha，header 区域还是能看到背景。
+ *
+ * 截断位置取 header 自身高度（-14 是 56px，-10 是 40px），
+ * 再用 1.5rem 过渡到完全不透明，和原来的渐隐条对齐。
+ * ------------------------------------------------------------------------- */
+
+:root[data-appearance='glass'] [data-chat-pane-root]:has(.mobile-safe-topbar-14) {
+  --glass-header-cut: calc(3.5rem + var(--app-safe-top, 0px));
+}
+
+:root[data-appearance='glass'] [data-chat-pane-root]:has(.mobile-safe-topbar-10) {
+  --glass-header-cut: calc(2.5rem + var(--app-safe-top, 0px));
+}
+
+:root[data-appearance='glass'] [data-chat-scroll-root] {
+  --glass-cut-at: var(--glass-header-cut, calc(3.5rem + var(--app-safe-top, 0px)));
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent var(--glass-cut-at),
+    #000 calc(var(--glass-cut-at) + 1.5rem)
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent var(--glass-cut-at),
+    #000 calc(var(--glass-cut-at) + 1.5rem)
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * 5. 例外：必须实底的内容
+ * ------------------------------------------------------------------------- */
+
+/* 代码块与预览要能读，不跟着透 */
+:root[data-appearance='glass'] :is(.cm-editor, .cm-gutters, .cm-gutter) {
+  background-color: hsl(var(--bg-100) / 0.9) !important;
+}
+
+/* 对话框：比输入框实，但仍然是一块玻璃。0.82 会让背后正文透上来。
+   这里必须压过 index.css 里的 `:root[data-glass] .glass`（同权重，靠顺序会输） */
+:root[data-appearance='glass'] .glass[data-glass-dialog] {
+  background-color: hsl(var(--bg-000) / 0.92);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  backdrop-filter: blur(24px) saturate(140%);
+}
+
+/* 全屏页（设置、移动端面板）：接近实底，避免正文穿透 */
+:root[data-appearance='glass'] [data-glass-solid] {
+  background-color: hsl(var(--bg-100) / 0.96);
+}

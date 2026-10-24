@@ -33,6 +33,7 @@ export const ModalShell = memo(function ModalShell({ isOpen, onClose, children, 
   return createPortal(
     <div
       className="fixed inset-0 flex flex-col bg-bg-100 transition-opacity duration-200 ease-out"
+      data-glass-solid
       style={{
         zIndex,
         opacity: isVisible ? 1 : 0,

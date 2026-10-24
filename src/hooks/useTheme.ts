@@ -2,7 +2,7 @@ import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { flushSync } from 'react-dom'
 import { THEME_SWITCH_DISABLE_MS } from '../constants'
 import { themeStore, type ColorMode } from '../store/themeStore'
-import type { StepFinishDisplay, CustomCSSSnippet } from '../store/themeStore'
+import type { StepFinishDisplay, CustomCSSSnippet, AppearanceStyle, WallpaperFit } from '../store/themeStore'
 import type { ReasoningDisplayMode, DiffStyle, ToolCardStyle, CompletedAtFormat, ExternalFileDropMode, ComposerSelectorStyle } from '../store/themeStore'
 
 // 保持向后兼容的类型别名
@@ -377,6 +377,35 @@ export function useTheme() {
     glassEffect: state.glassEffect,
     setGlassEffect: useCallback((enabled: boolean) => {
       themeStore.setGlassEffect(enabled)
+    }, []),
+
+    // 外观处理（实色 / 玻璃）
+    appearanceStyle: state.appearanceStyle,
+    setAppearanceStyle: useCallback((style: AppearanceStyle) => {
+      themeStore.setAppearanceStyle(style)
+    }, []),
+    glassAlpha: state.glassAlpha,
+    setGlassAlpha: useCallback((alpha: number) => {
+      themeStore.setGlassAlpha(alpha)
+    }, []),
+
+    // 壁纸
+    wallpaperEnabled: state.wallpaperEnabled,
+    setWallpaperEnabled: useCallback((enabled: boolean) => {
+      themeStore.setWallpaperEnabled(enabled)
+    }, []),
+    wallpaperFit: state.wallpaperFit,
+    setWallpaperFit: useCallback((fit: WallpaperFit) => {
+      themeStore.setWallpaperFit(fit)
+    }, []),
+    wallpaperInChat: state.wallpaperInChat,
+    setWallpaperInChat: useCallback((enabled: boolean) => {
+      themeStore.setWallpaperInChat(enabled)
+    }, []),
+    wallpaperFileName: state.wallpaperFileName,
+    wallpaperUrl: state.wallpaperUrl,
+    setWallpaperImage: useCallback((file: File | Blob | null, fileName?: string | null) => {
+      return themeStore.setWallpaperImage(file, fileName)
     }, []),
 
     // 终端标签标题模式

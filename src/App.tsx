@@ -933,7 +933,7 @@ function App() {
   const { showCloseDialog, handleCloseDialogConfirm, handleCloseDialogCancel, hasUnsavedChanges } = useCloseServiceDialog()
 
   return (
-    <div className="relative flex h-full flex-col bg-bg-100 overflow-hidden">
+    <div className="app-shell relative flex h-full flex-col bg-bg-100 overflow-hidden">
       <DesktopTitlebar />
       <InternalDragLayer />
       <ChatViewportProvider value={chatViewport}>

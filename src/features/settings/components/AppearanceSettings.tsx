@@ -6,6 +6,7 @@ import { MenuItem } from '../../../components/ui/MenuItem'
 import { SunIcon, MoonIcon, SystemIcon, CheckIcon, GlobeIcon, UndoIcon, CloseIcon } from '../../../components/Icons'
 import { settingsFieldAreaClass, settingsFieldClass, Toggle, SegmentedControl, SettingRow, SettingField, SettingsSection } from './SettingsUI'
 import { CodeBlockThemeSettings } from './CodeBlockThemeSettings'
+import { AppearanceStyleSettings } from './AppearanceStyleSettings'
 import { useTheme } from '../../../hooks'
 import { getThemePreset } from '../../../themes'
 import { parseOpenCodeTheme } from '../../../themes/opencodeTheme'
@@ -873,6 +874,10 @@ export function AppearanceSettings() {
               onChange={(v, e) => setThemeWithAnimation(v, e)}
             />
           </div>
+        </SettingField>
+
+        <SettingField label={t('appearance.style')} description={t('appearance.styleDesc')}>
+          <AppearanceStyleSettings />
         </SettingField>
 
         <SettingRow

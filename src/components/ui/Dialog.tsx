@@ -324,6 +324,7 @@ export function Dialog({
             ${isDraggingActive ? '' : 'transition-all duration-200 ease-out'}
             ${className}
           `}
+          data-glass-dialog
           style={{
             width: typeof width === 'number' ? `${width}px` : width,
             maxWidth: '100%',

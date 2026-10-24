@@ -41,6 +41,9 @@ uuid = { version = "1", features = ["v4"] }
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+window-vibrancy = "0.6"
+
 [profile.release]
 strip = true
 lto = true

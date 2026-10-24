@@ -183,6 +183,8 @@ const DEFAULT_APPEARANCE_STYLE: AppearanceStyle = 'default'
 const DEFAULT_GLASS_ALPHA = 0.88
 const GLASS_ALPHA_MIN = 0.15
 const GLASS_ALPHA_MAX = 1
+/** 系统没有窗口模糊时的最低不透明度，避免桌面原样透上来影响阅读 */
+const GLASS_NO_BLUR_ALPHA = 0.94
 const DEFAULT_WALLPAPER_ENABLED = false
 const DEFAULT_WALLPAPER_FIT: WallpaperFit = 'cover'
 /** 对话区是否再叠一层淡图；默认关闭，保持整窗观感统一 */
@@ -410,6 +412,8 @@ class ThemeStore {
   private wallpaperBlobLoaded = false
   /** 系统窗口材质当前是否开启，避免重复调用 */
   private nativeGlassEnabled = false
+  /** 系统是否真的提供了窗口模糊；null 表示还没问过 */
+  private nativeBlurSupported: boolean | null = null
 
   constructor() {
     // 自定义主题（OpenCode 官方主题 JSON 导入）先于 preset 校验注册——
@@ -1478,8 +1482,6 @@ class ThemeStore {
 
     root.setAttribute('data-appearance', 'glass')
     const isDark = this.getResolvedMode() === 'dark'
-    // 亮色下保持实色
-    root.style.setProperty('--glass-alpha', String(isDark ? this.state.glassAlpha : 1))
     for (const [key, value] of Object.entries(buildGlassTokens(isDark))) {
       root.style.setProperty(key, value)
     }
@@ -1506,6 +1508,16 @@ class ThemeStore {
     } else {
       root.removeAttribute('data-window-transparent')
     }
+
+    // 拿不到系统模糊时（部分 Windows 版本、Linux 合成器），桌面会原样透上来，
+    // 这里把染色抬高一档，保证文字还能读。
+    const alpha = !isDark
+      ? 1
+      : useDesktopBackdrop && this.nativeBlurSupported === false
+        ? Math.max(this.state.glassAlpha, GLASS_NO_BLUR_ALPHA)
+        : this.state.glassAlpha
+    root.style.setProperty('--glass-alpha', String(alpha))
+
     this.syncNativeWindowGlass(useDesktopBackdrop)
   }
 
@@ -1514,7 +1526,14 @@ class ThemeStore {
     if (this.nativeGlassEnabled === enabled) return
     this.nativeGlassEnabled = enabled
     void import('@tauri-apps/api/core')
-      .then(({ invoke }) => invoke('set_window_glass_enabled', { enabled }))
+      .then(({ invoke }) => invoke<boolean>('set_window_glass_enabled', { enabled }))
+      .then(applied => {
+        if (!enabled) return
+        const supported = applied === true
+        if (this.nativeBlurSupported === supported) return
+        this.nativeBlurSupported = supported
+        this.applyAppearance()
+      })
       .catch(() => undefined)
   }
 

@@ -343,6 +343,7 @@
     "styleGlass": "玻璃",
     "glassAlpha": "玻璃浓度",
     "glassAlphaDesc": "越低越透，越高越接近实色。默认 88%",
+    "glassLightNote": "浅色模式保持实色，切回深色才会透出壁纸",
     "wallpaperNoImage": "未选择图片",
     "wallpaperChoose": "选择图片",
     "wallpaperChange": "更换图片",

@@ -13,6 +13,7 @@ import type { AppearanceStyle, WallpaperFit } from '../../../store/themeStore'
 export function AppearanceStyleSettings() {
   const { t } = useTranslation('settings')
   const {
+    isDark,
     appearanceStyle,
     setAppearanceStyle,
     glassAlpha,
@@ -65,6 +66,9 @@ export function AppearanceStyleSettings() {
 
       {isGlass && (
         <div className="space-y-4 rounded-xl border border-border-200/50 bg-bg-100/30 p-3">
+          {!isDark && (
+            <p className="text-[length:var(--fs-xs)] text-text-400">{t('appearance.glassLightNote')}</p>
+          )}
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <p className="text-[length:var(--fs-md)] text-text-100">{t('appearance.glassAlpha')}</p>
@@ -78,8 +82,9 @@ export function AppearanceStyleSettings() {
               max={1}
               step={0.01}
               value={glassAlpha}
+              disabled={!isDark}
               onChange={e => setGlassAlpha(Number(e.target.value))}
-              className="w-full accent-[hsl(var(--accent-main-100))]"
+              className="w-full accent-[hsl(var(--accent-main-100))] disabled:opacity-40"
               aria-label={t('appearance.glassAlpha')}
             />
             <p className="mt-1 text-[length:var(--fs-xs)] text-text-500">{t('appearance.glassAlphaDesc')}</p>

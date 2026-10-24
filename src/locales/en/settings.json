@@ -343,6 +343,7 @@
     "styleGlass": "Glass",
     "glassAlpha": "Glass opacity",
     "glassAlphaDesc": "Lower is more translucent. The default is 88%",
+    "glassLightNote": "Light mode stays opaque; switch to dark to see the glass",
     "wallpaperNoImage": "No image selected",
     "wallpaperChoose": "Choose image",
     "wallpaperChange": "Change image",

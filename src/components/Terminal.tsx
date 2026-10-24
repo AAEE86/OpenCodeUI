@@ -85,13 +85,12 @@ function getHSLColor(varName: string): string {
   return `#${f(0)}${f(8)}${f(4)}`
 }
 
-function getTerminalTheme(isDark: boolean) {
+function getTerminalTheme(isDark: boolean, glass = false) {
   const fgColor = getHSLColor('--text-100') || (isDark ? '#e8e0d5' : '#2d2a26')
-  // 背景色需要设为实际颜色（而非透明），因为 xterm 在处理反转视频（\e[7m）时
-  // 会用 theme.background 作为反转后的前景色。如果设为 #00000000，
-  // 反转视频的文字会变成黑色，且反转背景也会出现黑框。
-  // 实际的透明效果由 CSS `.xterm-viewport { background-color: transparent !important }` 实现。
-  const bgColor = getHSLColor('--bg-100') || (isDark ? '#1a1a1a' : '#f5f3ef')
+  // 玻璃外观下用全透明，终端直接坐在整窗那一层上。
+  // 代价是反向视频（\e[7m）的文字会偏黑，TUI 里的反色块会变淡。
+  // 实色外观仍然用真实背景色，因为 xterm 处理反转视频时会拿它当反转后的前景色。
+  const bgColor = glass ? '#00000000' : getHSLColor('--bg-100') || (isDark ? '#1a1a1a' : '#f5f3ef')
 
   if (isDark) {
     return {
@@ -489,7 +488,8 @@ export const Terminal = memo(function Terminal({ ptyId, directory, serverId, isA
     const terminalDirectory = terminalDirectoryRef.current
 
     const touchUi = preferTouchUi
-    const theme = getTerminalTheme(isDarkMode())
+    const isGlass = document.documentElement.getAttribute('data-appearance') === 'glass'
+    const theme = getTerminalTheme(isDarkMode(), isGlass)
 
     // 从 CSS 变量读取终端字号（跟随 fontScale 设置）
     const rootStyle = getComputedStyle(document.documentElement)
@@ -535,17 +535,22 @@ export const Terminal = memo(function Terminal({ ptyId, directory, serverId, isA
     terminal.open(containerRef.current)
 
     // WebGL 渲染器: GPU 加速，大幅提升 TUI 渲染性能
-    // 若 WebGL 不可用则静默回退到内置 DOM 渲染器
-    const webglAddon = new WebglAddon()
-    webglAddon.onContextLoss(() => {
-      webglAddon.dispose()
-      logger.log('[Terminal] WebGL context lost, falling back to DOM renderer')
-    })
-    try {
-      terminal.loadAddon(webglAddon)
-    } catch {
-      webglAddon.dispose()
-      logger.log('[Terminal] WebGL not available, using DOM renderer')
+    // 若 WebGL 不可用则静默回退到内置 DOM 渲染器。
+    // 玻璃外观下不挂 WebGL：它会用 theme.background 自己清屏，透明失效。
+    let webglAddon: WebglAddon | null = null
+    if (!isGlass) {
+      webglAddon = new WebglAddon()
+      webglAddon.onContextLoss(() => {
+        webglAddon?.dispose()
+        logger.log('[Terminal] WebGL context lost, falling back to DOM renderer')
+      })
+      try {
+        terminal.loadAddon(webglAddon)
+      } catch {
+        webglAddon.dispose()
+        webglAddon = null
+        logger.log('[Terminal] WebGL not available, using DOM renderer')
+      }
     }
 
     const textarea = terminal.textarea
@@ -868,7 +873,7 @@ export const Terminal = memo(function Terminal({ ptyId, directory, serverId, isA
       fitAddon.dispose()
       serializeAddon.dispose()
       webLinksAddon.dispose()
-      webglAddon.dispose()
+      webglAddon?.dispose()
       terminal.dispose()
       terminalRef.current = null
       fitAddonRef.current = null
@@ -1020,9 +1025,10 @@ export const Terminal = memo(function Terminal({ ptyId, directory, serverId, isA
   useEffect(() => {
     const observer = new MutationObserver(mutations => {
       for (const mutation of mutations) {
-        if (mutation.attributeName === 'data-mode') {
+        if (mutation.attributeName === 'data-mode' || mutation.attributeName === 'data-appearance') {
           if (terminalRef.current) {
-            terminalRef.current.options.theme = getTerminalTheme(isDarkMode())
+            const glass = document.documentElement.getAttribute('data-appearance') === 'glass'
+            terminalRef.current.options.theme = getTerminalTheme(isDarkMode(), glass)
           }
           break
         }
@@ -1031,7 +1037,7 @@ export const Terminal = memo(function Terminal({ ptyId, directory, serverId, isA
 
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['data-mode'],
+      attributeFilter: ['data-mode', 'data-appearance'],
     })
 
     return () => observer.disconnect()

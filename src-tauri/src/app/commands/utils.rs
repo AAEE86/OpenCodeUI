@@ -45,14 +45,18 @@ pub fn set_window_glass_enabled(window: tauri::WebviewWindow, enabled: bool) -> 
             let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
             // 新系统优先 Acrylic；失败退到旧版 Blur；再退到 Win11 的 Mica
             if window_vibrancy::apply_acrylic(window.clone(), None).is_ok() {
+                log::info!("[window] glass material: acrylic");
                 return true;
             }
             if window_vibrancy::apply_blur(window.clone(), None).is_ok() {
+                log::info!("[window] glass material: blur");
                 return true;
             }
             if window_vibrancy::apply_mica(window.clone(), None).is_ok() {
+                log::info!("[window] glass material: mica");
                 return true;
             }
+            log::warn!("[window] no system backdrop available, falling back to opaque tint");
             return false;
         }
         let _ = window_vibrancy::clear_acrylic(window.clone());
@@ -66,13 +70,15 @@ pub fn set_window_glass_enabled(window: tauri::WebviewWindow, enabled: bool) -> 
         use tauri::window::{Color, Effect, EffectsBuilder};
         if enabled {
             let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
-            return window
+            let applied = window
                 .set_effects(
                     EffectsBuilder::new()
                         .effect(Effect::UnderWindowBackground)
                         .build(),
                 )
                 .is_ok();
+            log::info!("[window] glass material: under-window-background ({applied})");
+            return applied;
         }
         let _ = window.set_effects(None);
         false

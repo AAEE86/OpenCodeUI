@@ -373,25 +373,41 @@
  * `:root[data-glass] .glass`（glass.css 先被引入，靠顺序会输）。
  * ------------------------------------------------------------------------- */
 
-:root[data-appearance='glass'][data-appearance] :is(.glass, .glass-alt) {
+:root[data-appearance='glass'][data-appearance] :is(.glass, .glass-alt):not([data-glass-dialog]) {
   background-color: var(--glass-veil);
   border-color: var(--glass-hairline);
 }
 
 /* 上下文菜单、权限/提问弹窗、移动端抽屉用的是 bg-bg-100，而它是透明的 */
-:root[data-appearance='glass'] :is(.shadow-lg, .shadow-xl, .shadow-float).bg-bg-100,
-:root[data-appearance='glass'] :is(.shadow-lg, .shadow-xl, .shadow-float).bg-bg-000 {
+:root[data-appearance='glass'] :is(.shadow-lg, .shadow-xl, .shadow-float).bg-bg-100:not([data-glass-dialog]),
+:root[data-appearance='glass'] :is(.shadow-lg, .shadow-xl, .shadow-float).bg-bg-000:not([data-glass-dialog]) {
   background-color: var(--glass-veil);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
   backdrop-filter: blur(24px) saturate(140%);
 }
 
-/* 对话框比一般浮层再淡一点，用 2.5% 的文字色 */
-:root[data-appearance='glass'] .glass[data-glass-dialog] {
+/* 对话框和 Dialog 组件共用这一块材质：2.5% 文字色 + 24px 模糊 + 细描边。
+   面板自己不能再叠一层 bg-000（那是 8% 的白），两层白压在一起就是一块死灰板子，
+   文字没有对比，看着像塑料。 */
+:root[data-appearance='glass'][data-appearance] [data-glass-dialog] {
   background-color: var(--glass-veil-soft);
+  /* 顶部一道很淡的内高光，玻璃受光的那点意思，不加就是一张灰纸 */
+  background-image: linear-gradient(to bottom, rgb(255 255 255 / 0.045), transparent 42%);
   border-color: var(--glass-hairline);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
   backdrop-filter: blur(24px) saturate(140%);
+}
+
+/* 表头原本比面板亮一档，玻璃下这层亮就是那块灰的来源 */
+:root[data-appearance='glass'] [data-glass-dialog] [data-glass-dialog-head] {
+  background-color: transparent;
+}
+
+/* 反色按钮是「浅底深字」，玻璃下 --color-bg-000 只剩下 8% 的白，
+   拿它当文字色等于把字写成透明，于是浅色按钮上什么都看不见。
+   这里换回不透明的表面色。 */
+:root[data-appearance='glass'] .text-bg-000 {
+  color: hsl(var(--bg-000));
 }
 
 /* ---------------------------------------------------------------------------

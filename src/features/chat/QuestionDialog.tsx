@@ -80,8 +80,11 @@ export function QuestionDialog({
           paddingBottom: 'max(8px, var(--safe-area-inset-bottom, 8px))',
         }}
       >
-        <div className="border border-border-300/40 rounded-[14px] shadow-float bg-bg-100 overflow-hidden">
-          <div className="bg-bg-000 rounded-t-[14px]">
+        <div
+          data-glass-dialog
+          className="border border-border-300/40 rounded-[14px] shadow-float bg-bg-100 overflow-hidden"
+        >
+          <div data-glass-dialog-head className="bg-bg-000 rounded-t-[14px]">
             {/* Header */}
             <div className="flex items-center justify-between py-3 px-4">
               <div className="flex items-center gap-2">

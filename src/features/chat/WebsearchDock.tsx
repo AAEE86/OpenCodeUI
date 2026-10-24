@@ -237,11 +237,12 @@ export function WebsearchDock({
       >
         <div
           data-component="session-websearch-dock"
+          data-glass-dialog
           aria-label={t('chat:websearch.title')}
           aria-busy={busy}
           className="border border-border-300/40 rounded-[14px] shadow-float bg-bg-100 overflow-hidden"
         >
-          <div className="bg-bg-000 rounded-t-[14px]">
+          <div data-glass-dialog-head className="bg-bg-000 rounded-t-[14px]">
             {/* Header —— 与权限/提问同款：图标 + 标题 + 收起 */}
             <div className="flex items-center justify-between py-3 px-4">
               <div className="flex items-center gap-2">

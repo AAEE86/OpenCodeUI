@@ -1,5 +1,24 @@
 # Changelog
 
+## [v0.7.23] - 2026-10-24
+
+- fix(chat): 「移到后台」不再统计上一回合遗留的 shell (2952ccae)
+- fix(input): 换行到顶时输入框工具条不再被裁掉 (15739390)
+- fix(message): 折叠遮罩只作用于超长折叠消息 (af7eaafc)
+- fix(appearance): 玻璃下主按钮、标签栏与状态点的质感 (c90cfd4e)
+- chore(window): 记录最终选中的窗口材质，方便真机排查 (5fa185ed)
+- feat(appearance): 窗口材质加降级链，无模糊时抬高染色 (86f21896)
+- feat(appearance): 桌面端玻璃直接透出窗口背后的桌面 (7b88b3fc)
+- fix(input): 忙碌时输入框底色不再被抬高 (bd1ae610)
+- fix(input): 输入框单行高度不再随首字跳动 (abbc785e)
+- style(appearance): 提高输入框描边光的色彩可见度 (95d473a6)
+- fix(appearance): 全屏预览改用淡色叠层 (acfa4bfe)
+- style(appearance): 输入框描边光放缓坡度并拉长光带 (e7359457)
+- fix(appearance): 玻璃改用文字色叠层，开启时切深色 (833dde1a)
+- feat(appearance): 补齐组件、浮层、编辑器与终端 (1f67c0d9)
+- feat(appearance): 输入框与按钮改用中性玻璃质感 (f3c14549)
+- feat(appearance): 玻璃外观与自定义壁纸 (46184e96)
+
 ## [v0.7.22] - 2026-10-23
 
 - refactor(input): Android IME 兜底收敛为 useAndroidImeSafeTextarea (5b599f46)

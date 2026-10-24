@@ -104,4 +104,11 @@ describe('mergeRunningShells（官方 background.ts:100-109 同款）', () => {
     expect(merged).toHaveLength(1)
     expect(merged[0].id).toBe('part_shell')
   })
+
+  it('早于当前回合启动的 shell 不并入（上一回合遗留的后台任务）', () => {
+    const oldShell = { ...shellInfo('sh-old', 'npm run dev', 'ses_raw'), time: { started: 100 } }
+    const newShell = { ...shellInfo('sh-new', 'npm run build', 'ses_raw'), time: { started: 5_000 } }
+    const merged = mergeRunningShells([], [oldShell, newShell], 'ses_raw', { notBefore: 4_000 })
+    expect(merged.map(task => task.id)).toEqual(['sh-new'])
+  })
 })

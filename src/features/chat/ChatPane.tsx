@@ -371,23 +371,62 @@ export const ChatPane = memo(function ChatPane({
   // 并入服务端 running shells（官方 background.ts:100-109 同款）
   // ============================================
   const runningShells = useRunningShells(routeSessionId, isStreaming, effectiveDirectory, paneServerId)
+
+  // 当前回合开始的时间点：这之前启动、还挂在后台的 shell 属于上一回合，
+  // 不能算作阻塞当前回合、也不该继续提示「移到后台」。
+  const currentTurnStartedAt = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (message.type === 'user' && typeof message.time?.created === 'number') return message.time.created
+    }
+    return undefined
+  }, [messages])
+
+  // 刚被移到后台的任务：服务端 shell 仍是 running，本地先摘掉，避免入口一直挂着。
+  const [movedBackgroundKeys, setMovedBackgroundKeys] = useState<ReadonlySet<string>>(() => new Set())
+  useEffect(() => {
+    setMovedBackgroundKeys(new Set())
+  }, [routeSessionId, currentTurnStartedAt])
+
   const blockingBackgroundTasks = useMemo(() => {
     if (!isStreaming || !routeSessionId) return []
     const { sessionId: rawSessionId } = splitSessionKey(routeSessionId)
-    return mergeRunningShells(findBlockingBackgroundTasks(messages), runningShells, rawSessionId ?? routeSessionId)
-  }, [isStreaming, routeSessionId, messages, runningShells])
+    const merged = mergeRunningShells(
+      findBlockingBackgroundTasks(messages),
+      runningShells,
+      rawSessionId ?? routeSessionId,
+      { notBefore: currentTurnStartedAt },
+    )
+    if (movedBackgroundKeys.size === 0) return merged
+    return merged.filter(
+      task =>
+        !movedBackgroundKeys.has(`${task.type}:${task.id}`) && !movedBackgroundKeys.has(`label:${task.label}`),
+    )
+  }, [isStreaming, routeSessionId, messages, runningShells, currentTurnStartedAt, movedBackgroundKeys])
+
   const [backgroundMoving, setBackgroundMoving] = useState(false)
   const handleMoveToBackground = useCallback(async () => {
     if (!routeSessionId || backgroundMoving) return
+    const snapshot = blockingBackgroundTasks
     setBackgroundMoving(true)
     try {
       await backgroundSession(routeSessionId, paneServerId)
+      if (snapshot.length > 0) {
+        setMovedBackgroundKeys(prev => {
+          const next = new Set(prev)
+          for (const task of snapshot) {
+            next.add(`${task.type}:${task.id}`)
+            next.add(`label:${task.label}`)
+          }
+          return next
+        })
+      }
     } catch (e) {
       uiErrorHandler('background session', e)
     } finally {
       setBackgroundMoving(false)
     }
-  }, [routeSessionId, paneServerId, backgroundMoving])
+  }, [routeSessionId, paneServerId, backgroundMoving, blockingBackgroundTasks])
   const messageView = useMemo(() => ({ sessionId: routeSessionId, messages }), [routeSessionId, messages])
   // Streaming never consumes the deferred value, so do not feed every token into a
   // second low-priority render lane.

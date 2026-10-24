@@ -49,6 +49,14 @@ export function findBlockingBackgroundTasks(messages: SessionMessageInfo[]): Blo
   return []
 }
 
+export interface MergeRunningShellsOptions {
+  /**
+   * 只并入在这个时间点之后启动的 shell（通常是当前回合的用户消息时间）。
+   * 更早启动、还挂在后台的 shell 属于上一回合，不该继续提示「移到后台」。
+   */
+  notBefore?: number
+}
+
 /**
  * 并入服务端 running shells（官方 requests/background.ts:100-109 同款）：
  * shell.list 里 status==='running' 且属于本会话的 shell 也是后台化候选，
@@ -61,10 +69,13 @@ export function mergeRunningShells(
   tasks: BlockingBackgroundTask[],
   shells: ShellInfo[],
   rawSessionId: string,
+  options: MergeRunningShellsOptions = {},
 ): BlockingBackgroundTask[] {
+  const { notBefore } = options
   const running = shells.flatMap((shell): BlockingBackgroundTask[] => {
     if (shell.status !== 'running') return []
     if ((shell.metadata as Record<string, unknown> | undefined)?.sessionID !== rawSessionId) return []
+    if (notBefore !== undefined && shell.time.started < notBefore) return []
     if (tasks.some(task => task.type === 'shell' && (task.id === shell.id || (!!task.label && shell.command === task.label))))
       return []
     return [{ type: 'shell', id: shell.id, label: shell.command }]

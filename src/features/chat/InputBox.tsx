@@ -704,15 +704,30 @@ function InputBoxComponent({
     const textarea = textareaRef.current
     if (!textarea) return
 
+    // 一行的高度必须跟着真实行高走。TEXTAREA_MIN_HEIGHT 是 24，
+    // 但字号调大后一行会超过 24，输入第一个字就会把盒子撑高，
+    // 看起来像"没换行却变高"。
+    const computed = getComputedStyle(textarea)
+    const lineHeight = Number.parseFloat(computed.lineHeight)
+    const fontSize = Number.parseFloat(computed.fontSize)
+    const oneLine = Math.max(
+      TEXTAREA_MIN_HEIGHT,
+      Math.ceil(
+        Number.isFinite(lineHeight) ? lineHeight : Number.isFinite(fontSize) ? fontSize * 1.43 : TEXTAREA_MIN_HEIGHT,
+      ),
+    )
+
+    textarea.style.minHeight = `${oneLine}px`
+
     // 只有真正空字符串时才重置高度；保留仅空格/空行时的换行高度
     if (text.length === 0) {
-      textarea.style.height = `${TEXTAREA_MIN_HEIGHT}px`
+      textarea.style.height = `${oneLine}px`
       return
     }
 
     textarea.style.height = 'auto'
     const scrollHeight = textarea.scrollHeight
-    textarea.style.height = Math.max(TEXTAREA_MIN_HEIGHT, Math.min(scrollHeight, textareaMaxHeight)) + 'px'
+    textarea.style.height = Math.max(oneLine, Math.min(scrollHeight, textareaMaxHeight)) + 'px'
   }, [text, textareaMaxHeight])
 
   // 计算
@@ -2023,7 +2038,6 @@ function InputBoxComponent({
                       className={`w-full resize-none focus:outline-none focus:ring-0 bg-transparent text-text-100 placeholder:text-text-400 custom-scrollbar ${isCompact ? 'px-3' : 'px-4'} ${shellMode ? 'font-mono' : ''}`}
                       style={{
                         ...TEXT_STYLE,
-                        minHeight: '24px',
                         maxHeight: textareaMaxHeight,
                       }}
                       rows={1}

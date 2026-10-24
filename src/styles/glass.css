@@ -215,20 +215,19 @@
   border-color: color-mix(in srgb, hsl(var(--text-100)) 20%, transparent);
 }
 
-/* 主操作按钮：保留主题强调色，但做成半透明的玻璃块，
-   不再是一块实心色块，也不会变成白色 */
+/* 主操作按钮：薄底 + 模糊，不加描边（描边压在模糊层上会在圆角处泛光）。
+   浓度要够，不然半透明色被背后的深色吃掉，看着发暗。 */
 :root[data-appearance='glass'] [data-ui-button='primary'] {
-  background-color: color-mix(in srgb, hsl(var(--accent-main-100)) 78%, transparent);
+  background-color: color-mix(in srgb, hsl(var(--accent-main-100)) 62%, transparent);
   color: hsl(var(--oncolor-100));
-  -webkit-backdrop-filter: blur(12px) saturate(140%);
-  backdrop-filter: blur(12px) saturate(140%);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, hsl(var(--oncolor-100)) 22%, transparent),
-    0 1px 2px rgb(0 0 0 / 0.18);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: none;
+  border-color: transparent;
 }
 
 :root[data-appearance='glass'] [data-ui-button='primary']:hover:not(:disabled) {
-  background-color: color-mix(in srgb, hsl(var(--accent-main-100)) 92%, transparent);
+  background-color: color-mix(in srgb, hsl(var(--accent-main-100)) 78%, transparent);
 }
 
 :root[data-appearance='glass'] [data-ui-button='primary']:disabled {

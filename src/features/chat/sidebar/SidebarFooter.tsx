@@ -60,6 +60,7 @@ function StatusIndicator({
 
       {/* 右下角状态点 - 带背景边框以突出显示 */}
       <div
+        data-glass-ring
         className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-bg-200 ${statusColor}`}
       />
     </div>

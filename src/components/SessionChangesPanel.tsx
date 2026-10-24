@@ -890,6 +890,7 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       {/* Resize Handle - 与标签栏同色 */}
       {showPreview && (
         <div
+          data-preview-resizer
           className={`
             h-1.5 cursor-row-resize shrink-0 relative
             hover:bg-accent-main-100/50 active:bg-accent-main-100 transition-colors

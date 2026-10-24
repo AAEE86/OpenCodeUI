@@ -174,6 +174,57 @@
   border-color: color-mix(in srgb, hsl(var(--text-100)) 20%, transparent);
 }
 
+/* 主操作按钮：保留主题强调色，但做成半透明的玻璃块，
+   不再是一块实心色块，也不会变成白色 */
+:root[data-appearance='glass'] [data-ui-button='primary'] {
+  background-color: color-mix(in srgb, hsl(var(--accent-main-100)) 78%, transparent);
+  color: hsl(var(--oncolor-100));
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, hsl(var(--oncolor-100)) 22%, transparent),
+    0 1px 2px rgb(0 0 0 / 0.18);
+}
+
+:root[data-appearance='glass'] [data-ui-button='primary']:hover:not(:disabled) {
+  background-color: color-mix(in srgb, hsl(var(--accent-main-100)) 92%, transparent);
+}
+
+:root[data-appearance='glass'] [data-ui-button='primary']:disabled {
+  background-color: color-mix(in srgb, hsl(var(--accent-main-100)) 28%, transparent);
+  color: color-mix(in srgb, hsl(var(--oncolor-100)) 60%, transparent);
+  box-shadow: none;
+}
+
+:root[data-appearance='glass'] [data-ui-button='secondary'] {
+  background-color: color-mix(in srgb, hsl(var(--text-100)) 6%, transparent);
+  color: hsl(var(--text-100));
+}
+
+:root[data-appearance='glass'] [data-ui-button='secondary']:hover:not(:disabled) {
+  background-color: color-mix(in srgb, hsl(var(--text-100)) 10%, transparent);
+}
+
+:root[data-appearance='glass'] [data-ui-button='ghost']:hover:not(:disabled) {
+  background-color: color-mix(in srgb, hsl(var(--text-100)) 7%, transparent);
+}
+
+/* 预览区标签栏：轨道压暗一档，选中标签再补一点点亮，
+   抵消轨道那层暗色后和下方预览区的玻璃对齐，看起来是同一块表面 */
+:root[data-appearance='glass'] [data-preview-tabs] {
+  background-color: hsl(var(--always-black) / 0.14);
+}
+
+:root[data-appearance='glass'] [data-preview-tabs] .tab-active {
+  background-color: color-mix(in srgb, hsl(var(--text-100)) 3%, transparent);
+}
+
+/* 预览区和标签栏之间的分隔条，原本和标签栏同色。
+   玻璃下标签栏压暗了，这条也要跟着，不然中间会露出一道亮线。 */
+:root[data-appearance='glass'] [data-preview-resizer]:not(:hover):not(:active) {
+  background-color: hsl(var(--always-black) / 0.14);
+}
+
 /* ---------------------------------------------------------------------------
  * 5.1 忙碌时的描边光
  * ---------------------------------------------------------------------------
@@ -346,6 +397,25 @@
 /* ---------------------------------------------------------------------------
  * 7. 例外：必须实底的内容
  * ------------------------------------------------------------------------- */
+
+/* 状态点用 border-bg-200 挖一圈把绿点和底下的圆环隔开。
+   玻璃下 bg-200 是半透明的，绿色会从描边透出来，点看起来就变大了，
+   这里换成不透明的表面色。 */
+:root[data-appearance='glass'] [data-glass-ring] {
+  border-color: hsl(var(--bg-100));
+}
+
+/* 用户长文本折叠：原来的做法是盖一层和气泡同色的渐变。
+   玻璃下气泡是半透明叠层，盖上去的颜色对不上，边缘会出现一道突兀的色带。
+   改成直接对正文做渐变遮罩，文字淡出到气泡底色里，跟背景无关。 */
+:root[data-appearance='glass'] [data-collapse-mask] {
+  display: none;
+}
+
+:root[data-appearance='glass'] [data-collapse-content] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3rem), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 3rem), transparent 100%);
+}
 
 /* 代码编辑器：整块透明，靠整窗那一层托住；
    行号槽原本写死 hsl(var(--bg-100))，在玻璃下会变成一块死色，一起置空 */

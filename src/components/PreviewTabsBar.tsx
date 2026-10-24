@@ -84,7 +84,7 @@ export const PreviewTabsBar = memo(function PreviewTabsBar({
   }, [])
 
   return (
-    <div className="relative flex items-center justify-between shrink-0 bg-bg-200/60 h-[30px]">
+    <div data-preview-tabs className="relative flex items-center justify-between shrink-0 bg-bg-200/60 h-[30px]">
       <div
         ref={tabsScrollRef}
         onWheel={handleTabsWheel}

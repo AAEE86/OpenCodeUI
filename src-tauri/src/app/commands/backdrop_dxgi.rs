@@ -84,47 +84,6 @@ pub mod dxgi {
             }
         }
 
-        #[allow(dead_code)]
-        pub fn new() -> Result<Self, String> {
-            unsafe {
-                let mut device: Option<ID3D11Device> = None;
-                let mut context: Option<ID3D11DeviceContext> = None;
-                D3D11CreateDevice(
-                    None,
-                    D3D_DRIVER_TYPE_HARDWARE,
-                    HMODULE::default(),
-                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                    Some(&[D3D_FEATURE_LEVEL_11_0]),
-                    D3D11_SDK_VERSION,
-                    Some(&mut device),
-                    None,
-                    Some(&mut context),
-                )
-                .map_err(|err| format!("D3D11CreateDevice: {err}"))?;
-                let device = device.ok_or("没有拿到 D3D11 设备")?;
-                let context = context.ok_or("没有拿到 D3D11 上下文")?;
-
-                let dxgi_device: IDXGIDevice = device.cast().map_err(|err| err.to_string())?;
-                let adapter = dxgi_device.GetAdapter().map_err(|err| err.to_string())?;
-                let output = adapter.EnumOutputs(0).map_err(|err| err.to_string())?;
-                let desc = output.GetDesc().map_err(|err| err.to_string())?;
-                let output1: IDXGIOutput1 = output.cast().map_err(|err| err.to_string())?;
-                let dup = output1
-                    .DuplicateOutput(&device)
-                    .map_err(|err| format!("DuplicateOutput: {err}"))?;
-
-                let rect = desc.DesktopCoordinates;
-                Ok(Self {
-                    device,
-                    context,
-                    dup,
-                    offset: (rect.left, rect.top),
-                    size: ((rect.right - rect.left) as u32, (rect.bottom - rect.top) as u32),
-                    staging: None,
-                })
-            }
-        }
-
         pub fn size(&self) -> (u32, u32) {
             self.size
         }
@@ -245,56 +204,6 @@ pub mod dxgi {
             let texture = texture.ok_or("建 staging 纹理失败")?;
             self.staging = Some((texture.clone(), w, h));
             Ok(texture)
-        }
-    }
-}
-
-#[cfg(all(test, target_os = "windows"))]
-mod probe {
-    use std::time::{Duration, Instant};
-
-    #[test]
-    #[ignore]
-    fn dxgi_bench() {
-        let mut dup = match super::dxgi::Duplication::new() {
-            Ok(d) => d,
-            Err(err) => {
-                println!("dxgi unavailable: {err}");
-                return;
-            }
-        };
-        println!("output size = {:?}", dup.size());
-
-        // 抓一块 1600x1000，跑 2 秒，统计拿到帧的耗时
-        let mut grabbed = 0;
-        let mut total = Duration::ZERO;
-        let mut bytes = 0usize;
-        let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(2) {
-            let t = Instant::now();
-            match dup.grab(0, 0, 1600, 1000) {
-                Ok(Some((px, _, _))) => {
-                    total += t.elapsed();
-                    bytes = px.len();
-                    grabbed += 1;
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    println!("grab error: {err}");
-                    break;
-                }
-            }
-            std::thread::sleep(Duration::from_millis(8));
-        }
-        if grabbed > 0 {
-            println!(
-                "grabbed {grabbed} frames in {:?}, avg {:?}/frame, {:.1} MB/frame",
-                started.elapsed(),
-                total / grabbed,
-                bytes as f64 / 1024.0 / 1024.0
-            );
-        } else {
-            println!("no frames grabbed (desktop static?)");
         }
     }
 }

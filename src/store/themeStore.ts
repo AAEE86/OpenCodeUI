@@ -191,6 +191,7 @@ export type DesktopBackdrop = 'native' | 'live'
 const STORAGE_KEY_DESKTOP_BACKDROP = 'desktop-backdrop'
 const DEFAULT_DESKTOP_BACKDROP: DesktopBackdrop = 'native'
 const STORAGE_KEY_BACKDROP_BLUR = 'backdrop-blur'
+const STORAGE_KEY_PERFORMANCE_MODE = 'backdrop-performance'
 /** 页面磨砂层的半径（px），和壁纸模式共用同一个变量 */
 const DEFAULT_BACKDROP_BLUR = 24
 
@@ -318,6 +319,8 @@ export interface ThemeState {
   desktopBackdrop: DesktopBackdrop
   /** 页面磨砂层的半径（px） */
   backdropBlur: number
+  /** 性能模式：常驻排除自己，跑满帧率；代价是应用不出现在录屏里 */
+  performanceMode: boolean
   /** 忙碌时后续消息是否进入队列 */
   queueFollowupMessages: boolean
   /** 输入框的 busy 投递 chip（插队/排队）是否显示 */
@@ -551,6 +554,7 @@ class ThemeStore {
     const wallpaperInChat = localStorage.getItem(STORAGE_KEY_WALLPAPER_IN_CHAT) === 'true'
     const desktopBackdrop: DesktopBackdrop =
       localStorage.getItem(STORAGE_KEY_DESKTOP_BACKDROP) === 'live' ? 'live' : DEFAULT_DESKTOP_BACKDROP
+    const performanceMode = localStorage.getItem(STORAGE_KEY_PERFORMANCE_MODE) === 'true'
     const savedBackdropBlur = Number(localStorage.getItem(STORAGE_KEY_BACKDROP_BLUR))
     const backdropBlur =
       Number.isFinite(savedBackdropBlur) && savedBackdropBlur > 0 ? savedBackdropBlur : DEFAULT_BACKDROP_BLUR
@@ -659,6 +663,7 @@ class ThemeStore {
       liveBackdrop: false,
       desktopBackdrop,
       backdropBlur,
+      performanceMode,
       queueFollowupMessages,
       queueDeliveryChipVisible,
       manualTerminalTitles,
@@ -789,6 +794,18 @@ class ThemeStore {
   }
   get backdropBlur() {
     return this.state.backdropBlur
+  }
+
+  get performanceMode() {
+    return this.state.performanceMode
+  }
+
+  setPerformanceMode(enabled: boolean) {
+    if (this.state.performanceMode === enabled) return
+    this.state = { ...this.state, performanceMode: enabled }
+    localStorage.setItem(STORAGE_KEY_PERFORMANCE_MODE, String(enabled))
+    this.applyAppearance()
+    this.emit()
   }
 
   setBackdropBlur(value: number) {
@@ -1574,8 +1591,9 @@ class ThemeStore {
     // 才有东西可以糊（窗口背景透明时 Chromium 的 backdrop-filter 是死的）。
     // 其它平台留给系统材质，页面只负责染色。
     const wantsDesktop = isDark && !hasWallpaper && isTauri()
+    // Windows 上只走自绘：系统材质档对应用内面板没有帮助，还和录屏互斥
     const liveBackdrop =
-      wantsDesktop && this.state.desktopBackdrop === 'live' && getDesktopPlatform() === 'windows'
+      wantsDesktop && (getDesktopPlatform() === 'windows' || this.state.desktopBackdrop === 'live')
     const nativeBackdrop = wantsDesktop && !liveBackdrop
 
     if (liveBackdrop) root.setAttribute('data-live-backdrop', '')
@@ -1601,7 +1619,8 @@ class ThemeStore {
     this.syncWindowBackdrop(
       liveBackdrop ? 'page' : nativeBackdrop ? 'native' : 'none',
       isDark ? '#101014' : '#f5f5f6',
-      liveBackdrop,
+      // 性能模式：常驻排除自己，抓取时不用再等一帧合成
+      liveBackdrop && this.state.performanceMode,
     )
   }
 
@@ -1749,6 +1768,7 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
     appearanceStyle: parsed?.appearanceStyle === 'glass' ? 'glass' : DEFAULT_APPEARANCE_STYLE,
     glassAlpha: clampGlassAlpha(typeof parsed?.glassAlpha === 'number' ? parsed.glassAlpha : DEFAULT_GLASS_ALPHA),
     backdropBlur: typeof parsed?.backdropBlur === 'number' ? parsed.backdropBlur : DEFAULT_BACKDROP_BLUR,
+    performanceMode: parsed?.performanceMode === true,
     wallpaperEnabled:
       typeof parsed?.wallpaperEnabled === 'boolean' ? parsed.wallpaperEnabled : DEFAULT_WALLPAPER_ENABLED,
     wallpaperFit: parsed?.wallpaperFit === 'contain' ? 'contain' : DEFAULT_WALLPAPER_FIT,

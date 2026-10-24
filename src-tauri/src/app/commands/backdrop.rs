@@ -15,8 +15,8 @@ pub fn capture_desktop_backdrop(
     window: tauri::WebviewWindow,
     width: u32,
     height: u32,
-    blur: u32,
     margin: u32,
+    toggle: bool,
 ) -> Result<tauri::ipc::Response, String> {
     #[cfg(target_os = "windows")]
     {
@@ -25,7 +25,7 @@ pub fn capture_desktop_backdrop(
         // 这条命令跑在 WebView2 的 COM 回调里，panic 没法 unwind，会直接把进程带走。
         // 兜一层，任何内部错误都退化成「这一帧没变」。
         let frame = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            windows_capture::grab(raw, width, height, blur, margin)
+            windows_capture::grab(raw, width, height, margin, toggle)
         }))
         .unwrap_or_else(|_| {
             log::error!("[backdrop] 抓屏内部异常");
@@ -36,7 +36,7 @@ pub fn capture_desktop_backdrop(
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (window, width, height, blur, margin);
+        let _ = (window, width, height, margin, toggle);
         Err("只有 Windows 支持抓取桌面背景".into())
     }
 }
@@ -57,8 +57,8 @@ mod windows_capture {
         hwnd: *mut c_void,
         width: u32,
         height: u32,
-        blur: u32,
         margin: u32,
+        toggle: bool,
     ) -> Result<Vec<u8>, String> {
         if width == 0 || height == 0 || width > 4096 || height > 4096 {
             return Err("目标尺寸不合法".into());
@@ -86,31 +86,50 @@ mod windows_capture {
         let grab_w = src_w + margin * 2;
         let grab_h = src_h + margin * 2;
 
+        // toggle = true：只在抓这一瞬排除自己，抓完恢复可见（能截图能录屏，但要等一帧合成）
+        // toggle = false：排除标记已经由窗口模式常驻，这里直接抓（能跑满帧率）
+        if toggle {
+            set_exclusion(hwnd, true);
+            dwm_flush();
+        }
+        let grabbed = capture_region(left, top, grab_w, grab_h);
+        if toggle {
+            set_exclusion(hwnd, false);
+        }
+
         let t0 = std::time::Instant::now();
-        let Some((bgra, cap_w, cap_h)) = capture_region(left, top, grab_w, grab_h)? else {
+        let Some((bgra, cap_w, cap_h)) = grabbed? else {
             return Ok(vec![0u8]);
         };
         let t_grab = t0.elapsed();
         let pixels = downscale(&bgra, cap_w, cap_h, width, height);
         let t_scale = t0.elapsed();
-        // 不再在这里做模糊：页面那层 24px 的磨砂会把缩放噪点一起抹掉，
-        // 这里省下的 1.2ms 直接变成更低的延迟。
-        let _ = blur;
-        let t_blur = t0.elapsed();
 
         if !mark_changed(&pixels) {
             return Ok(vec![0u8]);
         }
-        log_cost(
-            src_w,
-            src_h,
-            width,
-            height,
-            t_grab,
-            t_scale - t_grab,
-            t_blur - t_scale,
-        );
+        log_cost(src_w, src_h, width, height, t_grab, t_scale - t_grab);
         Ok(pixels)
+    }
+
+    fn set_exclusion(hwnd: HWND, excluded: bool) {
+        #[link(name = "user32")]
+        extern "system" {
+            fn SetWindowDisplayAffinity(hwnd: *mut c_void, affinity: u32) -> i32;
+        }
+        const WDA_NONE: u32 = 0;
+        const WDA_EXCLUDEFROMCAPTURE: u32 = 0x11;
+        let affinity = if excluded { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
+        let _ = unsafe { SetWindowDisplayAffinity(hwnd.0, affinity) };
+    }
+
+    /// 等 DWM 完成一次合成。标记生效需要一帧，不等就会抓到上一帧。
+    fn dwm_flush() {
+        #[link(name = "dwmapi")]
+        extern "system" {
+            fn DwmFlush() -> i32;
+        }
+        let _ = unsafe { DwmFlush() };
     }
 
     /// 用 DXGI 抓窗口那块区域。`None` 表示桌面这一帧没变。
@@ -179,16 +198,15 @@ mod windows_capture {
     }
 
     /// 每 120 帧打一条耗时，定位延迟落在哪一段
-    fn log_cost(src_w: i32, src_h: i32, w: u32, h: u32, grab: std::time::Duration, scale: std::time::Duration, blur: std::time::Duration) {
+    fn log_cost(src_w: i32, src_h: i32, w: u32, h: u32, grab: std::time::Duration, scale: std::time::Duration) {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
         let n = N.fetch_add(1, Ordering::Relaxed);
         if n % 120 == 0 {
             log::info!(
-                "[backdrop] src={src_w}x{src_h} -> {w}x{h} grab={:?} scale={:?} blur={:?}",
+                "[backdrop] src={src_w}x{src_h} -> {w}x{h} grab={:?} scale={:?}",
                 grab,
-                scale,
-                blur
+                scale
             );
         }
     }

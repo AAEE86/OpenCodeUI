@@ -134,7 +134,7 @@ mod dwm {
 /// 重新合成一帧才生效，逐帧开关会一帧干净一帧带影子（看起来在闪），
 /// 所以它跟着档位常驻。代价：自绘档开着的时候，应用不会出现在截图/录屏里。
 #[cfg(target_os = "windows")]
-fn set_capture_excluded(hwnd: *mut std::ffi::c_void, excluded: bool) {
+fn apply_capture_exclusion(hwnd: *mut std::ffi::c_void, excluded: bool) {
     #[link(name = "user32")]
     extern "system" {
         fn SetWindowDisplayAffinity(hwnd: *mut std::ffi::c_void, affinity: u32) -> i32;
@@ -144,6 +144,28 @@ fn set_capture_excluded(hwnd: *mut std::ffi::c_void, excluded: bool) {
     let affinity = if excluded { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
     let ok = unsafe { SetWindowDisplayAffinity(hwnd, affinity) };
     log::info!("[window] capture excluded={excluded} ({ok})");
+}
+
+/// 单独开关「窗口是否参与捕获」。
+///
+/// 性能模式下排除标记常驻；窗口失焦时撤掉，这样截图工具（会抢焦点）
+/// 就能把应用截进去。
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn set_capture_excluded(window: tauri::WebviewWindow, excluded: bool) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let Ok(hwnd) = window.hwnd() else {
+            return false;
+        };
+        apply_capture_exclusion(hwnd.0 as *mut std::ffi::c_void, excluded);
+        return true;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, excluded);
+        false
+    }
 }
 
 /// 首帧之前窗口是隐藏的，材质可能没落到可见窗口上，这里补一次。
@@ -208,7 +230,7 @@ pub fn set_window_backdrop(
 
         match mode {
             BackdropMode::Native => {
-                set_capture_excluded(raw, false);
+                apply_capture_exclusion(raw, false);
                 GLASS_ENABLED.store(true, Ordering::Relaxed);
                 let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
                 let applied = dwm::apply(raw);
@@ -220,10 +242,10 @@ pub fn set_window_backdrop(
                 dwm::clear(raw);
                 // 不透明的 webview 背景：让页面里的 backdrop-filter 重新工作
                 let _ = window.set_background_color(Some(tauri::window::Color(r, g, b, 255)));
-                // 抓屏期间把自己排除出捕获，否则抓到的是我们自己。
-                // 常驻排除画面最干净，但这个窗口也就从所有截图/录屏里消失了；
-                // 用户勾了「允许被录屏」时改由抓屏那一步临时排除。
-                set_capture_excluded(raw, exclude);
+                // 排除标记由抓屏那一步临时开关（设完 DwmFlush 再抓），
+                // 这里不再常驻，否则应用会从所有截图/录屏里消失。
+                let _ = exclude;
+                apply_capture_exclusion(raw, false);
                 log::info!("[window] backdrop=page exclude={exclude}");
                 return true;
             }
@@ -231,7 +253,7 @@ pub fn set_window_backdrop(
                 GLASS_ENABLED.store(false, Ordering::Relaxed);
                 dwm::clear(raw);
                 let _ = window.set_background_color(Some(tauri::window::Color(r, g, b, 255)));
-                set_capture_excluded(raw, false);
+                apply_capture_exclusion(raw, false);
                 log::info!("[window] backdrop=none");
                 return true;
             }

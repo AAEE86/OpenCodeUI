@@ -415,8 +415,12 @@
  * ------------------------------------------------------------------------- */
 
 :root[data-appearance='glass'][data-appearance] :is(.glass, .glass-alt):not([data-glass-dialog]) {
-  background-color: var(--glass-veil);
+  /* 和 Dialog 完全同一套：2.5% 文字色 + 24px 模糊 + 140% 饱和。
+     index.css 里 glass 继承的是 saturate(200%)，那会把背景颜色放大，看着发花。 */
+  background-color: var(--glass-veil-soft);
   border-color: var(--glass-hairline);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  backdrop-filter: blur(24px) saturate(140%);
 }
 
 /* 上下文菜单、权限/提问弹窗、移动端抽屉用的是 bg-bg-100，而它是透明的 */

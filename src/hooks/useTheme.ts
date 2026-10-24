@@ -408,6 +408,10 @@ export function useTheme() {
     liveBackdrop: state.liveBackdrop,
     desktopBackdrop: state.desktopBackdrop,
     backdropBlur: state.backdropBlur,
+    performanceMode: state.performanceMode,
+    setPerformanceMode: useCallback((enabled: boolean) => {
+      themeStore.setPerformanceMode(enabled)
+    }, []),
     setBackdropBlur: useCallback((value: number) => {
       themeStore.setBackdropBlur(value)
     }, []),

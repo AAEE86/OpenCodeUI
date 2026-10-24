@@ -28,10 +28,10 @@ export function AppearanceStyleSettings() {
     wallpaperFileName,
     wallpaperUrl,
     setWallpaperImage,
-    desktopBackdrop,
-    setDesktopBackdrop,
     backdropBlur,
     setBackdropBlur,
+    performanceMode,
+    setPerformanceMode,
   } = useTheme()
 
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -97,41 +97,32 @@ export function AppearanceStyleSettings() {
           </div>
 
           {isTauriDesktop && (
-            <SettingField label={t('appearance.desktopBackdrop')} description={t('appearance.desktopBackdropDesc')}>
-              <SegmentedControl<'native' | 'live'>
-                value={desktopBackdrop}
-                options={[
-                  { value: 'native', label: t('appearance.desktopBackdropNative') },
-                  { value: 'live', label: t('appearance.desktopBackdropLive') },
-                ]}
-                onChange={setDesktopBackdrop}
-              />
-            </SettingField>
+            <SettingRow
+              label={t('appearance.performanceMode')}
+              description={t('appearance.performanceModeDesc')}
+              onClick={() => setPerformanceMode(!performanceMode)}
+            >
+              <Toggle enabled={performanceMode} onChange={() => setPerformanceMode(!performanceMode)} />
+            </SettingRow>
           )}
 
-          {isTauriDesktop && desktopBackdrop === 'live' && (
-            <p className="text-[length:var(--fs-xs)] text-danger-100">{t('appearance.desktopBackdropLiveNote')}</p>
-          )}
-
-          {isTauriDesktop && (
-            <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <p className="text-[length:var(--fs-md)] text-text-100">{t('appearance.backdropBlur')}</p>
-                <span className="text-[length:var(--fs-xs)] tabular-nums text-text-500">{backdropBlur}px</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={96}
-                step={1}
-                value={backdropBlur}
-                onChange={e => setBackdropBlur(Number(e.target.value))}
-                className="w-full accent-[hsl(var(--accent-main-100))]"
-                aria-label={t('appearance.backdropBlur')}
-              />
-              <p className="mt-1 text-[length:var(--fs-xs)] text-text-500">{t('appearance.backdropBlurDesc')}</p>
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <p className="text-[length:var(--fs-md)] text-text-100">{t('appearance.backdropBlur')}</p>
+              <span className="text-[length:var(--fs-xs)] tabular-nums text-text-500">{backdropBlur}px</span>
             </div>
-          )}
+            <input
+              type="range"
+              min={0}
+              max={96}
+              step={1}
+              value={backdropBlur}
+              onChange={e => setBackdropBlur(Number(e.target.value))}
+              className="w-full accent-[hsl(var(--accent-main-100))]"
+              aria-label={t('appearance.backdropBlur')}
+            />
+            <p className="mt-1 text-[length:var(--fs-xs)] text-text-500">{t('appearance.backdropBlurDesc')}</p>
+          </div>
 
           <div className="flex items-center gap-3">
             <div

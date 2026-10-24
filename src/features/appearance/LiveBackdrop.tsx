@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useTheme } from '../../hooks'
 
 /** 抓取宽度。出来本来就是糊的，分辨率再高没有意义。 */
@@ -18,7 +19,7 @@ const EDGE_MARGIN = 48
  * - 循环跟着 `requestAnimationFrame` 走，和屏幕刷新同拍，不会自己压帧
  */
 export function LiveBackdrop() {
-  const { liveBackdrop } = useTheme()
+  const { liveBackdrop, performanceMode } = useTheme()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
@@ -34,6 +35,21 @@ export function LiveBackdrop() {
     let cancelled = false
     let timer: number | null = null
     let failures = 0
+    // 窗口最近一次移动的时间。拖动时抓得更勤，松手后回到克制节奏。
+    let lastMoveAt = 0
+    // 性能模式排除标记常驻；窗口失焦时撤掉，截图工具（会抢焦点）才截得到
+    const unlistenFocus = performanceMode
+      ? getCurrentWindow()
+          .onFocusChanged(({ payload: focused }) => {
+            void invoke('set_capture_excluded', { excluded: focused }).catch(() => undefined)
+          })
+          .catch(() => undefined)
+      : Promise.resolve(undefined)
+    const unlistenMove = getCurrentWindow()
+      .onMoved(() => {
+        lastMoveAt = performance.now()
+      })
+      .catch(() => undefined)
 
     // 抓取尺寸跟着窗口比例走，canvas 反过来用 CSS 铺满窗口
     const applySize = () => {
@@ -57,8 +73,8 @@ export function LiveBackdrop() {
         const buffer = await invoke<ArrayBuffer>('capture_desktop_backdrop', {
           width,
           height,
-          blur: 0,
           margin: Math.round(EDGE_MARGIN * window.devicePixelRatio),
+          toggle: !performanceMode,
         })
         if (cancelled) return false
         // 长度对不上就是「这一帧没变」的哨兵，什么都不做
@@ -87,10 +103,24 @@ export function LiveBackdrop() {
       if (cancelled) return
       const fresh = await step()
       if (cancelled) return
-      timer = window.setTimeout(
-        () => void loop(),
-        failures > 2 ? 200 : fresh ? 0 : 16,
-      )
+      /*
+       * 每次抓取都要让窗口从捕获里消失约一帧（等 DWM 合成）。
+       * 33ms ≈ 30fps，手感流畅；代价是录屏里约两成的帧看不到应用。
+       * 想录屏干净，把 33 改成 80（12fps）或 200（5fps）。
+       */
+      const moving = performance.now() - lastMoveAt < 250
+      const delay = performanceMode
+        ? failures > 2
+          ? 400
+          : 0
+        : failures > 2
+          ? 400
+          : moving
+            ? 33
+            : fresh
+              ? 33
+              : 200
+      timer = window.setTimeout(() => void loop(), delay)
     }
 
     void loop()
@@ -98,8 +128,11 @@ export function LiveBackdrop() {
     return () => {
       cancelled = true
       if (timer !== null) window.clearTimeout(timer)
+      // onMoved 返回的是 Promise<UnlistenFn>，可能晚于清理到达
+      void unlistenMove.then(fn => fn?.())
+      void unlistenFocus.then(fn => fn?.())
     }
-  }, [liveBackdrop])
+  }, [liveBackdrop, performanceMode])
 
   if (!liveBackdrop) return null
   return <canvas ref={canvasRef} data-live-backdrop-canvas aria-hidden className="glass-live-backdrop" />

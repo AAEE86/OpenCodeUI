@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '../../../components/ui/Button'
 import { SegmentedControl, SettingField, SettingRow, Toggle } from './SettingsUI'
 import { useTheme } from '../../../hooks'
-import { getDesktopPlatform, isTauri } from '../../../utils/tauri'
 import type { AppearanceStyle, WallpaperFit } from '../../../store/themeStore'
 
 /**
@@ -30,14 +29,13 @@ export function AppearanceStyleSettings() {
     setWallpaperImage,
     backdropBlur,
     setBackdropBlur,
-    performanceMode,
-    setPerformanceMode,
+    backdropInterval,
+    setBackdropInterval,
   } = useTheme()
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const isGlass = appearanceStyle === 'glass'
-  const isTauriDesktop = isTauri() && getDesktopPlatform() === 'windows'
 
   const handleFile = async (file: File | null) => {
     if (!file || !file.type.startsWith('image/')) return
@@ -96,15 +94,25 @@ export function AppearanceStyleSettings() {
             <p className="mt-1 text-[length:var(--fs-xs)] text-text-500">{t('appearance.glassAlphaDesc')}</p>
           </div>
 
-          {isTauriDesktop && (
-            <SettingRow
-              label={t('appearance.performanceMode')}
-              description={t('appearance.performanceModeDesc')}
-              onClick={() => setPerformanceMode(!performanceMode)}
-            >
-              <Toggle enabled={performanceMode} onChange={() => setPerformanceMode(!performanceMode)} />
-            </SettingRow>
-          )}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <p className="text-[length:var(--fs-md)] text-text-100">{t('appearance.backdropInterval')}</p>
+              <span className="text-[length:var(--fs-xs)] tabular-nums text-text-500">
+                {backdropInterval}ms · {Math.round(1000 / backdropInterval)}fps
+              </span>
+            </div>
+            <input
+              type="range"
+              min={8}
+              max={200}
+              step={1}
+              value={backdropInterval}
+              onChange={e => setBackdropInterval(Number(e.target.value))}
+              className="w-full accent-[hsl(var(--accent-main-100))]"
+              aria-label={t('appearance.backdropInterval')}
+            />
+            <p className="mt-1 text-[length:var(--fs-xs)] text-text-500">{t('appearance.backdropIntervalDesc')}</p>
+          </div>
 
           <div>
             <div className="mb-1.5 flex items-center justify-between">

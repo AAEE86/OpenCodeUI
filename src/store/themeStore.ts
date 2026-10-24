@@ -191,7 +191,11 @@ export type DesktopBackdrop = 'native' | 'live'
 const STORAGE_KEY_DESKTOP_BACKDROP = 'desktop-backdrop'
 const DEFAULT_DESKTOP_BACKDROP: DesktopBackdrop = 'native'
 const STORAGE_KEY_BACKDROP_BLUR = 'backdrop-blur'
-const STORAGE_KEY_PERFORMANCE_MODE = 'backdrop-performance'
+const STORAGE_KEY_BACKDROP_INTERVAL = 'backdrop-interval'
+/** 抓取间隔（ms）。越小越跟手，CPU 越高；每次抓取都要等一帧合成，所以有下限。 */
+const DEFAULT_BACKDROP_INTERVAL = 33
+const BACKDROP_INTERVAL_MIN = 8
+const BACKDROP_INTERVAL_MAX = 200
 /** 页面磨砂层的半径（px），和壁纸模式共用同一个变量 */
 const DEFAULT_BACKDROP_BLUR = 24
 
@@ -319,8 +323,8 @@ export interface ThemeState {
   desktopBackdrop: DesktopBackdrop
   /** 页面磨砂层的半径（px） */
   backdropBlur: number
-  /** 性能模式：常驻排除自己，跑满帧率；代价是应用不出现在录屏里 */
-  performanceMode: boolean
+  /** 抓取间隔（ms） */
+  backdropInterval: number
   /** 忙碌时后续消息是否进入队列 */
   queueFollowupMessages: boolean
   /** 输入框的 busy 投递 chip（插队/排队）是否显示 */
@@ -554,7 +558,11 @@ class ThemeStore {
     const wallpaperInChat = localStorage.getItem(STORAGE_KEY_WALLPAPER_IN_CHAT) === 'true'
     const desktopBackdrop: DesktopBackdrop =
       localStorage.getItem(STORAGE_KEY_DESKTOP_BACKDROP) === 'live' ? 'live' : DEFAULT_DESKTOP_BACKDROP
-    const performanceMode = localStorage.getItem(STORAGE_KEY_PERFORMANCE_MODE) === 'true'
+    const savedInterval = Number(localStorage.getItem(STORAGE_KEY_BACKDROP_INTERVAL))
+    const backdropInterval =
+      Number.isFinite(savedInterval) && savedInterval > 0
+        ? Math.min(BACKDROP_INTERVAL_MAX, Math.max(BACKDROP_INTERVAL_MIN, Math.round(savedInterval)))
+        : DEFAULT_BACKDROP_INTERVAL
     const savedBackdropBlur = Number(localStorage.getItem(STORAGE_KEY_BACKDROP_BLUR))
     const backdropBlur =
       Number.isFinite(savedBackdropBlur) && savedBackdropBlur > 0 ? savedBackdropBlur : DEFAULT_BACKDROP_BLUR
@@ -663,7 +671,7 @@ class ThemeStore {
       liveBackdrop: false,
       desktopBackdrop,
       backdropBlur,
-      performanceMode,
+      backdropInterval,
       queueFollowupMessages,
       queueDeliveryChipVisible,
       manualTerminalTitles,
@@ -796,15 +804,15 @@ class ThemeStore {
     return this.state.backdropBlur
   }
 
-  get performanceMode() {
-    return this.state.performanceMode
+  get backdropInterval() {
+    return this.state.backdropInterval
   }
 
-  setPerformanceMode(enabled: boolean) {
-    if (this.state.performanceMode === enabled) return
-    this.state = { ...this.state, performanceMode: enabled }
-    localStorage.setItem(STORAGE_KEY_PERFORMANCE_MODE, String(enabled))
-    this.applyAppearance()
+  setBackdropInterval(value: number) {
+    const next = Math.min(BACKDROP_INTERVAL_MAX, Math.max(BACKDROP_INTERVAL_MIN, Math.round(value)))
+    if (this.state.backdropInterval === next) return
+    this.state = { ...this.state, backdropInterval: next }
+    localStorage.setItem(STORAGE_KEY_BACKDROP_INTERVAL, String(next))
     this.emit()
   }
 
@@ -1561,7 +1569,7 @@ class ThemeStore {
       root.removeAttribute('data-live-backdrop')
       for (const key of GLASS_TOKEN_KEYS) root.style.removeProperty(key)
       if (this.state.liveBackdrop) this.state = { ...this.state, liveBackdrop: false }
-      this.syncWindowBackdrop('none', '#101014', false)
+      this.syncWindowBackdrop('none', '#101014')
       return
     }
 
@@ -1619,8 +1627,6 @@ class ThemeStore {
     this.syncWindowBackdrop(
       liveBackdrop ? 'page' : nativeBackdrop ? 'native' : 'none',
       isDark ? '#101014' : '#f5f5f6',
-      // 性能模式：常驻排除自己，抓取时不用再等一帧合成
-      liveBackdrop && this.state.performanceMode,
     )
   }
 
@@ -1628,12 +1634,11 @@ class ThemeStore {
    * 窗口背景模式：native = 系统材质，page = 页面自己画，none = 纯色。
    * 浏览器里没有窗口可调，直接跳过。
    */
-  private syncWindowBackdrop(mode: BackdropMode, color: string, exclude: boolean) {
-    const key = `${mode}:${exclude}`
-    if (!isTauri() || this.backdropMode === key) return
-    this.backdropMode = key
+  private syncWindowBackdrop(mode: BackdropMode, color: string) {
+    if (!isTauri() || this.backdropMode === mode) return
+    this.backdropMode = mode
     void import('@tauri-apps/api/core')
-      .then(({ invoke }) => invoke<boolean>('set_window_backdrop', { mode, color, exclude }))
+      .then(({ invoke }) => invoke<boolean>('set_window_backdrop', { mode, color }))
       .then(applied => {
         if (mode !== 'native') return
         const supported = applied === true
@@ -1768,7 +1773,7 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
     appearanceStyle: parsed?.appearanceStyle === 'glass' ? 'glass' : DEFAULT_APPEARANCE_STYLE,
     glassAlpha: clampGlassAlpha(typeof parsed?.glassAlpha === 'number' ? parsed.glassAlpha : DEFAULT_GLASS_ALPHA),
     backdropBlur: typeof parsed?.backdropBlur === 'number' ? parsed.backdropBlur : DEFAULT_BACKDROP_BLUR,
-    performanceMode: parsed?.performanceMode === true,
+    backdropInterval: DEFAULT_BACKDROP_INTERVAL,
     wallpaperEnabled:
       typeof parsed?.wallpaperEnabled === 'boolean' ? parsed.wallpaperEnabled : DEFAULT_WALLPAPER_ENABLED,
     wallpaperFit: parsed?.wallpaperFit === 'contain' ? 'contain' : DEFAULT_WALLPAPER_FIT,

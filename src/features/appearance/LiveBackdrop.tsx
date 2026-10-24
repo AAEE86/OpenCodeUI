@@ -19,7 +19,7 @@ const EDGE_MARGIN = 48
  * - 循环跟着 `requestAnimationFrame` 走，和屏幕刷新同拍，不会自己压帧
  */
 export function LiveBackdrop() {
-  const { liveBackdrop, performanceMode } = useTheme()
+  const { liveBackdrop, backdropInterval } = useTheme()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
@@ -28,7 +28,6 @@ export function LiveBackdrop() {
     const canvas = canvasRef.current
     if (!canvas) return
     // desynchronized 绕过合成器直接写屏，省掉约一帧（16ms）的显示延迟。
-    // 之前以为它导致闪烁，后来查明那是「每帧开关排除标记」造成的，跟它无关。
     const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true })
     if (!ctx) return
 
@@ -37,14 +36,6 @@ export function LiveBackdrop() {
     let failures = 0
     // 窗口最近一次移动的时间。拖动时抓得更勤，松手后回到克制节奏。
     let lastMoveAt = 0
-    // 性能模式排除标记常驻；窗口失焦时撤掉，截图工具（会抢焦点）才截得到
-    const unlistenFocus = performanceMode
-      ? getCurrentWindow()
-          .onFocusChanged(({ payload: focused }) => {
-            void invoke('set_capture_excluded', { excluded: focused }).catch(() => undefined)
-          })
-          .catch(() => undefined)
-      : Promise.resolve(undefined)
     const unlistenMove = getCurrentWindow()
       .onMoved(() => {
         lastMoveAt = performance.now()
@@ -74,7 +65,8 @@ export function LiveBackdrop() {
           width,
           height,
           margin: Math.round(EDGE_MARGIN * window.devicePixelRatio),
-          toggle: !performanceMode,
+          // 始终走「抓前设标记、等一帧合成」这条路，否则拿不到干净帧
+          toggle: true,
         })
         if (cancelled) return false
         // 长度对不上就是「这一帧没变」的哨兵，什么都不做
@@ -109,17 +101,7 @@ export function LiveBackdrop() {
        * 想录屏干净，把 33 改成 80（12fps）或 200（5fps）。
        */
       const moving = performance.now() - lastMoveAt < 250
-      const delay = performanceMode
-        ? failures > 2
-          ? 400
-          : 0
-        : failures > 2
-          ? 400
-          : moving
-            ? 33
-            : fresh
-              ? 33
-              : 200
+      const delay = failures > 2 ? 400 : moving || fresh ? backdropInterval : 200
       timer = window.setTimeout(() => void loop(), delay)
     }
 
@@ -130,9 +112,8 @@ export function LiveBackdrop() {
       if (timer !== null) window.clearTimeout(timer)
       // onMoved 返回的是 Promise<UnlistenFn>，可能晚于清理到达
       void unlistenMove.then(fn => fn?.())
-      void unlistenFocus.then(fn => fn?.())
     }
-  }, [liveBackdrop, performanceMode])
+  }, [liveBackdrop, backdropInterval])
 
   if (!liveBackdrop) return null
   return <canvas ref={canvasRef} data-live-backdrop-canvas aria-hidden className="glass-live-backdrop" />

@@ -146,28 +146,6 @@ fn apply_capture_exclusion(hwnd: *mut std::ffi::c_void, excluded: bool) {
     log::info!("[window] capture excluded={excluded} ({ok})");
 }
 
-/// 单独开关「窗口是否参与捕获」。
-///
-/// 性能模式下排除标记常驻；窗口失焦时撤掉，这样截图工具（会抢焦点）
-/// 就能把应用截进去。
-#[cfg(not(target_os = "android"))]
-#[tauri::command]
-pub fn set_capture_excluded(window: tauri::WebviewWindow, excluded: bool) -> bool {
-    #[cfg(target_os = "windows")]
-    {
-        let Ok(hwnd) = window.hwnd() else {
-            return false;
-        };
-        apply_capture_exclusion(hwnd.0 as *mut std::ffi::c_void, excluded);
-        return true;
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = (window, excluded);
-        false
-    }
-}
-
 /// 首帧之前窗口是隐藏的，材质可能没落到可见窗口上，这里补一次。
 pub fn reapply_on_shown(window: &tauri::Window) {
     #[cfg(target_os = "windows")]
@@ -213,7 +191,6 @@ pub fn set_window_backdrop(
     window: tauri::WebviewWindow,
     mode: String,
     color: String,
-    exclude: bool,
 ) -> bool {
     let mode = BackdropMode::parse(&mode);
     let (r, g, b) = parse_hex_color(&color);
@@ -241,12 +218,14 @@ pub fn set_window_backdrop(
                 GLASS_ENABLED.store(false, Ordering::Relaxed);
                 dwm::clear(raw);
                 // 不透明的 webview 背景：让页面里的 backdrop-filter 重新工作
-                let _ = window.set_background_color(Some(tauri::window::Color(r, g, b, 255)));
+                match window.set_background_color(Some(tauri::window::Color(r, g, b, 255))) {
+                    Ok(()) => log::info!("[window] webview background set {r},{g},{b}"),
+                    Err(err) => log::warn!("[window] set_background_color failed: {err}"),
+                }
                 // 排除标记由抓屏那一步临时开关（设完 DwmFlush 再抓），
-                // 这里不再常驻，否则应用会从所有截图/录屏里消失。
-                let _ = exclude;
+                // 这里不常驻，否则应用会从所有截图/录屏里消失。
                 apply_capture_exclusion(raw, false);
-                log::info!("[window] backdrop=page exclude={exclude}");
+                log::info!("[window] backdrop=page");
                 return true;
             }
             BackdropMode::None => {
@@ -277,7 +256,6 @@ pub fn set_window_backdrop(
                 return applied;
             }
             _ => {
-                let _ = exclude;
                 let _ = window.set_effects(None);
                 let _ = window.set_background_color(Some(Color(r, g, b, 255)));
                 return true;
@@ -287,7 +265,6 @@ pub fn set_window_backdrop(
 
     #[cfg(target_os = "linux")]
     {
-        let _ = exclude;
         let _ = window.set_background_color(Some(if mode == BackdropMode::Native {
             tauri::window::Color(0, 0, 0, 0)
         } else {
@@ -298,7 +275,7 @@ pub fn set_window_backdrop(
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
-        let _ = (window, r, g, b, mode, exclude);
+        let _ = (window, r, g, b, mode);
         false
     }
 }

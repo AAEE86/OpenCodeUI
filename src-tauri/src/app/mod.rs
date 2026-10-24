@@ -294,6 +294,13 @@ fn configure_desktop_window_builder<'a, R: tauri::Runtime, M: tauri::Manager<R>>
     // 窗口本身保持透明，是否真的透出桌面由前端决定（页面画不画底色）。
     let window_builder = window_builder.transparent(true);
 
+    // Windows：透明窗口如果没给背景色，WebView2 在窗口重新激活时会先出一帧
+    // 默认白色底再补页面内容，看着就是闪一下白。这里给窗口表面一个深色底，
+    // 只在 Windows 生效，不影响 macOS 的系统材质。
+    #[cfg(target_os = "windows")]
+    let window_builder = window_builder
+        .background_color(tauri::window::Color(16, 16, 20, 255));
+
     #[cfg(target_os = "macos")]
     let window_builder = window_builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
@@ -473,7 +480,6 @@ pub fn run() {
             commands::utils::open_new_window,
             commands::utils::desktop_window_ready,
             commands::window_backdrop::set_window_backdrop,
-            commands::window_backdrop::set_capture_excluded,
             commands::backdrop::capture_desktop_backdrop,
             // 附件上传：Rust 侧流式发送（桌面端拿不到 webview 的上传进度）
             commands::upload::upload_attachment,

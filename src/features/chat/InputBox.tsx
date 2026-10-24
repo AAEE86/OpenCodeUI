@@ -640,25 +640,40 @@ function InputBoxComponent({
   const updateComposerHeightBudget = useCallback(() => {
     const paneHeight = getComposerPaneHeight(inputContainerRef.current ?? contentWrapRef.current)
     const nextComposerMaxHeight = getComposerMaxHeight(paneHeight, isCompact)
-    const attachmentHeight = attachments.length > 0 ? (attachmentSectionRef.current?.offsetHeight ?? 0) : 0
     const toolbarHeight = toolbarRef.current?.offsetHeight || INPUT_TOOLBAR_FALLBACK_HEIGHT
     const footerHeight = isCollapsed ? 0 : footerRef.current?.offsetHeight || INPUT_FOOTER_FALLBACK_HEIGHT
-    const inputContainerChrome = attachmentHeight + toolbarHeight + TEXTAREA_VERTICAL_CHROME
+
+    // 输入框里除 textarea 之外的固定高度：上方留白 + 间距 + 工具条 + 边框。
+    // 用常量估会差几像素，内容到顶时工具条就会被 overflow 裁掉，所以直接按布局位置量。
+    const containerEl = inputContainerRef.current
+    const textareaEl = textareaRef.current
+    const toolbarEl = toolbarRef.current
+    let containerChrome = TEXTAREA_MIN_HEIGHT + TEXTAREA_VERTICAL_CHROME + toolbarHeight
+    if (containerEl && textareaEl && toolbarEl) {
+      const boxRect = containerEl.getBoundingClientRect()
+      const textareaRect = textareaEl.getBoundingClientRect()
+      const toolbarRect = toolbarEl.getBoundingClientRect()
+      const style = getComputedStyle(containerEl)
+      const border = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)
+      containerChrome =
+        Math.max(0, textareaRect.top - boxRect.top) +
+        Math.max(0, toolbarRect.top - textareaRect.bottom) +
+        toolbarRect.height +
+        border
+    }
+
     const nextInputContainerMaxHeight = Math.max(
-      TEXTAREA_MIN_HEIGHT + TEXTAREA_VERTICAL_CHROME + toolbarHeight,
+      TEXTAREA_MIN_HEIGHT + containerChrome,
       nextComposerMaxHeight - footerHeight,
     )
-    const nextTextareaMaxHeight = Math.max(
-      TEXTAREA_MIN_HEIGHT,
-      nextInputContainerMaxHeight - inputContainerChrome,
-    )
+    const nextTextareaMaxHeight = Math.max(TEXTAREA_MIN_HEIGHT, nextInputContainerMaxHeight - containerChrome)
 
     setComposerMaxHeight(prev => (Math.abs(prev - nextComposerMaxHeight) < 1 ? prev : nextComposerMaxHeight))
     setInputContainerMaxHeight(prev =>
       Math.abs(prev - nextInputContainerMaxHeight) < 1 ? prev : nextInputContainerMaxHeight,
     )
     setTextareaMaxHeight(prev => (Math.abs(prev - nextTextareaMaxHeight) < 1 ? prev : nextTextareaMaxHeight))
-  }, [attachments.length, isCollapsed, isCompact])
+  }, [isCollapsed, isCompact])
 
   useLayoutEffect(() => {
     updateComposerHeightBudget()

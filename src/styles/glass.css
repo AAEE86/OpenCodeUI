@@ -52,6 +52,19 @@
   background-repeat: no-repeat;
 }
 
+/* 桌面端没设壁纸时窗口是透明的，整条背景链都要让开，
+   否则页面底色会把窗口背后的桌面盖掉 */
+:root[data-appearance='glass'][data-window-transparent],
+:root[data-appearance='glass'][data-window-transparent] body,
+:root[data-appearance='glass'][data-window-transparent] #root {
+  background-color: transparent;
+}
+
+/* 桌面已经在窗口背后了，页面内这层磨砂只会空转，交给系统材质 */
+:root[data-appearance='glass'][data-window-transparent] #root::before {
+  display: none;
+}
+
 /* 全窗唯一一次磨砂，所有面板共享 */
 :root[data-appearance='glass'] #root::before {
   content: '';

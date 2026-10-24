@@ -11,6 +11,7 @@
 import { getThemePreset, themeColorsToCSSVars, builtinThemes, DEFAULT_THEME_ID, registerCustomTheme, unregisterCustomTheme, listCustomThemes } from '../themes'
 import type { ThemePreset, ThemeColors } from '../themes'
 import { buildGlassTokens, GLASS_TOKEN_KEYS } from '../utils/glassTokens'
+import { isTauri } from '../utils/tauri'
 import {
   compressWallpaperImage,
   wallpaperIdbDelete,
@@ -407,6 +408,8 @@ class ThemeStore {
   private listeners = new Set<() => void>()
   /** 是否已从 IndexedDB 恢复过壁纸 */
   private wallpaperBlobLoaded = false
+  /** 系统窗口材质当前是否开启，避免重复调用 */
+  private nativeGlassEnabled = false
 
   constructor() {
     // 自定义主题（OpenCode 官方主题 JSON 导入）先于 preset 校验注册——
@@ -1467,7 +1470,9 @@ class ThemeStore {
     if (this.state.appearanceStyle !== 'glass') {
       root.removeAttribute('data-appearance')
       root.removeAttribute('data-glass-wallpaper')
+      root.removeAttribute('data-window-transparent')
       for (const key of GLASS_TOKEN_KEYS) root.style.removeProperty(key)
+      this.syncNativeWindowGlass(false)
       return
     }
 
@@ -1480,7 +1485,8 @@ class ThemeStore {
     }
 
     const url = this.state.wallpaperUrl
-    if (this.state.wallpaperEnabled && url) {
+    const hasWallpaper = this.state.wallpaperEnabled && !!url
+    if (hasWallpaper) {
       root.setAttribute('data-glass-wallpaper', '')
       root.style.setProperty('--glass-wallpaper', `url("${url}")`)
       root.style.setProperty('--glass-wallpaper-fit', this.state.wallpaperFit)
@@ -1491,6 +1497,25 @@ class ThemeStore {
       root.style.removeProperty('--glass-wallpaper-fit')
       root.style.setProperty('--glass-art-alpha', '0')
     }
+
+    // 桌面端：没设壁纸时让窗口直接透出桌面，模糊交给系统材质。
+    // 设了壁纸就没必要再挂系统材质，图片本身已经盖住了窗口。
+    const useDesktopBackdrop = isDark && !hasWallpaper && isTauri()
+    if (useDesktopBackdrop) {
+      root.setAttribute('data-window-transparent', '')
+    } else {
+      root.removeAttribute('data-window-transparent')
+    }
+    this.syncNativeWindowGlass(useDesktopBackdrop)
+  }
+
+  /** 桌面端窗口材质开关；浏览器里直接跳过 */
+  private syncNativeWindowGlass(enabled: boolean) {
+    if (this.nativeGlassEnabled === enabled) return
+    this.nativeGlassEnabled = enabled
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke('set_window_glass_enabled', { enabled }))
+      .catch(() => undefined)
   }
 
   /** 替换壁纸 object URL（先释放旧的） */

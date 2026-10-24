@@ -291,7 +291,8 @@ pub(crate) fn create_new_window(app: &tauri::AppHandle, directory: Option<String
 fn configure_desktop_window_builder<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
     window_builder: tauri::WebviewWindowBuilder<'a, R, M>,
 ) -> tauri::WebviewWindowBuilder<'a, R, M> {
-    let window_builder = window_builder;
+    // 窗口本身保持透明，是否真的透出桌面由前端决定（页面画不画底色）。
+    let window_builder = window_builder.transparent(true);
 
     #[cfg(target_os = "macos")]
     let window_builder = window_builder
@@ -471,6 +472,7 @@ pub fn run() {
             commands::utils::get_dropped_paths_info,
             commands::utils::open_new_window,
             commands::utils::desktop_window_ready,
+            commands::utils::set_window_glass_enabled,
             // 附件上传：Rust 侧流式发送（桌面端拿不到 webview 的上传进度）
             commands::upload::upload_attachment,
             commands::opencode::check_opencode_service,

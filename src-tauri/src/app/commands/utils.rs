@@ -34,6 +34,54 @@ pub fn desktop_window_ready(window: tauri::Window) -> Result<(), String> {
     crate::app::mark_window_ready(&window).map_err(|err| err.to_string())
 }
 
+/// 玻璃外观：让窗口背后直接透出桌面。
+/// 返回是否成功挂上系统材质（Linux 只有透明，模糊交给合成器）。
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn set_window_glass_enabled(window: tauri::WebviewWindow, enabled: bool) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use tauri::window::{Color, Effect, EffectsBuilder};
+        if enabled {
+            let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
+            return window
+                .set_effects(EffectsBuilder::new().effect(Effect::Acrylic).build())
+                .is_ok();
+        }
+        let _ = window.set_effects(None);
+        false
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::window::{Color, Effect, EffectsBuilder};
+        if enabled {
+            let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
+            return window
+                .set_effects(
+                    EffectsBuilder::new()
+                        .effect(Effect::UnderWindowBackground)
+                        .build(),
+                )
+                .is_ok();
+        }
+        let _ = window.set_effects(None);
+        false
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = (window, enabled);
+        false
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (window, enabled);
+        false
+    }
+}
+
 /// 获取拖入路径的基础信息，用于前端区分文件/目录并生成 @ 引用。
 #[tauri::command]
 pub fn get_dropped_paths_info(paths: Vec<String>) -> Vec<DroppedPathInfo> {

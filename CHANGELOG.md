@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.7.24] - 2026-10-24
+
+- feat(appearance): 抓取间隔改成可调滑杆 (d8a3565e)
+- fix(appearance): 主操作按钮改成半透明磨砂 (9177c56d)
+- feat(appearance): 抓屏背景支持录屏，并统一浮层材质 (a0e6f49a)
+- feat(appearance): 桌面背景抓取（自绘档）与窗口背景模式 (83422e6c)
+- fix(appearance): 权限/提问/websearch 弹窗与 Dialog 同一块玻璃 (fad989bd)
+
 ## [v0.7.23] - 2026-10-24
 
 - fix(chat): 「移到后台」不再统计上一回合遗留的 shell (2952ccae)

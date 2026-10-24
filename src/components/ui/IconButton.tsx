@@ -29,6 +29,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
       <button
         ref={ref}
         disabled={disabled}
+        data-ui-button={variant === 'solid' ? 'primary' : 'ghost'}
         className={`
           inline-flex items-center justify-center
           ${round ? 'rounded-full' : 'rounded-lg'}

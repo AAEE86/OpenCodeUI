@@ -33,6 +33,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         disabled={disabled || isLoading}
+        data-ui-button={variant}
         className={`
           inline-flex items-center justify-center gap-2
           rounded-lg font-medium

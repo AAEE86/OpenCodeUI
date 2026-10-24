@@ -93,6 +93,7 @@ export const CollapsibleUserText = memo(function CollapsibleUserText({
             contentRef.current = node
             headerRef(node)
           }}
+          data-collapse-content={showMask && showCollapse && isCollapsed ? '' : undefined}
           className={`m-0 break-words text-[length:var(--fs-base)] ${textClassName} leading-relaxed${
             renderMarkdown ? '' : ' whitespace-pre-wrap'
           }${isCollapsed ? ' overflow-hidden' : ''}`}
@@ -110,6 +111,7 @@ export const CollapsibleUserText = memo(function CollapsibleUserText({
         {/* 底部渐变遮罩 */}
         {showMask && showCollapse && isCollapsed && (
           <div
+            data-collapse-mask
             className={`absolute bottom-0 left-0 right-0 h-12 ${maskClassName} pointer-events-none [-webkit-mask-image:linear-gradient(to_top,black,transparent)] [mask-image:linear-gradient(to_top,black,transparent)]`}
           />
         )}

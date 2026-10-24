@@ -46,6 +46,7 @@ import type { TerminalTab } from './store/layoutStore'
 import type { SettingsTab } from './features/settings/SettingsDialog'
 import { isTauri, isTauriMobile } from './utils/tauri'
 import { InternalDragLayer } from './components/InternalDragLayer'
+import { LiveBackdrop } from './features/appearance/LiveBackdrop'
 
 const SettingsDialog = lazy(() =>
   import('./features/settings/SettingsDialog').then(module => ({ default: module.SettingsDialog })),
@@ -933,7 +934,11 @@ function App() {
   const { showCloseDialog, handleCloseDialogConfirm, handleCloseDialogCancel, hasUnsavedChanges } = useCloseServiceDialog()
 
   return (
-    <div className="app-shell relative flex h-full flex-col bg-bg-100 overflow-hidden">
+    <>
+      {/* 桌面背景层放在 .app-shell 之前：两者都是定位元素，
+          靠文档顺序决定谁在上，图要垫在整层染色底下 */}
+      <LiveBackdrop />
+      <div className="app-shell relative flex h-full flex-col bg-bg-100 overflow-hidden">
       <DesktopTitlebar />
       <InternalDragLayer />
       <ChatViewportProvider value={chatViewport}>
@@ -1122,7 +1127,8 @@ function App() {
           />
         </Suspense>
       </ChatViewportProvider>
-    </div>
+      </div>
+    </>
   )
 }
 

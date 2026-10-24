@@ -472,7 +472,8 @@ pub fn run() {
             commands::utils::get_dropped_paths_info,
             commands::utils::open_new_window,
             commands::utils::desktop_window_ready,
-            commands::utils::set_window_glass_enabled,
+            commands::window_backdrop::set_window_backdrop,
+            commands::backdrop::capture_desktop_backdrop,
             // 附件上传：Rust 侧流式发送（桌面端拿不到 webview 的上传进度）
             commands::upload::upload_attachment,
             commands::opencode::check_opencode_service,

@@ -11,7 +11,7 @@
 import { getThemePreset, themeColorsToCSSVars, builtinThemes, DEFAULT_THEME_ID, registerCustomTheme, unregisterCustomTheme, listCustomThemes } from '../themes'
 import type { ThemePreset, ThemeColors } from '../themes'
 import { buildGlassTokens, GLASS_TOKEN_KEYS } from '../utils/glassTokens'
-import { isTauri } from '../utils/tauri'
+import { getDesktopPlatform, isTauri } from '../utils/tauri'
 import {
   compressWallpaperImage,
   wallpaperIdbDelete,
@@ -178,9 +178,32 @@ export type AppearanceStyle = 'default' | 'glass'
 /** 壁纸铺放方式 */
 export type WallpaperFit = 'cover' | 'contain'
 
+/** 窗口背景模式：系统材质 / 页面自绘 / 纯色 */
+type BackdropMode = 'native' | 'page' | 'none'
+
+/**
+ * 桌面背景由谁提供。
+ * - native：系统合成器（DWM / WindowServer）糊，60fps、零 CPU
+ * - live：我们抓屏自己糊，能控制半径，但每帧要走 CPU 往返
+ */
+export type DesktopBackdrop = 'native' | 'live'
+
+const STORAGE_KEY_DESKTOP_BACKDROP = 'desktop-backdrop'
+const DEFAULT_DESKTOP_BACKDROP: DesktopBackdrop = 'native'
+const STORAGE_KEY_BACKDROP_BLUR = 'backdrop-blur'
+/** 页面磨砂层的半径（px），和壁纸模式共用同一个变量 */
+const DEFAULT_BACKDROP_BLUR = 24
+
 const DEFAULT_APPEARANCE_STYLE: AppearanceStyle = 'default'
-/** 玻璃浓度：整窗染色的不透明度，默认 0.88，最低可到 0.15 */
-const DEFAULT_GLASS_ALPHA = 0.88
+/**
+ * 玻璃浓度：整窗染色的不透明度。
+ *
+ * 默认 0.6——系统材质（acrylic/壁纸）在窗口底下，染色只是“压一层”让文字能读。
+ * 之前默认 0.88，等于把材质盖掉，只剩 12% 能看见，怎么调都是块死板子。
+ */
+const DEFAULT_GLASS_ALPHA = 0.6
+/** 0.88 是旧默认值，存档里遇到就当成没设置过 */
+const LEGACY_GLASS_ALPHA = 0.88
 const GLASS_ALPHA_MIN = 0.15
 const GLASS_ALPHA_MAX = 1
 /** 系统没有窗口模糊时的最低不透明度，避免桌面原样透上来影响阅读 */
@@ -289,6 +312,12 @@ export interface ThemeState {
   wallpaperFileName: string | null
   /** 运行时壁纸 object URL，不持久化、不随备份导出 */
   wallpaperUrl: string | null
+  /** 桌面背景是否由页面自己画（抓屏或壁纸），此时不能用系统材质 */
+  liveBackdrop: boolean
+  /** 桌面背景来源：系统材质 / 自己抓屏 */
+  desktopBackdrop: DesktopBackdrop
+  /** 页面磨砂层的半径（px） */
+  backdropBlur: number
   /** 忙碌时后续消息是否进入队列 */
   queueFollowupMessages: boolean
   /** 输入框的 busy 投递 chip（插队/排队）是否显示 */
@@ -410,8 +439,8 @@ class ThemeStore {
   private listeners = new Set<() => void>()
   /** 是否已从 IndexedDB 恢复过壁纸 */
   private wallpaperBlobLoaded = false
-  /** 系统窗口材质当前是否开启，避免重复调用 */
-  private nativeGlassEnabled = false
+  /** 当前窗口背景模式（含排除标记），避免重复调用 */
+  private backdropMode: string | null = null
   /** 系统是否真的提供了窗口模糊；null 表示还没问过 */
   private nativeBlurSupported: boolean | null = null
 
@@ -512,11 +541,19 @@ class ThemeStore {
     const appearanceStyle: AppearanceStyle =
       localStorage.getItem(STORAGE_KEY_APPEARANCE_STYLE) === 'glass' ? 'glass' : DEFAULT_APPEARANCE_STYLE
     const savedGlassAlpha = localStorage.getItem(STORAGE_KEY_GLASS_ALPHA)
-    const glassAlpha = savedGlassAlpha !== null ? clampGlassAlpha(Number(savedGlassAlpha)) : DEFAULT_GLASS_ALPHA
+    const glassAlpha =
+      savedGlassAlpha !== null && Number(savedGlassAlpha) !== LEGACY_GLASS_ALPHA
+        ? clampGlassAlpha(Number(savedGlassAlpha))
+        : DEFAULT_GLASS_ALPHA
     const wallpaperEnabled = localStorage.getItem(STORAGE_KEY_WALLPAPER_ENABLED) === 'true'
     const wallpaperFit: WallpaperFit =
       localStorage.getItem(STORAGE_KEY_WALLPAPER_FIT) === 'contain' ? 'contain' : DEFAULT_WALLPAPER_FIT
     const wallpaperInChat = localStorage.getItem(STORAGE_KEY_WALLPAPER_IN_CHAT) === 'true'
+    const desktopBackdrop: DesktopBackdrop =
+      localStorage.getItem(STORAGE_KEY_DESKTOP_BACKDROP) === 'live' ? 'live' : DEFAULT_DESKTOP_BACKDROP
+    const savedBackdropBlur = Number(localStorage.getItem(STORAGE_KEY_BACKDROP_BLUR))
+    const backdropBlur =
+      Number.isFinite(savedBackdropBlur) && savedBackdropBlur > 0 ? savedBackdropBlur : DEFAULT_BACKDROP_BLUR
     const wallpaperFileName = localStorage.getItem(STORAGE_KEY_WALLPAPER_FILE_NAME)
 
     const savedQueueFollowupMessages = localStorage.getItem(STORAGE_KEY_QUEUE_FOLLOWUP_MESSAGES)
@@ -619,6 +656,9 @@ class ThemeStore {
       wallpaperInChat,
       wallpaperFileName: wallpaperFileName || null,
       wallpaperUrl: null,
+      liveBackdrop: false,
+      desktopBackdrop,
+      backdropBlur,
       queueFollowupMessages,
       queueDeliveryChipVisible,
       manualTerminalTitles,
@@ -740,6 +780,32 @@ class ThemeStore {
   }
   get wallpaperUrl() {
     return this.state.wallpaperUrl
+  }
+  get liveBackdrop() {
+    return this.state.liveBackdrop
+  }
+  get desktopBackdrop() {
+    return this.state.desktopBackdrop
+  }
+  get backdropBlur() {
+    return this.state.backdropBlur
+  }
+
+  setBackdropBlur(value: number) {
+    const next = Math.max(0, Math.min(96, Math.round(value)))
+    if (this.state.backdropBlur === next) return
+    this.state = { ...this.state, backdropBlur: next }
+    localStorage.setItem(STORAGE_KEY_BACKDROP_BLUR, String(next))
+    document.documentElement.style.setProperty('--glass-blur', `${next}px`)
+    this.emit()
+  }
+
+  setDesktopBackdrop(mode: DesktopBackdrop) {
+    if (this.state.desktopBackdrop === mode) return
+    this.state = { ...this.state, desktopBackdrop: mode }
+    localStorage.setItem(STORAGE_KEY_DESKTOP_BACKDROP, mode)
+    this.applyAppearance()
+    this.emit()
   }
   get queueFollowupMessages() {
     return this.state.queueFollowupMessages
@@ -1475,8 +1541,10 @@ class ThemeStore {
       root.removeAttribute('data-appearance')
       root.removeAttribute('data-glass-wallpaper')
       root.removeAttribute('data-window-transparent')
+      root.removeAttribute('data-live-backdrop')
       for (const key of GLASS_TOKEN_KEYS) root.style.removeProperty(key)
-      this.syncNativeWindowGlass(false)
+      if (this.state.liveBackdrop) this.state = { ...this.state, liveBackdrop: false }
+      this.syncWindowBackdrop('none', '#101014', false)
       return
     }
 
@@ -1500,35 +1568,55 @@ class ThemeStore {
       root.style.setProperty('--glass-art-alpha', '0')
     }
 
-    // 桌面端：没设壁纸时让窗口直接透出桌面，模糊交给系统材质。
-    // 设了壁纸就没必要再挂系统材质，图片本身已经盖住了窗口。
-    const useDesktopBackdrop = isDark && !hasWallpaper && isTauri()
-    if (useDesktopBackdrop) {
-      root.setAttribute('data-window-transparent', '')
-    } else {
-      root.removeAttribute('data-window-transparent')
+    // 桌面端没设壁纸时，窗口背后就是桌面。
+    //
+    // Windows 上我们不再用系统材质：把桌面抓下来当页面背景，我们的材质
+    // 才有东西可以糊（窗口背景透明时 Chromium 的 backdrop-filter 是死的）。
+    // 其它平台留给系统材质，页面只负责染色。
+    const wantsDesktop = isDark && !hasWallpaper && isTauri()
+    const liveBackdrop =
+      wantsDesktop && this.state.desktopBackdrop === 'live' && getDesktopPlatform() === 'windows'
+    const nativeBackdrop = wantsDesktop && !liveBackdrop
+
+    if (liveBackdrop) root.setAttribute('data-live-backdrop', '')
+    else root.removeAttribute('data-live-backdrop')
+
+    if (nativeBackdrop) root.setAttribute('data-window-transparent', '')
+    else root.removeAttribute('data-window-transparent')
+
+    if (this.state.liveBackdrop !== liveBackdrop) {
+      this.state = { ...this.state, liveBackdrop }
     }
 
     // 拿不到系统模糊时（部分 Windows 版本、Linux 合成器），桌面会原样透上来，
     // 这里把染色抬高一档，保证文字还能读。
     const alpha = !isDark
       ? 1
-      : useDesktopBackdrop && this.nativeBlurSupported === false
+      : nativeBackdrop && this.nativeBlurSupported === false
         ? Math.max(this.state.glassAlpha, GLASS_NO_BLUR_ALPHA)
         : this.state.glassAlpha
     root.style.setProperty('--glass-alpha', String(alpha))
+    root.style.setProperty('--glass-blur', `${this.state.backdropBlur}px`)
 
-    this.syncNativeWindowGlass(useDesktopBackdrop)
+    this.syncWindowBackdrop(
+      liveBackdrop ? 'page' : nativeBackdrop ? 'native' : 'none',
+      isDark ? '#101014' : '#f5f5f6',
+      liveBackdrop,
+    )
   }
 
-  /** 桌面端窗口材质开关；浏览器里直接跳过 */
-  private syncNativeWindowGlass(enabled: boolean) {
-    if (this.nativeGlassEnabled === enabled) return
-    this.nativeGlassEnabled = enabled
+  /**
+   * 窗口背景模式：native = 系统材质，page = 页面自己画，none = 纯色。
+   * 浏览器里没有窗口可调，直接跳过。
+   */
+  private syncWindowBackdrop(mode: BackdropMode, color: string, exclude: boolean) {
+    const key = `${mode}:${exclude}`
+    if (!isTauri() || this.backdropMode === key) return
+    this.backdropMode = key
     void import('@tauri-apps/api/core')
-      .then(({ invoke }) => invoke<boolean>('set_window_glass_enabled', { enabled }))
+      .then(({ invoke }) => invoke<boolean>('set_window_backdrop', { mode, color, exclude }))
       .then(applied => {
-        if (!enabled) return
+        if (mode !== 'native') return
         const supported = applied === true
         if (this.nativeBlurSupported === supported) return
         this.nativeBlurSupported = supported
@@ -1660,6 +1748,7 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
     glassEffect: typeof parsed?.glassEffect === 'boolean' ? parsed.glassEffect : DEFAULT_GLASS_EFFECT,
     appearanceStyle: parsed?.appearanceStyle === 'glass' ? 'glass' : DEFAULT_APPEARANCE_STYLE,
     glassAlpha: clampGlassAlpha(typeof parsed?.glassAlpha === 'number' ? parsed.glassAlpha : DEFAULT_GLASS_ALPHA),
+    backdropBlur: typeof parsed?.backdropBlur === 'number' ? parsed.backdropBlur : DEFAULT_BACKDROP_BLUR,
     wallpaperEnabled:
       typeof parsed?.wallpaperEnabled === 'boolean' ? parsed.wallpaperEnabled : DEFAULT_WALLPAPER_ENABLED,
     wallpaperFit: parsed?.wallpaperFit === 'contain' ? 'contain' : DEFAULT_WALLPAPER_FIT,
@@ -1667,6 +1756,8 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
       typeof parsed?.wallpaperInChat === 'boolean' ? parsed.wallpaperInChat : DEFAULT_WALLPAPER_IN_CHAT,
     wallpaperFileName: typeof parsed?.wallpaperFileName === 'string' ? parsed.wallpaperFileName : null,
     wallpaperUrl: null,
+    liveBackdrop: false,
+    desktopBackdrop: DEFAULT_DESKTOP_BACKDROP,
     queueFollowupMessages:
       typeof parsed?.queueFollowupMessages === 'boolean'
         ? parsed.queueFollowupMessages

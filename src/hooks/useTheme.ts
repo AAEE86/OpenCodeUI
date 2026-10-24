@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import { THEME_SWITCH_DISABLE_MS } from '../constants'
 import { themeStore, type ColorMode } from '../store/themeStore'
 import type { StepFinishDisplay, CustomCSSSnippet, AppearanceStyle, WallpaperFit } from '../store/themeStore'
+import type { DesktopBackdrop } from '../store/themeStore'
 import type { ReasoningDisplayMode, DiffStyle, ToolCardStyle, CompletedAtFormat, ExternalFileDropMode, ComposerSelectorStyle } from '../store/themeStore'
 
 // 保持向后兼容的类型别名
@@ -404,6 +405,15 @@ export function useTheme() {
     }, []),
     wallpaperFileName: state.wallpaperFileName,
     wallpaperUrl: state.wallpaperUrl,
+    liveBackdrop: state.liveBackdrop,
+    desktopBackdrop: state.desktopBackdrop,
+    backdropBlur: state.backdropBlur,
+    setBackdropBlur: useCallback((value: number) => {
+      themeStore.setBackdropBlur(value)
+    }, []),
+    setDesktopBackdrop: useCallback((mode: DesktopBackdrop) => {
+      themeStore.setDesktopBackdrop(mode)
+    }, []),
     setWallpaperImage: useCallback((file: File | Blob | null, fileName?: string | null) => {
       return themeStore.setWallpaperImage(file, fileName)
     }, []),

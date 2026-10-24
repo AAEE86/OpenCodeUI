@@ -31,71 +31,9 @@ pub async fn open_new_window(app: tauri::AppHandle, directory: Option<String>) {
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn desktop_window_ready(window: tauri::Window) -> Result<(), String> {
-    crate::app::mark_window_ready(&window).map_err(|err| err.to_string())
-}
-
-/// 玻璃外观：让窗口背后直接透出桌面。
-/// 返回系统是否真的挂上了模糊材质（Linux 只有透明，模糊交给合成器）。
-#[cfg(not(target_os = "android"))]
-#[tauri::command]
-pub fn set_window_glass_enabled(window: tauri::WebviewWindow, enabled: bool) -> bool {
-    #[cfg(target_os = "windows")]
-    {
-        if enabled {
-            let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
-            // 新系统优先 Acrylic；失败退到旧版 Blur；再退到 Win11 的 Mica
-            if window_vibrancy::apply_acrylic(window.clone(), None).is_ok() {
-                log::info!("[window] glass material: acrylic");
-                return true;
-            }
-            if window_vibrancy::apply_blur(window.clone(), None).is_ok() {
-                log::info!("[window] glass material: blur");
-                return true;
-            }
-            if window_vibrancy::apply_mica(window.clone(), None).is_ok() {
-                log::info!("[window] glass material: mica");
-                return true;
-            }
-            log::warn!("[window] no system backdrop available, falling back to opaque tint");
-            return false;
-        }
-        let _ = window_vibrancy::clear_acrylic(window.clone());
-        let _ = window_vibrancy::clear_blur(window.clone());
-        let _ = window_vibrancy::clear_mica(window.clone());
-        false
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        use tauri::window::{Color, Effect, EffectsBuilder};
-        if enabled {
-            let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
-            let applied = window
-                .set_effects(
-                    EffectsBuilder::new()
-                        .effect(Effect::UnderWindowBackground)
-                        .build(),
-                )
-                .is_ok();
-            log::info!("[window] glass material: under-window-background ({applied})");
-            return applied;
-        }
-        let _ = window.set_effects(None);
-        false
-    }
-
-    // Linux：窗口透明由合成器处理，没有可移植的模糊接口
-    #[cfg(target_os = "linux")]
-    {
-        let _ = (window, enabled);
-        false
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-    {
-        let _ = (window, enabled);
-        false
-    }
+    crate::app::mark_window_ready(&window).map_err(|err| err.to_string())?;
+    super::window_backdrop::reapply_on_shown(&window);
+    Ok(())
 }
 
 /// 获取拖入路径的基础信息，用于前端区分文件/目录并生成 @ 引用。

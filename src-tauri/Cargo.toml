@@ -42,7 +42,22 @@ uuid = { version = "1", features = ["v4"] }
 tauri-build = { version = "2", features = [] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-window-vibrancy = "0.6"
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+# dev 下也开优化：抓屏后的模糊和 JPEG 编码在纯 debug 里慢一个数量级
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
 
 [profile.release]
 strip = true

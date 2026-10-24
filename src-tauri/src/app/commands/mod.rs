@@ -1,4 +1,7 @@
+pub mod backdrop;
+pub mod backdrop_dxgi;
 pub mod bridge;
+pub mod window_backdrop;
 #[cfg(not(target_os = "android"))]
 pub mod opencode;
 #[cfg(not(target_os = "android"))]

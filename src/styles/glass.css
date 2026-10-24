@@ -55,15 +55,56 @@
 /* 桌面端没设壁纸时窗口是透明的，整条背景链都要让开，
    否则页面底色会把窗口背后的桌面盖掉 */
 :root[data-appearance='glass'][data-window-transparent],
-:root[data-appearance='glass'][data-window-transparent] body,
-:root[data-appearance='glass'][data-window-transparent] #root {
+:root[data-appearance='glass'][data-window-transparent] body {
   background-color: transparent;
+}
+
+/* 这一层肉眼看不出来，但必须有。
+   WebView2 的窗口背景全透明时，Chromium 建不出 backdrop root，
+   页面里所有 backdrop-filter 都会静默失效——弹窗、菜单于是只剩一层色，
+   后面的正文原样透上来。留 1% 的黑就能把合成层立起来。 */
+:root[data-appearance='glass'][data-window-transparent] #root {
+  background-color: rgb(0 0 0 / 0.01);
 }
 
 /* 桌面已经在窗口背后了，页面内这层磨砂只会空转，交给系统材质 */
 :root[data-appearance='glass'][data-window-transparent] #root::before {
   display: none;
 }
+
+/* ---------------------------------------------------------------------------
+ * 1.1 页面自绘的桌面背景（Windows）
+ * ---------------------------------------------------------------------------
+ * 抓屏得到的桌面只负责当底图；糊还是页面自己做，
+ * 这样面板能按自己的位置和半径去糊它，而不是整窗一张糊图。
+ * ------------------------------------------------------------------------- */
+
+:root[data-appearance='glass'][data-live-backdrop] #root {
+  background-color: hsl(var(--bg-100));
+}
+
+/* 抓屏层的画布。尺寸只有几百像素，靠 CSS 拉满窗口——
+   底图本来就是糊的，放大看不出差别，还省掉一次全屏重采样。
+
+   磨砂在这一层做：filter 只糊自己，不采背景，比 backdrop-filter 便宜。
+   scale 稍微放大一点，把模糊后透明的边缘推出窗口外。 */
+:root[data-appearance='glass'][data-live-backdrop] .glass-live-backdrop {
+  position: fixed;
+  /* 比窗口大一圈：模糊的边缘衰减落在这圈里，画面本身保持 1:1 不放大。
+     canvas 是替换元素，光有 inset 撑不开，宽高得显式给。 */
+  inset: -48px;
+  width: calc(100% + 96px);
+  height: calc(100% + 96px);
+  z-index: 0;
+  pointer-events: none;
+  filter: blur(var(--glass-blur, 24px));
+}
+
+/* 画布自带模糊了，整窗那层 backdrop-filter 在这儿是空转 */
+:root[data-appearance='glass'][data-live-backdrop] #root::before {
+  display: none;
+}
+
 
 /* 全窗唯一一次磨砂，所有面板共享 */
 :root[data-appearance='glass'] #root::before {
@@ -386,9 +427,7 @@
   backdrop-filter: blur(24px) saturate(140%);
 }
 
-/* 对话框和 Dialog 组件共用这一块材质：2.5% 文字色 + 24px 模糊 + 细描边。
-   面板自己不能再叠一层 bg-000（那是 8% 的白），两层白压在一起就是一块死灰板子，
-   文字没有对比，看着像塑料。 */
+/* 对话框和 Dialog 组件共用这一块材质：2.5% 文字色 + 24px 模糊 + 细描边。 */
 :root[data-appearance='glass'][data-appearance] [data-glass-dialog] {
   background-color: var(--glass-veil-soft);
   /* 顶部一道很淡的内高光，玻璃受光的那点意思，不加就是一张灰纸 */

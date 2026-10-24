@@ -668,6 +668,7 @@ export function AppearanceSettings() {
     clearActiveCustomCSSSnippet,
     glassEffect,
     setGlassEffect,
+    appearanceStyle,
     uiFontScale,
     setUIFontScale,
     codeFontScale,
@@ -880,13 +881,15 @@ export function AppearanceSettings() {
           <AppearanceStyleSettings />
         </SettingField>
 
-        <SettingRow
-          label={t('appearance.glassEffect')}
-          description={t('appearance.glassEffectDesc')}
-          onClick={() => setGlassEffect(!glassEffect)}
-        >
-          <Toggle enabled={glassEffect} onChange={() => setGlassEffect(!glassEffect)} />
-        </SettingRow>
+        {appearanceStyle !== 'glass' && (
+          <SettingRow
+            label={t('appearance.glassEffect')}
+            description={t('appearance.glassEffectDesc')}
+            onClick={() => setGlassEffect(!glassEffect)}
+          >
+            <Toggle enabled={glassEffect} onChange={() => setGlassEffect(!glassEffect)} />
+          </SettingRow>
+        )}
 
         <SettingField
           label={t('appearance.uiFontScale')}

@@ -29,12 +29,10 @@
   /* 关键：内部面板不再自己涂色，统一由 .app-shell 那一层提供 */
   --color-bg-100: transparent;
 
-  /* 其余层保留一点透光，避免玻璃下出现一块块死色。
-     bg-000 是菜单/卡片/输入框，接近实心；200–400 是悬停和次级面，半透。 */
-  --color-bg-000: hsl(var(--bg-000) / 0.94);
-  --color-bg-200: hsl(var(--bg-200) / 0.62);
-  --color-bg-300: hsl(var(--bg-300) / 0.55);
-  --color-bg-400: hsl(var(--bg-400) / 0.5);
+  /* 浮层底色，JS 按明暗写入：深色是极淡的文字色，浅色回退实色 */
+  --glass-veil: color-mix(in srgb, hsl(var(--text-100)) 4%, transparent);
+  --glass-veil-soft: color-mix(in srgb, hsl(var(--text-100)) 2.5%, transparent);
+  --glass-hairline: color-mix(in srgb, hsl(var(--text-100)) 10%, transparent);
 }
 
 /* 亮色下走实色，不做玻璃 */
@@ -153,8 +151,8 @@
  * ------------------------------------------------------------------------- */
 
 :root[data-appearance='glass'] .glass[data-input-box]:not([class*='border-accent-main-100']) {
-  background-color: color-mix(in srgb, hsl(var(--text-100)) 3%, transparent);
-  border-color: color-mix(in srgb, hsl(var(--text-100)) 10%, transparent);
+  background-color: var(--glass-veil-soft);
+  border-color: var(--glass-hairline);
   -webkit-backdrop-filter: blur(24px);
   backdrop-filter: blur(24px);
 }
@@ -193,14 +191,28 @@
 /* ---------------------------------------------------------------------------
  * 6. 浮层底盘
  * ---------------------------------------------------------------------------
- * 上下文菜单、权限/提问弹窗、移动端抽屉这些用的是 bg-bg-100，
- * 而它在玻璃下是透明的。统一给带阴影的浮层补一块底盘 + 模糊。
- * 普通布局里的 bg-bg-100 不受影响，仍然透出整窗那一层。
+ * 浮层不用表面色，统一是极淡的文字色 + 模糊 + 一道细描边。
+ * 这里必须多带一个属性选择器，才能压过 index.css 里同权重的
+ * `:root[data-glass] .glass`（glass.css 先被引入，靠顺序会输）。
  * ------------------------------------------------------------------------- */
 
+:root[data-appearance='glass'][data-appearance] :is(.glass, .glass-alt) {
+  background-color: var(--glass-veil);
+  border-color: var(--glass-hairline);
+}
+
+/* 上下文菜单、权限/提问弹窗、移动端抽屉用的是 bg-bg-100，而它是透明的 */
 :root[data-appearance='glass'] :is(.shadow-lg, .shadow-xl, .shadow-float).bg-bg-100,
 :root[data-appearance='glass'] :is(.shadow-lg, .shadow-xl, .shadow-float).bg-bg-000 {
-  background-color: hsl(var(--bg-000) / 0.94);
+  background-color: var(--glass-veil);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  backdrop-filter: blur(24px) saturate(140%);
+}
+
+/* 对话框比一般浮层再淡一点，用 2.5% 的文字色 */
+:root[data-appearance='glass'] .glass[data-glass-dialog] {
+  background-color: var(--glass-veil-soft);
+  border-color: var(--glass-hairline);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
   backdrop-filter: blur(24px) saturate(140%);
 }
@@ -213,14 +225,6 @@
    行号槽原本写死 hsl(var(--bg-100))，在玻璃下会变成一块死色，一起置空 */
 :root[data-appearance='glass'] :is(.cm-editor, .cm-gutters, .cm-gutter) {
   background-color: transparent !important;
-}
-
-/* 对话框：比输入框实，但仍然是一块玻璃。0.82 会让背后正文透上来。
-   这里必须压过 index.css 里的 `:root[data-glass] .glass`（同权重，靠顺序会输） */
-:root[data-appearance='glass'] .glass[data-glass-dialog] {
-  background-color: hsl(var(--bg-000) / 0.92);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  backdrop-filter: blur(24px) saturate(140%);
 }
 
 /* 全屏页（设置、移动端面板）：接近实底，避免正文穿透 */

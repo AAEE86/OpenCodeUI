@@ -10,6 +10,7 @@
 
 import { getThemePreset, themeColorsToCSSVars, builtinThemes, DEFAULT_THEME_ID, registerCustomTheme, unregisterCustomTheme, listCustomThemes } from '../themes'
 import type { ThemePreset, ThemeColors } from '../themes'
+import { buildGlassTokens, GLASS_TOKEN_KEYS } from '../utils/glassTokens'
 import {
   compressWallpaperImage,
   wallpaperIdbDelete,
@@ -1115,14 +1116,21 @@ class ThemeStore {
   setAppearanceStyle(style: AppearanceStyle) {
     if (this.state.appearanceStyle === style) return
     const next: Partial<ThemeState> = { appearanceStyle: style }
-    if (style === 'glass' && !this.state.glassEffect) {
-      next.glassEffect = true
-      localStorage.setItem(STORAGE_KEY_GLASS_EFFECT, 'true')
+    if (style === 'glass') {
+      if (!this.state.glassEffect) {
+        next.glassEffect = true
+        localStorage.setItem(STORAGE_KEY_GLASS_EFFECT, 'true')
+      }
+      // 玻璃只在暗色下成立，浅色时开启就直接切到深色
+      if (this.getResolvedMode() === 'light') {
+        next.colorMode = 'dark'
+        localStorage.setItem(STORAGE_KEY_COLOR_MODE, 'dark')
+      }
     }
     this.state = { ...this.state, ...next }
     localStorage.setItem(STORAGE_KEY_APPEARANCE_STYLE, style)
     this.applyGlassClass()
-    this.applyAppearance()
+    this.applyTheme()
     this.emit()
   }
 
@@ -1459,17 +1467,17 @@ class ThemeStore {
     if (this.state.appearanceStyle !== 'glass') {
       root.removeAttribute('data-appearance')
       root.removeAttribute('data-glass-wallpaper')
-      root.style.removeProperty('--glass-wallpaper')
-      root.style.removeProperty('--glass-wallpaper-fit')
-      root.style.removeProperty('--glass-alpha')
-      root.style.removeProperty('--glass-art-alpha')
+      for (const key of GLASS_TOKEN_KEYS) root.style.removeProperty(key)
       return
     }
 
     root.setAttribute('data-appearance', 'glass')
+    const isDark = this.getResolvedMode() === 'dark'
     // 亮色下保持实色
-    const alpha = this.getResolvedMode() === 'light' ? 1 : this.state.glassAlpha
-    root.style.setProperty('--glass-alpha', String(alpha))
+    root.style.setProperty('--glass-alpha', String(isDark ? this.state.glassAlpha : 1))
+    for (const [key, value] of Object.entries(buildGlassTokens(isDark))) {
+      root.style.setProperty(key, value)
+    }
 
     const url = this.state.wallpaperUrl
     if (this.state.wallpaperEnabled && url) {

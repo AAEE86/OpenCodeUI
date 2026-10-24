@@ -161,31 +161,145 @@
   border-color: color-mix(in srgb, hsl(var(--text-100)) 20%, transparent);
 }
 
-:root[data-appearance='glass'] [data-ui-button='primary'] {
-  background-color: hsl(var(--text-100));
-  color: hsl(var(--bg-100));
+/* ---------------------------------------------------------------------------
+ * 5.1 忙碌时的描边光
+ * ---------------------------------------------------------------------------
+ * 结构说明：
+ *   ::after  1px 描边，颜色写在 conic 里跟着角度转
+ *   bloom    同一道光带放大模糊，贴着边框做光晕
+ * 只在玻璃外观 + 忙碌时出现，非忙碌时透明度归零，不会常驻闪烁。
+ * ------------------------------------------------------------------------- */
+
+@property --glass-beam-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: true;
 }
 
-:root[data-appearance='glass'] [data-ui-button='primary']:hover:not(:disabled) {
-  background-color: color-mix(in srgb, hsl(var(--text-100)) 88%, transparent);
+@property --glass-beam-opacity {
+  syntax: '<number>';
+  initial-value: 0;
+  inherits: true;
 }
 
-:root[data-appearance='glass'] [data-ui-button='primary']:disabled {
-  background-color: color-mix(in srgb, hsl(var(--text-100)) 22%, transparent);
-  color: color-mix(in srgb, hsl(var(--bg-100)) 65%, transparent);
+:root[data-appearance='glass'] [data-input-box] {
+  --glass-beam-angle: 0deg;
+  --glass-beam-opacity: 0;
+  --glass-beam-strength: 0.78;
+  transition: --glass-beam-opacity 420ms ease;
 }
 
-:root[data-appearance='glass'] [data-ui-button='secondary'] {
-  background-color: color-mix(in srgb, hsl(var(--text-100)) 6%, transparent);
-  color: hsl(var(--text-100));
+/* 忙碌时不要旧的高亮描边，留给描边光 */
+:root[data-appearance='glass'] [data-input-box]:not([class*='ring-accent']) {
+  border-color: var(--glass-hairline);
 }
 
-:root[data-appearance='glass'] [data-ui-button='secondary']:hover:not(:disabled) {
-  background-color: color-mix(in srgb, hsl(var(--text-100)) 10%, transparent);
+:root[data-appearance='glass'] [data-input-box][data-busy] {
+  animation:
+    glass-beam-spin 3.4s linear infinite,
+    glass-beam-in 0.5s ease forwards;
 }
 
-:root[data-appearance='glass'] [data-ui-button='ghost']:hover:not(:disabled) {
-  background-color: color-mix(in srgb, hsl(var(--text-100)) 7%, transparent);
+/* 描边：一条会走的细光
+   颜色写在 conic 里跟着角度转，1px 贴边，不再有固定的四角光斑。 */
+:root[data-appearance='glass'] [data-input-box]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  opacity: calc(var(--glass-beam-opacity) * 0.55 * var(--glass-beam-strength));
+  background: conic-gradient(
+    from var(--glass-beam-angle),
+    transparent 0%,
+    transparent 38%,
+    rgb(124 132 255 / 0.06) 43%,
+    rgb(96 168 255 / 0.14) 48%,
+    rgb(64 210 206 / 0.22) 53%,
+    rgb(84 226 152 / 0.28) 57%,
+    rgb(255 255 255 / 0.4) 61%,
+    rgb(255 255 255 / 0.74) 65%,
+    rgb(255 255 255 / 0.95) 68%,
+    rgb(255 255 255 / 0.74) 71%,
+    rgb(255 214 140 / 0.44) 75%,
+    rgb(255 146 96 / 0.26) 80%,
+    rgb(255 96 168 / 0.12) 85%,
+    transparent 90%,
+    transparent 100%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+
+/* 光晕：只贴着那 1px 描边，轻微发亮，不往外扩 */
+:root[data-appearance='glass'] [data-input-box] [data-glass-beam-bloom] {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  opacity: 0;
+  background: conic-gradient(
+    from var(--glass-beam-angle),
+    transparent 0%,
+    transparent 38%,
+    rgb(110 150 255 / 0.08) 44%,
+    rgb(70 214 196 / 0.14) 51%,
+    rgb(255 255 255 / 0.26) 60%,
+    rgb(255 255 255 / 0.62) 66%,
+    rgb(255 255 255 / 0.62) 70%,
+    rgb(255 168 108 / 0.16) 78%,
+    transparent 90%,
+    transparent 100%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  filter: blur(4px) brightness(1.15) saturate(0.95);
+}
+
+:root[data-appearance='glass'] [data-input-box][data-busy] [data-glass-beam-bloom] {
+  opacity: calc(var(--glass-beam-opacity) * 0.26 * var(--glass-beam-strength));
+}
+
+@keyframes glass-beam-spin {
+  to {
+    --glass-beam-angle: 360deg;
+  }
+}
+
+@keyframes glass-beam-in {
+  to {
+    --glass-beam-opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-appearance='glass'] [data-input-box][data-busy] {
+    --glass-beam-angle: 220deg;
+    animation: glass-beam-in 150ms ease forwards;
+  }
+}
+
+@media (forced-colors: active) {
+  :root[data-appearance='glass'] [data-input-box]::after,
+  :root[data-appearance='glass'] [data-input-box] [data-glass-beam-bloom] {
+    display: none;
+  }
 }
 
 /* ---------------------------------------------------------------------------

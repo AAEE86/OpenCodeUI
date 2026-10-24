@@ -1925,6 +1925,7 @@ function InputBoxComponent({
               ref={inputContainerRef}
               data-input-box
               data-pane-id={paneId}
+              data-busy={isStreaming || undefined}
               onPointerDown={handleContainerPointerDown}
               onDragEnter={handleDragEnter}
               onDragOver={handleDragOver}
@@ -1945,6 +1946,9 @@ function InputBoxComponent({
                   <span className="text-[length:var(--fs-base)] text-accent-main-100 font-medium">{t('inputBox.dropFilesHere')}</span>
                 </div>
               )}
+
+              {/* 忙碌时的描边光：模糊光晕层，玻璃外观下才可见 */}
+              <span aria-hidden data-glass-beam-bloom />
 
               <div className="relative">
                 <div className="overflow-hidden">
